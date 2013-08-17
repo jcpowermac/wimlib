@@ -1,6 +1,7 @@
 #ifndef _WIMLIB_WIM_H
 #define _WIMLIB_WIM_H
 
+#include "wimlib.h"
 #include "wimlib/header.h"
 #include "wimlib/types.h"
 #include "wimlib/file_io.h"

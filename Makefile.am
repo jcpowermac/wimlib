@@ -91,7 +91,8 @@ libwim_la_SOURCES =		\
 	include/wimlib/xpress.h
 
 if WITH_NTFS_3G
-libwim_la_SOURCES += src/ntfs-3g_apply.c	\
+libwim_la_SOURCES += src/efs.c			\
+		     src/ntfs-3g_apply.c	\
 		     src/ntfs-3g_capture.c	\
 		     include/wimlib/ntfs_3g.h
 endif

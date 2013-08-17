@@ -157,6 +157,14 @@ extern int
 extract_wim_resource_to_fd(const struct wim_lookup_table_entry *lte,
 			   struct filedes *fd, u64 size);
 
+#ifdef WITH_NTFS_3G
+extern int
+extract_wim_efs_resource(struct wim_lookup_table_entry *lte,
+			 consume_data_callback_t efsdata_cb,
+			 consume_data_callback_t efsinfo_cb,
+			 void *caller_ctx);
+#endif
+
 /* Miscellaneous resource functions.  */
 
 extern int
