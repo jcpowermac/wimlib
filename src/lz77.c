@@ -30,6 +30,8 @@
 #  include "config.h"
 #endif
 
+#include "wimlib/assert.h"
+#include "wimlib/error.h"
 #include "wimlib/compress.h"
 #include "wimlib/util.h"
 
@@ -49,46 +51,6 @@
 #error "Invalid LZ_MIN_MATCH"
 #endif
 
-/* Hash function, based on code from zlib.  This function will update and return
- * the hash value @hash for the string ending on the additional input character
- * @c.  This function must be called for each consecutive character, because it
- * uses a running hash value rather than computing it separately for each
- * 3-character string.
- *
- * The AND operation guarantees that only 3 characters will affect the hash
- * value, so every identical 3-character string will have the same hash value.
- */
-static inline unsigned
-update_hash(unsigned hash, u8 c)
-{
-	return ((hash << HASH_SHIFT) ^ c) & HASH_MASK;
-}
-
-
-/* Insert a 3-character string at position @str_pos in @window and with hash
- * code @hash into the hash table described by @hash_tab and @prev_tab.  Based
- * on code from zlib.
- *
- * The hash table uses chains (linked lists) for the hash buckets, but there are
- * no real pointers involved.  Indexing `hash_tab' by hash value gives the index
- * within the window of the last string in the hash bucket.  To find the index
- * of the previous string in the hash chain, the `prev_tab' array is indexed by
- * the string index.  `prev_tab' can be indexed repeatedly by the string index
- * to walk through the hash chain, until the special index `0' is reached,
- * indicating the end of the hash chain.
- */
-static inline unsigned
-insert_string(u16 hash_tab[], u16 prev_tab[],
-	      const u8 window[], unsigned str_pos,
-	      unsigned hash)
-{
-	hash = update_hash(hash, window[str_pos + LZ_MIN_MATCH - 1]);
-	prev_tab[str_pos] = hash_tab[hash];
-	hash_tab[hash] = str_pos;
-	return hash;
-}
-
-
 /*
  * Returns the longest match for a given input position.
  *
@@ -102,8 +64,7 @@ insert_string(u16 hash_tab[], u16 prev_tab[],
  * 				at index @strstart.
  * @prev_len:		The length of the match that was found for the string
  * 				beginning at (@strstart - 1).
- * @match_start_ret:	A location into which the index of the start of the
- * 				match will be returned.
+ * @match_offset_ret:	A location into which the offset of the match be returned.
  * @params:		Parameters that affect how long the search will proceed
  * 				before going with the best that has been found
  * 				so far.
@@ -114,15 +75,15 @@ static unsigned
 longest_match(const u8 window[], unsigned bytes_remaining,
 	      unsigned strstart, const u16 prev_tab[],
 	      unsigned cur_match, unsigned prev_len,
-	      unsigned *match_start_ret,
+	      unsigned *match_offset_ret,
+	      unsigned * chain_len,
 	      const struct lz_params *params)
 {
-	unsigned chain_len = params->max_chain_len;
-
 	const u8 *scan = window + strstart;
 	const u8 *match;
 	unsigned len;
 	unsigned best_len = prev_len;
+	unsigned best_match_offset = strstart;
 	unsigned match_start = cur_match;
 
 	unsigned nice_match = min(params->nice_match, bytes_remaining);
@@ -132,10 +93,11 @@ longest_match(const u8 window[], unsigned bytes_remaining,
 	u8 scan_end1 = scan[best_len - 1];
 	u8 scan_end = scan[best_len];
 
-
+#if 0
 	/* Do not waste too much time if we already have a good match: */
 	if (best_len >= params->good_match)
 		chain_len >>= 2;
+#endif
 
 	do {
 		match = &window[cur_match];
@@ -151,7 +113,7 @@ longest_match(const u8 window[], unsigned bytes_remaining,
 		 */
 
 		if (match[best_len] != scan_end
-		    || match[best_len - 1] != scan_end1
+		    /*|| match[best_len - 1] != scan_end1*/
 		    || *match != *scan
 		    || *++match != scan[1])
 			continue;
@@ -161,6 +123,7 @@ longest_match(const u8 window[], unsigned bytes_remaining,
 		do {
 		} while (scan < strend && *++match == *++scan);
 	#else
+
 
 		do {
 		} while (
@@ -177,24 +140,78 @@ longest_match(const u8 window[], unsigned bytes_remaining,
 		if (len > best_len) {
 			match_start = cur_match;
 			best_len = len;
+			best_match_offset = strstart - match_start;
 			if (len >= nice_match)
 				break;
 			scan_end1  = scan[best_len - 1];
 			scan_end   = scan[best_len];
 		}
-	} while (--chain_len != 0 && (cur_match = prev_tab[cur_match]) != 0);
-	*match_start_ret = match_start;
+	} while (--*chain_len != 0 && (cur_match = prev_tab[cur_match]) != 0);
+	*match_offset_ret = best_match_offset;
 	return min(min(best_len, bytes_remaining), params->max_match);
 }
 
+static inline unsigned
+update_hash1(unsigned hash1, u8 c)
+{
+	return ((hash1 << HASH_SHIFT) ^ c) & HASH_MASK;
+}
 
+static inline unsigned
+update_hash2(unsigned hash2, u8 c)
+{
+	return (hash2 << 2) | (c & 3);
+}
+
+static void
+lz_init_hash_tabs(u16 hash1_tab[restrict], u16 hash2_tab[restrict],
+		  u8 hash2_nchars_tab[restrict],
+		  const u8 window[restrict], unsigned window_size)
+{
+	unsigned hash1;
+	unsigned i;
+	u16 hash_freq_tab[HASH_SIZE];
+	unsigned hash2_pos;
+
+	/* Count the frequency of each level-1 hash code within the window.  */
+	hash1 = 0;
+	ZERO_ARRAY(hash_freq_tab);
+	for (i = 0; i < window_size; i++)
+	{
+		hash1 = update_hash1(hash1, window[i]);
+		hash_freq_tab[hash1]++;
+	}
+
+	/* Allocate blocks in the level-2 hash table.
+	 *
+	 * Set up hash1_tab to map each level-1 hash code to the index of the
+	 * corresponding block in the level-2 hash table.  Choose the size of
+	 * each block in the level-2 hash table to be proportional to the base-2
+	 * logarithm of the number of times the corresponding level-1 hash code
+	 * appears in the window.  */
+	hash2_pos = 0;
+	for (hash1 = 0; hash1 < HASH_SIZE; hash1++) {
+		if (hash_freq_tab[hash1]) {
+			unsigned hash2_nchars;
+
+			hash1_tab[hash1] = hash2_pos;
+			hash2_nchars = bsr32(hash_freq_tab[hash1]) >> 1;
+			hash2_nchars_tab[hash1] = hash2_nchars;
+			hash2_pos += 1U << (hash2_nchars << 1);
+		}
+	}
+
+	/* Initialize the level-2 hash table to all 0s, indicating that all hash
+	 * chains are empty.  */
+	memset(hash2_tab, 0, window_size * sizeof(hash2_tab[0]));
+}
 
 /*
  * Determines the sequence of matches and literals that a block of data will be
  * compressed to.
  *
- * @uncompressed_data:	The data that is to be compressed.
- * @uncompressed_len:	The length of @uncompressed_data, in bytes.
+ * @window:	The data that is to be compressed.
+ * @window_size:	The length of @window, in bytes.
  * @match_tab:		An array for the intermediate representation of matches.
  * @record_match:	A function that will be called to produce the
  * 				intermediate representation of a match, given
@@ -220,8 +237,8 @@ longest_match(const u8 window[], unsigned bytes_remaining,
  * intermediate representation of a match or literal byte.
  */
 unsigned
-lz_analyze_block(const u8 uncompressed_data[],
-		 unsigned uncompressed_len,
+lz_analyze_block(const u8 window[],
+		 unsigned window_size,
 		 u32 match_tab[],
 		 lz_record_match_t record_match,
 		 lz_record_literal_t record_literal,
@@ -230,127 +247,176 @@ lz_analyze_block(const u8 uncompressed_data[],
 		 void *record_literal_arg,
 		 const struct lz_params *params)
 {
-	unsigned cur_match_pos = 0;
-	unsigned cur_input_pos = 0;
-	unsigned hash          = 0;
-	unsigned hash_head     = 0;
-	unsigned prev_len      = params->min_match - 1;
-	unsigned prev_start;
-	unsigned match_len     = params->min_match - 1;
-	unsigned match_start   = 0;
-	bool match_available = false;
-	u16 hash_tab[HASH_SIZE];
-	u32 match;
-	u16 prev_tab[uncompressed_len];
+	u16 hash1_tab[HASH_SIZE];
+	u8  hash2_nchars_tab[HASH_SIZE];
+	u16 hash2_tab[window_size];
+	u16 prev_tab[window_size];
+	unsigned hash1;
+	unsigned hash2;
+	const unsigned hash2_lookahead = LZ_MIN_MATCH + sizeof(hash2) * (8 / 2);
+	unsigned inserts_remaining;
+	unsigned match_offset;
+	unsigned match_len;
+	unsigned prev_offset;
+	unsigned prev_len;
+	bool match_available;
+	unsigned cur_match_pos;
 
-	ZERO_ARRAY(hash_tab);
-	ZERO_ARRAY(prev_tab);
+	lz_init_hash_tabs(hash1_tab, hash2_tab, hash2_nchars_tab,
+			  window, window_size);
 
-	do {
-		/* If there are at least 3 characters remaining in the input,
-		 * insert the 3-character string beginning at
-		 * uncompressed_data[cur_input_pos] into the hash table.
-		 *
-		 * hash_head is set to the index of the previous string in the
-		 * hash bucket, or 0 if there is no such string */
-		if (uncompressed_len - cur_input_pos >= params->min_match) {
-			hash = insert_string(hash_tab, prev_tab,
-					     uncompressed_data,
-					     cur_input_pos, hash);
-			hash_head = prev_tab[cur_input_pos];
-		} else {
-			hash_head = 0;
+	hash1 = 0;
+	for (unsigned i = 0; i < min(window_size, LZ_MIN_MATCH - 1); i++)
+	{
+		hash1 = update_hash1(hash1, window[i]);
+	}
+
+	hash2 = 0;
+	for (unsigned i = LZ_MIN_MATCH; i < min(window_size, hash2_lookahead - 1); i++)
+	{
+		hash2 = update_hash2(hash2, window[i]);
+	}
+
+	match_available = false;
+	inserts_remaining = 0;
+	match_len = 0;
+	cur_match_pos = 0;
+
+	for (unsigned i = 0; i < window_size; i++)
+	{
+		unsigned base, offset;
+
+		/* Update level-2 hash code.  */
+		if (window_size - i >= hash2_lookahead)
+			hash2 = update_hash2(hash2, window[i + hash2_lookahead - 1]);
+		else
+			hash2 <<= 2;
+
+		/* Update level-1 hash code.  */
+		if (window_size - i >= LZ_MIN_MATCH)
+			hash1 = update_hash1(hash1, window[i + LZ_MIN_MATCH - 1]);
+
+		/* Prepare base and offset in level 2-table.  */
+		if (window_size - i >= LZ_MIN_MATCH) {
+			base = hash1_tab[hash1];
+
+			if (hash2_nchars_tab[hash1] == 0)
+				offset = 0;
+			else
+				offset = hash2 >> (2 * (hash2_lookahead -
+							LZ_MIN_MATCH -
+							hash2_nchars_tab[hash1]));
 		}
 
+		/* If a match is already covering this position, update the
+		 * level-2 hash table, but don't look for a match at this
+		 * position.  */
+		if (inserts_remaining) {
+			prev_tab[i] = hash2_tab[base + offset];
+			hash2_tab[base + offset] = i;
+			--inserts_remaining;
+			continue;
+		}
 
-		/* Find the longest match, discarding those <= prev_len. */
+		/* Save previous match.  */
 		prev_len = match_len;
-		prev_start = match_start;
-		match_len = params->min_match - 1;
+		prev_offset = match_offset;
 
-		if (hash_head != 0 && prev_len < params->max_lazy_match) {
-			/* To simplify the code, we prevent matches with the
-			 * string of window index 0 (in particular we have to
-			 * avoid a match of the string with itself at the start
-			 * of the input file).  */
-			match_len = longest_match(uncompressed_data,
-						  uncompressed_len - cur_input_pos,
-						  cur_input_pos, prev_tab,
-						  hash_head, prev_len,
-						  &match_start, params);
+		match_len = 0;
+
+		/* Look for longest match at this position.  */
+		if (prev_len < params->max_lazy_match &&
+		    window_size - i >= LZ_MIN_MATCH)
+		{
+			unsigned xor_mask = 0;
+			unsigned xor_limit = 1;
+			unsigned maxlen = min(params->max_match, window_size - i);
+			unsigned num_hash2_chars = hash2_nchars_tab[hash1];
+			unsigned best_len = 1;
+			unsigned best_offset = 0;
+			unsigned hash_head;
+			unsigned chain_len = params->max_chain_len;
+
+			for (;;) {
+				for (; xor_mask < xor_limit; xor_mask++) {
+
+					hash_head = hash2_tab[base + (offset ^ xor_mask)];
+
+					if (hash_head == 0)
+						continue;
+
+					match_len = longest_match(window,
+								  window_size - i,
+								  i,
+								  prev_tab,
+								  hash_head,
+								  best_len,
+								  &match_offset,
+								  &chain_len,
+								  params);
+					if (match_len >= best_len &&
+					    (match_len > best_len ||
+					     match_offset < best_offset))
+					{
+						best_len = match_len;
+						best_offset = match_offset;
+					}
+					if (chain_len == 0)
+						goto matchend;
+				}
+				if (best_len >= maxlen)
+					break;
+
+				if (num_hash2_chars == 0)
+					break;
+
+				--num_hash2_chars;
+
+				xor_limit <<= 2;
+
+				maxlen = LZ_MIN_MATCH + num_hash2_chars;
+			}
+		matchend:
+
+			match_len = best_len;
+			match_offset = best_offset;
+
+			if (match_offset == 0)
+				match_len = 0;
 
 			if (match_len == params->min_match &&
-			     cur_input_pos - match_start > params->too_far)
-				match_len = params->min_match - 1;
+			    match_offset > params->too_far)
+				match_len = 0;
 		}
+
+		/* Update the level-2 hash table.  */
+		prev_tab[i] = hash2_tab[base + offset];
+		hash2_tab[base + offset] = i;
 
 		/* If there was a match at the previous step and the current
 		 * match is not better, output the previous match:
 		 */
 		if (prev_len >= params->min_match && match_len <= prev_len) {
 
-			/* Do not insert strings in hash table beyond this. */
-			unsigned max_insert = uncompressed_len - params->min_match;
-
-			/*DEBUG("Recording match (pos = %u, offset = %u, len = %u)\n",*/
-					/*cur_input_pos - 1, */
-					/*cur_input_pos - 1 - prev_start,*/
-					/*prev_len);*/
-
-			match = (*record_match)(cur_input_pos - 1 - prev_start,
+			match_tab[cur_match_pos++] =
+				(*record_match)(prev_offset,
 						prev_len,
 						record_match_arg1,
 						record_match_arg2);
-
-			match_tab[cur_match_pos++] = match;
-
-			/* Insert in hash table all strings up to the end of the match.
-			 * strstart-1 and strstart are already inserted. If there is not
-			 * enough lookahead, the last two strings are not inserted in
-			 * the hash table.
-			 */
-#if LZ_MIN_MATCH == 2
-			if (prev_len >= 3)
-#endif
-			{
-				prev_len -= 2;
-
-				do {
-					if (++cur_input_pos <= max_insert) {
-						hash = insert_string(hash_tab, prev_tab,
-								     uncompressed_data,
-								     cur_input_pos,
-								     hash);
-					}
-				} while (--prev_len != 0);
-			}
+			inserts_remaining = prev_len - 2;
 			match_available = false;
-			match_len = params->min_match - 1;
+			match_len = 0;
 		} else if (match_available) {
-			/* If there was no match at the previous position, output a
-			 * single literal. If there was a match but the current match
-			 * is longer, truncate the previous match to a single literal.
-			 */
-
-			/*DEBUG("Recording litrl (pos = %u, value = %u)\n",*/
-					/*cur_input_pos - 1, */
-					/*uncompressed_data[cur_input_pos - 1]);*/
-
-			match = (*record_literal)(
-					uncompressed_data[cur_input_pos - 1],
-							record_literal_arg);
-			match_tab[cur_match_pos++] = match;
+			match_tab[cur_match_pos++] =
+				(*record_literal)(window[i - 1],
+						  record_literal_arg);
 		} else {
-			/* There is no previous match to compare with, wait for
-			 * the next step to decide.  */
 			match_available = true;
 		}
-	} while (++cur_input_pos < uncompressed_len);
-
+	}
 	if (match_available) {
-		match = (*record_literal)(uncompressed_data[cur_input_pos - 1],
-						record_literal_arg);
-		match_tab[cur_match_pos++] = match;
+		match_tab[cur_match_pos++] =
+			(*record_literal)(window[window_size - 1], record_literal_arg);
 	}
 	return cur_match_pos;
 }
