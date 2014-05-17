@@ -2,94 +2,43 @@
  * Compare directory trees (Windows version)
  */
 
-#include <windows.h>
-#include <sddl.h>
-#include <wchar.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <inttypes.h>
+#include "common.h"
+#include "avl_tree.h"
+
 #include <assert.h>
+#include <sddl.h>
+#include <stdarg.h>
+#include <windows.h>
 
-typedef uint8_t  u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-
-#define REPARSE_POINT_MAX_SIZE (16 * 1024)
-
-static wchar_t *
-win32_error_string(DWORD err_code)
-{
-	static wchar_t buf[1024];
-	buf[0] = L'\0';
-	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_code, 0,
-		      buf, 1024, NULL);
-	return buf;
-}
-
-static void __attribute__((noreturn))
-error(const wchar_t *format, ...)
-{
-	va_list va;
-	va_start(va, format);
-	vfwprintf(stderr, format, va);
-	va_end(va);
-	putwc(L'\n', stderr);
-	exit(1);
-}
-
-static void __attribute__((noreturn))
-win32_error(const wchar_t *format, ...)
-{
-	va_list va;
-	DWORD err = GetLastError();
-
-	va_start(va, format);
-	vfwprintf(stderr, format, va);
-	fwprintf(stderr, L": %ls\n", win32_error_string(err));
-	va_end(va);
-	exit(1);
-}
-
-struct node {
+struct inode_map_node {
 	u64 ino_from;
 	u64 ino_to;
-	struct node *left;
-	struct node *right;
+	struct avl_tree_node index_node;
 };
 
-static struct node *tree = NULL;
+#define NODE(avl_node) \
+	avl_tree_entry((avl_node), struct inode_map_node, index_node)
 
-static u64 do_lookup_ino(struct node *tree, u64 ino_from)
-{
-	if (!tree)
-		return -1;
-	if (ino_from == tree->ino_from)
-		return tree->ino_to;
-	else if (ino_from < tree->ino_from)
-		return do_lookup_ino(tree->left, ino_from);
-	else
-		return do_lookup_ino(tree->right, ino_from);
-}
+static struct avl_tree_node *inode_map;
 
-static void do_insert(struct node *tree, struct node *node)
+static int
+_avl_cmp_by_ino_from(const struct avl_tree_node *node1,
+		     const struct avl_tree_node *node2)
 {
-	if (node->ino_from < tree->ino_from) {
-		if (tree->left)
-			return do_insert(tree->left, node);
-		else
-			tree->left = node;
-	} else {
-		if (tree->right)
-			return do_insert(tree->right, node);
-		else
-			tree->right = node;
-	}
+	u64 n1 = NODE(node1)->ino_from;
+	u64 n2 = NODE(node2)->ino_from;
+	return n1 < n2 ? -1 : (n1 > n2 ? 1 : 0);
 }
 
 static u64 lookup_ino(u64 ino_from)
 {
-	return do_lookup_ino(tree, ino_from);
+	struct avl_tree_node dummy;
+	struct avl_tree_node *res;
+
+	dummy.ino_from = ino_from;
+	res = avl_tree_lookup_node(inode_map, &dummy, _avl_cmp_by_ino_from);
+	if (!res)
+		return 
 }
 
 static void insert_ino(u64 ino_from, u64 ino_to)
@@ -105,40 +54,6 @@ static void insert_ino(u64 ino_from, u64 ino_to)
 		tree = node;
 	else
 		do_insert(tree, node);
-}
-
-static HANDLE
-win32_open_file_readonly(const wchar_t *path)
-{
-	HANDLE hFile = CreateFile(path,
-				  GENERIC_READ | ACCESS_SYSTEM_SECURITY,
-				  FILE_SHARE_READ | FILE_SHARE_DELETE | FILE_SHARE_WRITE,
-				  NULL,
-				  OPEN_EXISTING,
-				  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-				  NULL);
-	if (hFile == INVALID_HANDLE_VALUE)
-		win32_error(L"Failed to open file %ls read-only", path);
-	return hFile;
-}
-
-static size_t
-get_reparse_data(HANDLE hFile, const wchar_t *path,
-		 char *rpdata)
-{
-	DWORD bytesReturned = 0;
-	if (!DeviceIoControl(hFile,
-			     FSCTL_GET_REPARSE_POINT,
-			     NULL, /* "Not used with this operation; set to NULL" */
-			     0, /* "Not used with this operation; set to 0" */
-			     rpdata, /* "A pointer to a buffer that
-						   receives the reparse point data */
-			     REPARSE_POINT_MAX_SIZE, /* "The size of the output
-							buffer, in bytes */
-			     &bytesReturned,
-			     NULL))
-		win32_error(L"Can't get reparse data from %ls", path);
-	return bytesReturned;
 }
 
 static void
@@ -158,62 +73,6 @@ cmp_reparse_data(HANDLE hFile_1, const wchar_t *path_1,
 	}
 }
 
-struct win32_stream_wrapper {
-	struct win32_stream_wrapper *next;
-	WIN32_FIND_STREAM_DATA dat;
-};
-
-static int
-qsort_cmp_streams_by_name(const void *p1, const void *p2)
-{
-	const WIN32_FIND_STREAM_DATA *s1 = p1, *s2 = p2;
-	return wcscmp(s1->cStreamName, s2->cStreamName);
-}
-
-static WIN32_FIND_STREAM_DATA *
-get_stream_array(const wchar_t *path, size_t *nstreams_ret)
-{
-	WIN32_FIND_STREAM_DATA dat;
-	WIN32_FIND_STREAM_DATA *array = NULL;
-	WIN32_FIND_STREAM_DATA *p;
-	size_t nstreams = 0;
-	struct win32_stream_wrapper *stream_list = NULL;
-	HANDLE hFind;
-
-	hFind = FindFirstStreamW(path, FindStreamInfoStandard, &dat, 0);
-	if (hFind != INVALID_HANDLE_VALUE) {
-		do {
-			struct win32_stream_wrapper *wrapper;
-
-			wrapper = malloc(sizeof(*wrapper));
-			if (!wrapper)
-				error(L"out of memory");
-			memcpy(&wrapper->dat, &dat, sizeof(dat));
-			wrapper->next = stream_list;
-			stream_list = wrapper;
-			nstreams++;
-		} while (FindNextStreamW(hFind, &dat));
-	}
-	if (GetLastError() != ERROR_HANDLE_EOF)
-		win32_error(L"Can't lookup streams from %ls", path);
-	if (hFind != INVALID_HANDLE_VALUE)
-		FindClose(hFind);
-	array = malloc(nstreams * sizeof(array[0]));
-	p = array;
-	while (stream_list) {
-		struct win32_stream_wrapper *next;
-
-		memcpy(p, &stream_list->dat, sizeof(*p));
-		next = stream_list->next;
-		free(stream_list);
-		stream_list = next;
-		p++;
-	}
-	assert(p - array == nstreams);
-	qsort(array, nstreams, sizeof(array[0]), qsort_cmp_streams_by_name);
-	*nstreams_ret = nstreams;
-	return array;
-}
 
 static const wchar_t *
 fix_stream_name(wchar_t *stream_name)
@@ -325,69 +184,6 @@ cmp_streams(wchar_t *path_1, size_t path_1_len,
 			   path_2, path_2_len, &streams_2[i]);
 	free(streams_1);
 	free(streams_2);
-}
-
-struct win32_dentry_wrapper {
-	struct win32_dentry_wrapper *next;
-	WIN32_FIND_DATA dat;
-};
-
-static int
-qsort_cmp_dentries_by_name(const void *p1, const void *p2)
-{
-	const WIN32_FIND_DATA *d1 = p1, *d2 = p2;
-	return wcscmp(d1->cFileName, d2->cFileName);
-}
-
-static WIN32_FIND_DATA *
-get_dentry_array(wchar_t *path, size_t path_len, size_t *ndentries_ret)
-{
-	WIN32_FIND_DATA dat;
-	WIN32_FIND_DATA *array = NULL;
-	WIN32_FIND_DATA *p;
-	size_t ndentries = 0;
-	struct win32_dentry_wrapper *dentry_list = NULL;
-	HANDLE hFind;
-	DWORD err;
-
-	path[path_len] = L'\\';
-	path[path_len + 1] = L'*';
-	path[path_len + 2] = L'\0';
-	hFind = FindFirstFile(path, &dat);
-	path[path_len] = L'\0';
-	if (hFind != INVALID_HANDLE_VALUE) {
-		do {
-			struct win32_dentry_wrapper *wrapper;
-
-			wrapper = malloc(sizeof(*wrapper));
-			if (!wrapper)
-				error(L"out of memory");
-			memcpy(&wrapper->dat, &dat, sizeof(dat));
-			wrapper->next = dentry_list;
-			dentry_list = wrapper;
-			ndentries++;
-		} while (FindNextFile(hFind, &dat));
-	}
-	err = GetLastError();
-	if (err != ERROR_NO_MORE_FILES && err != ERROR_FILE_NOT_FOUND)
-		win32_error(L"Can't lookup dentries from %ls", path);
-	if (hFind != INVALID_HANDLE_VALUE)
-		FindClose(hFind);
-	array = malloc(ndentries * sizeof(array[0]));
-	p = array;
-	while (dentry_list) {
-		struct win32_dentry_wrapper *next;
-
-		memcpy(p, &dentry_list->dat, sizeof(*p));
-		next = dentry_list->next;
-		free(dentry_list);
-		dentry_list = next;
-		p++;
-	}
-	assert(p - array == ndentries);
-	qsort(array, ndentries, sizeof(array[0]), qsort_cmp_dentries_by_name);
-	*ndentries_ret = ndentries;
-	return array;
 }
 
 static void
@@ -583,45 +379,16 @@ tree_cmp(wchar_t *path_1, size_t path_1_len, wchar_t *path_2, size_t path_2_len)
 	CloseHandle(hFile_2);
 }
 
-static void
-enable_privilege(const wchar_t *privilege)
+void assert_trees_equal(const wchar_t *tree_1, const wchar_t *tree_2)
 {
-	HANDLE hToken;
-	LUID luid;
-	TOKEN_PRIVILEGES newState;
+	wchar_t path_1[32768];
+	wchar_t path_2[32768];
+	size_t len_1;
+	size_t len_2;
 
-	if (!OpenProcessToken(GetCurrentProcess(),
-			      TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
-		win32_error(L"Failed to open process token");
-
-	if (!LookupPrivilegeValueW(NULL, privilege, &luid))
-		win32_error(L"Failed to look up privileges %ls", privilege);
-
-	newState.PrivilegeCount = 1;
-	newState.Privileges[0].Luid = luid;
-	newState.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-	if (!AdjustTokenPrivileges(hToken, FALSE, &newState, 0, NULL, NULL))
-		win32_error(L"Failed to acquire privilege %ls", privilege);
-	CloseHandle(hToken);
-}
-
-int wmain(int argc, wchar_t **argv, wchar_t **envp)
-{
-	wchar_t dir_1[32769], dir_2[32769];
-	size_t len_1, len_2;
-
-	if (argc != 3) {
-		fwprintf(stderr, L"Usage: win32-tree-cmp DIR1 DIR2\n");
-		return 2;
-	}
-
-	enable_privilege(SE_BACKUP_NAME);
-	enable_privilege(SE_SECURITY_NAME);
-
-	len_1 = wcslen(argv[1]);
-	len_2 = wcslen(argv[2]);
-	wmemcpy(dir_1, argv[1], len_1 + 1);
-	wmemcpy(dir_2, argv[2], len_2 + 1);
-	tree_cmp(dir_1, len_1, dir_2, len_2);
-	return 0;
+	len_1 = wcslen(tree_1);
+	len_2 = wcslen(tree_2);
+	wmemcpy(path_1, tree_1, len_1 + 1);
+	wmemcpy(path_2, tree_2, len_2 + 1);
+	tree_cmp(path_1, len_1, path_2, len_2);
 }
