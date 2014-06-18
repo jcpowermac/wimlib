@@ -456,9 +456,10 @@ lzx_read_block_header(struct input_bitstream *istream,
 			istream->bitsleft = 0;
 			istream->bitbuf = 0;
 		}
-		queue->R[0] = le32_to_cpu(*(le32*)(istream->data + 0));
-		queue->R[1] = le32_to_cpu(*(le32*)(istream->data + 4));
-		queue->R[2] = le32_to_cpu(*(le32*)(istream->data + 8));
+		lzx_fill_lru_queue(queue,
+				   le32_to_cpu(*(le32*)(istream->data + 0)),
+				   le32_to_cpu(*(le32*)(istream->data + 4)),
+				   le32_to_cpu(*(le32*)(istream->data + 8)));
 		istream->data += 12;
 		istream->data_bytes_left -= 12;
 		/* The uncompressed data of this block directly follows and will
@@ -550,9 +551,7 @@ lzx_decode_match(unsigned main_element, int block_type,
 		 * doesn't bump the R1 offset down to R2.  This quirk allows all
 		 * 3 recent offsets to be handled by the same code.  (For R0,
 		 * the swap is a no-op.)  */
-		match_offset = queue->R[position_slot];
-		queue->R[position_slot] = queue->R[0];
-		queue->R[0] = match_offset;
+		match_offset = lzx_reference_lru(queue, position_slot);
 	} else {
 		/* Otherwise, the offset was not encoded as one the offsets in
 		 * the queue.  Depending on the position slot, there is a
@@ -595,9 +594,7 @@ lzx_decode_match(unsigned main_element, int block_type,
 			       verbatim_bits + aligned_bits - LZX_OFFSET_OFFSET;
 
 		/* Update the LRU queue. */
-		queue->R[2] = queue->R[1];
-		queue->R[1] = queue->R[0];
-		queue->R[0] = match_offset;
+		lzx_insert_lru(queue, match_offset);
 	}
 
 	/* Verify that the match is in the bounds of the part of the window
