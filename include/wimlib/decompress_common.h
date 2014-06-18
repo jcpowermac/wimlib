@@ -82,8 +82,6 @@ bitstream_ensure_bits(struct input_bitstream *istream, unsigned num_bits)
 static inline u32
 bitstream_peek_bits(const struct input_bitstream *istream, unsigned num_bits)
 {
-	if (unlikely(num_bits == 0))
-		return 0;
 	return istream->bitbuf >> (sizeof(istream->bitbuf) * 8 - num_bits);
 }
 

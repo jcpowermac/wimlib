@@ -140,129 +140,61 @@ extern unsigned lzx_get_num_main_syms(u32 window_size);
 
 #define LZX_NUM_RECENT_OFFSETS	3
 
-#ifdef __SSE2__
 #include <emmintrin.h>
-#include <assert.h>
+
 struct lzx_lru_queue {
-	__m128i R;
+	u64 R;
 };
 
-static inline void
-lzx_fill_lru_queue(struct lzx_lru_queue *q, u32 R0, u32 R1, u32 R2)
+static struct lzx_lru_queue
+lzx_create_lru_queue(u32 R0, u32 R1, u32 R2)
 {
-	q->R = _mm_set_epi32(0, R2, R1, R0);
-	assert(((u32 *)&q->R)[0] == R0);
-	assert(((u32 *)&q->R)[1] == R1);
-	assert(((u32 *)&q->R)[2] == R2);
+	return (struct lzx_lru_queue) {
+		.R = ((u64)R0 << 0) | ((u64)R1 << 21) | ((u64)R2 << 42),
+	};
 }
 
-static inline u32
-lzx_reference_lru(struct lzx_lru_queue *q, unsigned idx)
+static inline struct lzx_lru_queue
+lzx_reference_lru(struct lzx_lru_queue q, unsigned idx)
 {
-#if 1
-	__m128i R = q->R;
+	u64 R = q.R;
+#if 0
 
 	switch (idx) {
 	case 0:
-		/* Nothing to do.  */
 		break;
 	case 1:
-		/* 3 => 3:  11
-		 * 2 => 2:  10
-		 * 0 => 1:  00
-		 * 1 => 0:  01
-		 *
-		 * 11100001 = 0xE1 */
-		R = _mm_shuffle_epi32(R, 0xE1);
+		R = (R & (((1ULL << 21) - 1) << 42)) |
+		    ((R & ((1ULL << 21) - 1)) << 21) |
+		    ((R & (((1ULL << 21) - 1) << 21)) >> 21);
+
 		break;
-	default:
-		/* 3 => 3:  11
-		 * 0 => 2:  00
-		 * 1 => 1:  01
-		 * 2 => 0:  10
-		 *
-		 * 11000110 = 0xC6 */
-		R = _mm_shuffle_epi32(R, 0xC6);
+	case 2:
+		R = ((R >> 42) & ((1ULL << 21) - 1)) |
+			(R << 42) |
+			(R & (((1ULL << 21) - 1) << 21));
 		break;
 	}
-	q->R = R;
-	return ((u32 *)&q->R)[0];
 #else
-	u32 *R = (u32 *)&q->R;
-	u32 offset = R[idx];
-	R[idx] = R[0];
-	R[0] = offset;
-	return offset;
+	unsigned shiftN = 21 * idx;
+	u64 mask = (1 << 21) - 1;
+	u64 v0 = R & mask;
+	u64 vN = (R >> shiftN) & mask;
+	R = (R & ~(mask | (mask << shiftN))) | (v0 << shiftN) | vN;
 #endif
+	return (struct lzx_lru_queue) {.R = R};
 }
 
-static void
-lzx_insert_lru(struct lzx_lru_queue *q, u32 value)
+static struct lzx_lru_queue
+lzx_insert_lru(struct lzx_lru_queue q, u32 value)
 {
-#if 1
-	__m128i R = q->R;
-	R = _mm_slli_si128(R, 32);
-	R = _mm_
-
-	q->R = R;
-#else
-	u32 *R = (u32 *)&q->R;
-	R[2] = R[1];
-	R[1] = R[0];
-	R[0] = value;
-#endif
+	return (struct lzx_lru_queue) { .R = (q.R << 21) | value };
 }
 
-#else /* __SSE2__ */
-/* Least-recently used queue for match offsets.  */
-struct lzx_lru_queue {
-	u32 R[LZX_NUM_RECENT_OFFSETS];
-}
-#ifdef __x86_64__
-_aligned_attribute(8)  /* Improves performance of LZX compression by 1% - 2%;
-			  specifically, this speeds up
-			  lzx_get_near_optimal_match().  */
-#endif
-;
-
-static inline void
-lzx_fill_lru_queue(struct lzx_lru_queue *q, u32 R0, u32 R1, u32 R2)
-{
-	q->R[0] = R0;
-	q->R[1] = R1;
-	q->R[2] = R2;
-}
-
-static inline u32
-lzx_reference_lru(struct lzx_lru_queue *q, unsigned idx)
-{
-	u32 offset = q->R[idx];
-	q->R[idx] = q->R[0];
-	q->R[0] = offset;
-	return offset;
-}
-
-static void
-lzx_insert_lru(struct lzx_lru_queue *q, u32 value)
-{
-	q->R[2] = q->R[1];
-	q->R[1] = q->R[0];
-	q->R[0] = value;
-}
-
-#endif /* !__SSE2__ */
 
 /* In the LZX format, an offset of n bytes is actually encoded
  * as (n + LZX_OFFSET_OFFSET).  */
 #define LZX_OFFSET_OFFSET	(LZX_NUM_RECENT_OFFSETS - 1)
-
-/* Initialize the LZX least-recently-used match offset queue at the beginning of
- * a new window for either decompression or compression.  */
-static inline void
-lzx_lru_queue_init(struct lzx_lru_queue *queue)
-{
-	lzx_fill_lru_queue(queue, 1, 1, 1);
-}
 
 extern void
 lzx_do_e8_preprocessing(u8 *data, s32 size);

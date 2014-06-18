@@ -243,6 +243,7 @@
 #include "wimlib/util.h"
 #include <string.h>
 
+
 #ifdef ENABLE_LZX_DEBUG
 #  include "wimlib/decompress_common.h"
 #endif
@@ -486,18 +487,10 @@ lzx_get_position_slot(u32 offset, struct lzx_lru_queue *queue)
 	unsigned position_slot;
 
 	/* See if the offset was recently used.  */
-	for (int i = 0; i < LZX_NUM_RECENT_OFFSETS; i++) {
-		if (offset == queue->R[i]) {
-			/* Found it.  */
-
-			/* Bring the repeat offset to the front of the
-			 * queue.  Note: this is, in fact, not a real
-			 * LRU queue because repeat matches are simply
-			 * swapped to the front.  */
-			swap(queue->R[0], queue->R[i]);
-
-			/* The resulting position slot is simply the first index
-			 * at which the offset was found in the queue.  */
+	u64 R = queue->R;
+	for (int i = 0; i < LZX_NUM_RECENT_OFFSETS; i++, R >>= 21) {
+		if (offset == (R & 0x1FFFFF)) {
+			*queue = lzx_reference_lru(*queue, i);
 			return i;
 		}
 	}
@@ -506,10 +499,7 @@ lzx_get_position_slot(u32 offset, struct lzx_lru_queue *queue)
 	position_slot = lzx_get_position_slot_raw(offset + LZX_OFFSET_OFFSET);
 
 	/* Bring the new offset to the front of the queue.  */
-	for (int i = LZX_NUM_RECENT_OFFSETS - 1; i > 0; i--)
-		queue->R[i] = queue->R[i - 1];
-	queue->R[0] = offset;
-
+	*queue = lzx_insert_lru(*queue, offset);
 	return position_slot;
 }
 
@@ -1476,8 +1466,9 @@ lzx_get_near_optimal_match(struct lzx_compressor *ctx)
 	if (ctx->match_window_pos >= 1) {
 		unsigned limit = min(LZX_MAX_MATCH_LEN,
 				     ctx->match_window_end - ctx->match_window_pos);
-		for (int i = 0; i < LZX_NUM_RECENT_OFFSETS; i++) {
-			u32 offset = ctx->queue.R[i];
+		u64 R = ctx->queue.R;
+		for (int i = 0; i < LZX_NUM_RECENT_OFFSETS; i++, R >>= 21) {
+			u32 offset = (R & 0x1FFFFF);
 			const u8 *strptr = &ctx->window[ctx->match_window_pos];
 			const u8 *matchptr = strptr - offset;
 			unsigned len = 0;
@@ -1646,8 +1637,9 @@ lzx_get_near_optimal_match(struct lzx_compressor *ctx)
 		longest_rep_len = LZX_MIN_MATCH_LEN - 1;
 		unsigned limit = min(LZX_MAX_MATCH_LEN,
 				     ctx->match_window_end - ctx->match_window_pos);
-		for (int i = 0; i < LZX_NUM_RECENT_OFFSETS; i++) {
-			u32 offset = ctx->optimum[cur_pos].queue.R[i];
+		u64 R = ctx->optimum[cur_pos].queue.R;
+		for (int i = 0; i < LZX_NUM_RECENT_OFFSETS; i++, R >>= 21) {
+			u32 offset = (R & 0x1FFFFF);
 			const u8 *strptr = &ctx->window[ctx->match_window_pos];
 			const u8 *matchptr = strptr - offset;
 			unsigned len = 0;
@@ -1959,7 +1951,7 @@ lzx_prepare_blocks(struct lzx_compressor * ctx)
 	lz_bt_load_window(&ctx->mf, ctx->window, ctx->window_size);
 
 	/* Determine sequence of matches/literals to output for each block.  */
-	lzx_lru_queue_init(&ctx->queue);
+	ctx->queue = lzx_create_lru_queue(1, 1, 1);
 	ctx->optimum_cur_idx = 0;
 	ctx->optimum_end_idx = 0;
 	for (unsigned i = 0; i < ctx->num_blocks; i++) {
@@ -2008,7 +2000,7 @@ lzx_prepare_block_fast(struct lzx_compressor * ctx)
 
 	/* Initialize symbol frequencies and match offset LRU queue.  */
 	memset(&record_ctx.freqs, 0, sizeof(struct lzx_freqs));
-	lzx_lru_queue_init(&record_ctx.queue);
+	record_ctx.queue = lzx_create_lru_queue(1, 1, 1);
 	record_ctx.matches = ctx->chosen_matches;
 
 	/* Determine series of matches/literals to output.  */

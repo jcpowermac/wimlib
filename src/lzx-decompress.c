@@ -456,10 +456,9 @@ lzx_read_block_header(struct input_bitstream *istream,
 			istream->bitsleft = 0;
 			istream->bitbuf = 0;
 		}
-		lzx_fill_lru_queue(queue,
-				   le32_to_cpu(*(le32*)(istream->data + 0)),
-				   le32_to_cpu(*(le32*)(istream->data + 4)),
-				   le32_to_cpu(*(le32*)(istream->data + 8)));
+		*queue = lzx_create_lru_queue(le32_to_cpu(*(le32*)(istream->data + 0)),
+					      le32_to_cpu(*(le32*)(istream->data + 4)),
+					      le32_to_cpu(*(le32*)(istream->data + 8)));
 		istream->data += 12;
 		istream->data_bytes_left -= 12;
 		/* The uncompressed data of this block directly follows and will
@@ -472,153 +471,6 @@ lzx_read_block_header(struct input_bitstream *istream,
 	*block_type_ret = block_type;
 	*block_size_ret = block_size;
 	return 0;
-}
-
-/*
- * Decodes a compressed match from a block of LZX-compressed data.  A match
- * refers to some match_offset to a point earlier in the window as well as some
- * match_len, for which the data is to be copied to the current position in the
- * window.
- *
- * @main_element:	The start of the match data, as decoded using the main
- *			tree.
- *
- * @block_type:		The type of the block (LZX_BLOCKTYPE_ALIGNED or
- *			LZX_BLOCKTYPE_VERBATIM)
- *
- * @bytes_remaining:	The amount of uncompressed data remaining to be
- *			uncompressed in this block.  It is an error if the match
- *			is longer than this number.
- *
- * @window:		A pointer to the window into which the uncompressed
- *			data is being written.
- *
- * @window_pos:		The current byte offset in the window.
- *
- * @tables:		The Huffman decoding tables for this LZX block (main
- *			code, length code, and for LZX_BLOCKTYPE_ALIGNED blocks,
- *			also the aligned offset code).
- *
- * @queue:		The least-recently used queue for match offsets.
- *
- * @istream:		The input bitstream.
- *
- * Returns the length of the match, or a negative number on error.  The possible
- * error cases are:
- *	- Match would exceed the amount of data remaining to be uncompressed.
- *	- Match refers to data before the window.
- *	- The input bitstream ended unexpectedly.
- */
-static int
-lzx_decode_match(unsigned main_element, int block_type,
-		 unsigned bytes_remaining, u8 *window,
-		 unsigned window_pos,
-		 const struct lzx_tables *tables,
-		 struct lzx_lru_queue *queue,
-		 struct input_bitstream *istream)
-{
-	unsigned length_header;
-	unsigned position_slot;
-	unsigned match_len;
-	unsigned match_offset;
-	unsigned num_extra_bits;
-	u32 verbatim_bits;
-	u32 aligned_bits;
-
-	/* The main element is offset by 256 because values under 256 indicate a
-	 * literal value. */
-	main_element -= LZX_NUM_CHARS;
-
-	/* The length header consists of the lower 3 bits of the main element.
-	 * The position slot is the rest of it. */
-	length_header = main_element & LZX_NUM_PRIMARY_LENS;
-	position_slot = main_element >> 3;
-
-	/* If the length_header is less than LZX_NUM_PRIMARY_LENS (= 7), it
-	 * gives the match length as the offset from LZX_MIN_MATCH_LEN.
-	 * Otherwise, the length is given by an additional symbol encoded using
-	 * the length tree, offset by 9 (LZX_MIN_MATCH_LEN +
-	 * LZX_NUM_PRIMARY_LENS) */
-	match_len = LZX_MIN_MATCH_LEN + length_header;
-	if (length_header == LZX_NUM_PRIMARY_LENS)
-		match_len += read_huffsym_using_lentree(istream, tables);
-
-	/* If the position_slot is 0, 1, or 2, the match offset is retrieved
-	 * from the LRU queue.  Otherwise, the match offset is not in the LRU
-	 * queue. */
-	if (position_slot <= 2) {
-		/* Note: This isn't a real LRU queue, since using the R2 offset
-		 * doesn't bump the R1 offset down to R2.  This quirk allows all
-		 * 3 recent offsets to be handled by the same code.  (For R0,
-		 * the swap is a no-op.)  */
-		match_offset = lzx_reference_lru(queue, position_slot);
-	} else {
-		/* Otherwise, the offset was not encoded as one the offsets in
-		 * the queue.  Depending on the position slot, there is a
-		 * certain number of extra bits that need to be read to fully
-		 * decode the match offset. */
-
-		/* Look up the number of extra bits that need to be read. */
-		num_extra_bits = lzx_get_num_extra_bits(position_slot);
-
-		/* For aligned blocks, if there are at least 3 extra bits, the
-		 * actual number of extra bits is 3 less, and they encode a
-		 * number of 8-byte words that are added to the offset; there
-		 * is then an additional symbol read using the aligned tree that
-		 * specifies the actual byte alignment. */
-		if (block_type == LZX_BLOCKTYPE_ALIGNED && num_extra_bits >= 3) {
-
-			/* There is an error in the LZX "specification" at this
-			 * point; it indicates that a Huffman symbol is to be
-			 * read only if num_extra_bits is greater than 3, but
-			 * actually it is if num_extra_bits is greater than or
-			 * equal to 3.  (Note that in the case with
-			 * num_extra_bits == 3, the assignment to verbatim_bits
-			 * will just set it to 0. ) */
-			verbatim_bits = bitstream_read_bits(istream,
-							    num_extra_bits - 3);
-			verbatim_bits <<= 3;
-			aligned_bits = read_huffsym_using_alignedtree(istream,
-								      tables);
-		} else {
-			/* For non-aligned blocks, or for aligned blocks with
-			 * less than 3 extra bits, the extra bits are added
-			 * directly to the match offset, and the correction for
-			 * the alignment is taken to be 0. */
-			verbatim_bits = bitstream_read_bits(istream, num_extra_bits);
-			aligned_bits = 0;
-		}
-
-		/* Calculate the match offset. */
-		match_offset = lzx_position_base[position_slot] +
-			       verbatim_bits + aligned_bits - LZX_OFFSET_OFFSET;
-
-		/* Update the LRU queue. */
-		lzx_insert_lru(queue, match_offset);
-	}
-
-	/* Verify that the match is in the bounds of the part of the window
-	 * currently in use, then copy the source of the match to the current
-	 * position. */
-
-	if (unlikely(match_len > bytes_remaining)) {
-		LZX_DEBUG("Match of length %u bytes overflows "
-			  "uncompressed block size", match_len);
-		return -1;
-	}
-
-	if (unlikely(match_offset > window_pos)) {
-		LZX_DEBUG("Match of length %u bytes references "
-			  "data before window (match_offset = %u, "
-			  "window_pos = %u)",
-			  match_len, match_offset, window_pos);
-		return -1;
-	}
-
-	lz_copy(&window[window_pos], match_len, match_offset,
-		&window[window_pos + bytes_remaining]);
-
-	return match_len;
 }
 
 /*
@@ -638,37 +490,137 @@ lzx_decode_match(unsigned main_element, int block_type,
  */
 static int
 lzx_decompress_block(int block_type, unsigned block_size,
-		     u8 *window,
-		     unsigned window_pos,
+		     u8 *window, unsigned window_pos,
 		     const struct lzx_tables *tables,
-		     struct lzx_lru_queue *queue,
+		     struct lzx_lru_queue *queueptr,
 		     struct input_bitstream *istream)
 {
 	unsigned main_element;
 	unsigned end;
 	int match_len;
-
-	end = window_pos + block_size;
-	while (window_pos < end) {
+	struct lzx_lru_queue queue = *queueptr;
+	u8 *winptr = window + window_pos;
+	u8 *winend = winptr + block_size;
+	while (winptr != winend) {
 		main_element = read_huffsym_using_maintree(istream, tables);
-		if (main_element < LZX_NUM_CHARS) {
+		if (!(main_element & 0x100)) {
 			/* literal: 0 to LZX_NUM_CHARS - 1 */
-			window[window_pos++] = main_element;
+			*winptr++ = main_element;
 		} else {
 			/* match: LZX_NUM_CHARS to num_main_syms - 1 */
-			match_len = lzx_decode_match(main_element,
-						     block_type,
-						     end - window_pos,
-						     window,
-						     window_pos,
-						     tables,
-						     queue,
-						     istream);
-			if (unlikely(match_len < 0))
-				return match_len;
-			window_pos += match_len;
+
+			unsigned length_header;
+			unsigned position_slot;
+			unsigned match_len;
+			unsigned match_offset;
+			unsigned num_extra_bits;
+			u32 verbatim_bits;
+			u32 aligned_bits;
+
+			/* The main element is offset by 256 because values under 256 indicate a
+			 * literal value. */
+
+			/* The length header consists of the lower 3 bits of the main element.
+			 * The position slot is the rest of it. */
+			length_header = main_element & LZX_NUM_PRIMARY_LENS;
+			position_slot = (main_element >> 3) & 0x1F;
+
+			/* If the length_header is less than LZX_NUM_PRIMARY_LENS (= 7), it
+			 * gives the match length as the offset from LZX_MIN_MATCH_LEN.
+			 * Otherwise, the length is given by an additional symbol encoded using
+			 * the length tree, offset by 9 (LZX_MIN_MATCH_LEN +
+			 * LZX_NUM_PRIMARY_LENS) */
+			match_len = LZX_MIN_MATCH_LEN + length_header;
+			if (length_header == LZX_NUM_PRIMARY_LENS)
+				match_len += read_huffsym_using_lentree(istream, tables);
+
+			/* If the position_slot is 0, 1, or 2, the match offset is retrieved
+			 * from the LRU queue.  Otherwise, the match offset is not in the LRU
+			 * queue. */
+			if (position_slot <= 2) {
+				/* Note: This isn't a real LRU queue, since using the R2 offset
+				 * doesn't bump the R1 offset down to R2.  This quirk allows all
+				 * 3 recent offsets to be handled by the same code.  (For R0,
+				 * the swap is a no-op.)  */
+				queue = lzx_reference_lru(queue, position_slot);
+				match_offset = queue.R & 0x1FFFFF;
+			} else {
+				/* Otherwise, the offset was not encoded as one the offsets in
+				 * the queue.  Depending on the position slot, there is a
+				 * certain number of extra bits that need to be read to fully
+				 * decode the match offset. */
+
+				/* Look up the number of extra bits that need to be read. */
+				num_extra_bits = lzx_get_num_extra_bits(position_slot);
+
+				/* For aligned blocks, if there are at least 3 extra bits, the
+				 * actual number of extra bits is 3 less, and they encode a
+				 * number of 8-byte words that are added to the offset; there
+				 * is then an additional symbol read using the aligned tree that
+				 * specifies the actual byte alignment. */
+				if (num_extra_bits >= 3 && block_type == LZX_BLOCKTYPE_ALIGNED) {
+
+					/* There is an error in the LZX "specification" at this
+					 * point; it indicates that a Huffman symbol is to be
+					 * read only if num_extra_bits is greater than 3, but
+					 * actually it is if num_extra_bits is greater than or
+					 * equal to 3.  (Note that in the case with
+					 * num_extra_bits == 3, the assignment to verbatim_bits
+					 * will just set it to 0. ) */
+					if (num_extra_bits >= 4) {
+						verbatim_bits = bitstream_read_bits(istream,
+										    num_extra_bits - 3);
+						verbatim_bits <<= 3;
+					} else {
+						verbatim_bits = 0;
+					}
+					aligned_bits = read_huffsym_using_alignedtree(istream,
+										      tables);
+				} else {
+					/* For non-aligned blocks, or for aligned blocks with
+					 * less than 3 extra bits, the extra bits are added
+					 * directly to the match offset, and the correction for
+					 * the alignment is taken to be 0. */
+					if (num_extra_bits) {
+						verbatim_bits = bitstream_read_bits(istream, num_extra_bits);
+					} else {
+						verbatim_bits = 0;
+					}
+					aligned_bits = 0;
+				}
+
+				/* Calculate the match offset. */
+				match_offset = lzx_position_base[position_slot] +
+					       verbatim_bits + aligned_bits - LZX_OFFSET_OFFSET;
+
+				/* Update the LRU queue. */
+				queue = lzx_insert_lru(queue, match_offset);
+
+				if (unlikely(match_offset > winptr - window)) {
+					LZX_DEBUG("Match of length %u bytes references "
+						  "data before window (match_offset = %u, "
+						  "window_pos = %u)",
+						  match_len, match_offset, winptr - window);
+					return -1;
+				}
+			}
+
+			/* Verify that the match is in the bounds of the part of the window
+			 * currently in use, then copy the source of the match to the current
+			 * position. */
+
+			if (unlikely(match_len > winend - winptr)) {
+				LZX_DEBUG("Match of length %u bytes overflows "
+					  "uncompressed block size", match_len);
+				return -1;
+			}
+
+
+			lz_copy(winptr, match_len, match_offset, winend);
+			winptr += match_len;
 		}
 	}
+	*queueptr = queue;
 	return 0;
 }
 
@@ -702,7 +654,7 @@ lzx_decompress(const void *compressed_data, size_t compressed_size,
 
 	memset(ctx->tables.maintree_lens, 0, sizeof(ctx->tables.maintree_lens));
 	memset(ctx->tables.lentree_lens, 0, sizeof(ctx->tables.lentree_lens));
-	lzx_lru_queue_init(&queue);
+	queue = lzx_create_lru_queue(1, 1, 1);
 	init_input_bitstream(&istream, compressed_data, compressed_size);
 
 	e8_preprocessing_done = false; /* Set to true if there may be 0xe8 bytes
