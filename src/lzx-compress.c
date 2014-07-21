@@ -2035,8 +2035,8 @@ static void
 lzx_build_params(unsigned int compression_level, u32 max_window_size,
 		 struct lzx_compressor_params *lzx_params)
 {
-	if (compression_level < 25) {
 
+	if (compression_level < 25) {
 		/* Fast compression: Use lazy parsing.  */
 
 		lzx_params->choose_items_for_block = lzx_choose_lazy_items_for_block;

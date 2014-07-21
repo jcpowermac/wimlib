@@ -44,6 +44,8 @@ static const struct lz_mf_ops *mf_ops[] = {
 	[LZ_MF_BINARY_TREES]		= &lz_binary_trees_ops,
 	[LZ_MF_LCP_INTERVAL_TREE]	= &lz_lcp_interval_tree_ops,
 	[LZ_MF_LINKED_SUFFIX_ARRAY]	= &lz_linked_suffix_array_ops,
+	[LZ_MF_HASH_ARRAYS]		= &lz_hash_arrays_ops,
+	[LZ_MF_HASH_ARRAYS_64]		= &lz_hash_arrays_64_ops,
 };
 
 /*
