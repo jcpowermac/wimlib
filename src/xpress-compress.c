@@ -850,7 +850,7 @@ xpress_build_params(unsigned int compression_level, u32 max_window_size,
 	} else if (compression_level < 60) {
 
 		/* Lazy parsing  */
-		xpress_params->mf_algo = LZ_MF_HASH_CHAINS;
+		xpress_params->mf_algo = LZ_MF_HASH_ARRAYS;
 		xpress_params->choose_item_func = xpress_choose_lazy_item;
 		xpress_params->num_optim_passes = 1;
 		xpress_params->nice_match_length = compression_level;

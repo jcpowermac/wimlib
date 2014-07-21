@@ -179,6 +179,11 @@ enum lz_mf_algo {
 	 * exceeding the 33554432 byte limit of the LCP interval tree algorithm.
 	 */
 	LZ_MF_LINKED_SUFFIX_ARRAY = 6,
+
+	/*
+	 * TODO
+	 */
+	LZ_MF_HASH_ARRAYS = 7,
 };
 
 /* Parameters for Lempel-Ziv match-finding.  */
