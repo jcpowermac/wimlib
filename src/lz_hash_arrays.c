@@ -47,7 +47,12 @@
 #define LZ_HA_HASH_BYTES   3
 
 /* TODO */
-#define LZ_HA_SLOTS_PER_POS	16
+#define LZ_HA_SLOT_BITS		4
+#define LZ_HA_SLOTS_PER_BUCKET	(1 << LZ_HA_SLOT_BITS)
+#define LZ_HA_SLOT_MASK	(LZ_HA_SLOTS_PER_BUCKET - 1)
+
+#define LZ_HA_POS_BITS		(32 - LZ_HA_SLOT_BITS)
+#define LZ_HA_POS_MASK		(((u32)1 << LZ_HA_POS_BITS) - 1)
 
 struct lz_ha {
 	struct lz_mf base;
@@ -121,7 +126,7 @@ lz_ha_params_valid(const struct lz_mf_params *_params)
 static u64
 lz_ha_get_needed_memory(u32 max_window_size)
 {
-	return LZ_HA_HASH_LEN * (LZ_HA_SLOTS_PER_POS + 1) * sizeof(u32);
+	return LZ_HA_HASH_LEN * LZ_HA_SLOTS_PER_BUCKET * sizeof(u32);
 }
 
 static bool
@@ -131,7 +136,8 @@ lz_ha_init(struct lz_mf *_mf)
 
 	lz_ha_set_default_params(&mf->base.params);
 
-	mf->arrays = MALLOC(lz_ha_get_needed_memory(mf->base.params.max_window_size));
+	mf->arrays = ALIGNED_MALLOC(lz_ha_get_needed_memory(mf->base.params.max_window_size),
+				    64);
 	if (!mf->arrays)
 		return false;
 
@@ -144,13 +150,9 @@ static void
 lz_ha_load_window(struct lz_mf *_mf, const u8 window[], u32 size)
 {
 	struct lz_ha *mf = (struct lz_ha *)_mf;
-	u32 *array_ptr = mf->arrays;
 
-	for (u32 i = 0; i < LZ_HA_HASH_LEN; i++) {
-		array_ptr[0] = 0;
-		array_ptr[1] = 0;
-		array_ptr += LZ_HA_SLOTS_PER_POS + 1;
-	}
+	for (u32 i = 0; i < LZ_HA_HASH_LEN; i++)
+		mf->arrays[i << LZ_HA_SLOT_BITS] = 0;
 
 	if (size >= LZ_HA_HASH_BYTES)
 		mf->next_hash = lz_ha_hash(window);
@@ -166,6 +168,7 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 	u32 hash;
 	u32 *array;
 	u32 start_i;
+	u32 next_i;
 	u32 i;
 	u32 best_len;
 	u32 cur_match;
@@ -176,18 +179,17 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 
 	hash = mf->next_hash;
 	mf->next_hash = lz_ha_hash(strptr + 1);
-	prefetch(&mf->arrays[mf->next_hash * (LZ_HA_SLOTS_PER_POS + 1)]);
-	array = &mf->arrays[hash * (LZ_HA_SLOTS_PER_POS + 1)];
+	prefetch(&mf->arrays[mf->next_hash << LZ_HA_SLOT_BITS]);
+	array = &mf->arrays[hash << LZ_HA_SLOT_BITS];
 
-	start_i = *array++;
-	LZ_ASSERT(start_i < LZ_HA_SLOTS_PER_POS);
+	start_i = array[0] >> LZ_HA_POS_BITS;
+	LZ_ASSERT(start_i < LZ_HA_SLOTS_PER_BUCKET);
 
-	i = start_i;
 	best_len = LZ_HA_HASH_BYTES - 1;
 
 	for (i = start_i;
-	     (cur_match = array[i]) != 0;
-	     i = (i - 1) & (LZ_HA_SLOTS_PER_POS - 1))
+	     (cur_match = (array[i] & LZ_HA_POS_MASK)) != 0;
+	     i = (i - 1) & LZ_HA_SLOT_MASK)
 	{
 		u32 len;
 		const u8 *matchptr;
@@ -228,12 +230,13 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 		;
 	}
 	
-	i = (start_i + 1) & (LZ_HA_SLOTS_PER_POS - 1);
-	array[i] = mf->base.cur_window_pos;
-	array[-1] = i;
-	i = (i + 1) & (LZ_HA_SLOTS_PER_POS - 1);
-	array[i] = 0;
-
+	next_i = (start_i + 1) & LZ_HA_SLOT_MASK;
+	array[0] += (u32)1 << LZ_HA_POS_BITS;
+	LZ_ASSERT((array[0] >> LZ_HA_POS_BITS) == next_i);
+	i = next_i;
+	array[i] = (next_i << LZ_HA_POS_BITS) | mf->base.cur_window_pos;
+	i = (i + 1) & LZ_HA_SLOT_MASK;
+	array[i] = (next_i << LZ_HA_POS_BITS);
 out:
 	mf->base.cur_window_pos++;
 	return num_matches;
@@ -245,6 +248,8 @@ lz_ha_skip_position(struct lz_ha *mf)
 	const u32 bytes_remaining = lz_mf_get_bytes_remaining(&mf->base);
 	u32 hash;
 	u32 *array;
+	u32 start_i;
+	u32 next_i;
 	u32 i;
 
 	if (bytes_remaining <= LZ_HA_HASH_BYTES)
@@ -252,15 +257,17 @@ lz_ha_skip_position(struct lz_ha *mf)
 
 	hash = mf->next_hash;
 	mf->next_hash = lz_ha_hash(lz_mf_get_window_ptr(&mf->base) + 1);
-	prefetch(&mf->arrays[mf->next_hash * (LZ_HA_SLOTS_PER_POS + 1)]);
-	array = &mf->arrays[hash * (LZ_HA_SLOTS_PER_POS + 1)];
+	prefetch(&mf->arrays[mf->next_hash << LZ_HA_SLOT_BITS]);
+	array = &mf->arrays[hash << LZ_HA_SLOT_BITS];
+	start_i = array[0] >> LZ_HA_POS_BITS;
 
-	i = *array++;
-	i = (i + 1) & (LZ_HA_SLOTS_PER_POS - 1);
-	array[i] = mf->base.cur_window_pos;
-	array[-1] = i;
-	i = (i + 1) & (LZ_HA_SLOTS_PER_POS - 1);
-	array[i] = 0;
+	next_i = (start_i + 1) & LZ_HA_SLOT_MASK;
+	array[0] += (u32)1 << LZ_HA_POS_BITS;
+	LZ_ASSERT((array[0] >> LZ_HA_POS_BITS) == next_i);
+	i = next_i;
+	array[i] = (next_i << LZ_HA_POS_BITS) | mf->base.cur_window_pos;
+	i = (i + 1) & LZ_HA_SLOT_MASK;
+	array[i] = (next_i << LZ_HA_POS_BITS);
 out:
 	mf->base.cur_window_pos++;
 }
@@ -280,7 +287,7 @@ lz_ha_destroy(struct lz_mf *_mf)
 {
 	struct lz_ha *mf = (struct lz_ha *)_mf;
 
-	FREE(mf->arrays);
+	ALIGNED_FREE(mf->arrays);
 }
 
 const struct lz_mf_ops lz_hash_arrays_ops = {
