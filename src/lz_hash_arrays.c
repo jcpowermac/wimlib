@@ -165,6 +165,7 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 	const u32 bytes_remaining = lz_mf_get_bytes_remaining(&mf->base);
 	const u8 * const strptr = lz_mf_get_window_ptr(&mf->base);
 	const u32 max_len = min(bytes_remaining, mf->base.params.nice_match_len);
+	const u8 * const cur_window = mf->base.cur_window;
 	u32 hash;
 	u32 *array;
 	u32 start_i;
@@ -194,9 +195,12 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 		u32 len;
 		const u8 *matchptr;
 
+
 		LZ_ASSERT(cur_match < mf->base.cur_window_pos);
 
-		matchptr = &mf->base.cur_window[cur_match];
+		matchptr = &cur_window[cur_match];
+
+		/*prefetch(&cur_window[array[(i - 1) & LZ_HA_SLOT_MASK] & LZ_HA_POS_MASK]);*/
 
 		if (matchptr[best_len] != strptr[best_len] ||
 		    matchptr[best_len - 1] != strptr[best_len - 1] ||
