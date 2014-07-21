@@ -47,7 +47,7 @@
 #define LZ_HA_HASH_BYTES   3
 
 /* TODO */
-#define LZ_HA_SLOT_BITS		4
+#define LZ_HA_SLOT_BITS		5
 #define LZ_HA_SLOTS_PER_BUCKET	(1 << LZ_HA_SLOT_BITS)
 #define LZ_HA_SLOT_MASK	(LZ_HA_SLOTS_PER_BUCKET - 1)
 
@@ -152,7 +152,7 @@ lz_ha_load_window(struct lz_mf *_mf, const u8 window[], u32 size)
 	struct lz_ha *mf = (struct lz_ha *)_mf;
 
 	for (u32 i = 0; i < LZ_HA_HASH_LEN; i++)
-		mf->arrays[i << LZ_HA_SLOT_BITS] = 0;
+		mf->arrays[i << LZ_HA_SLOT_BITS] = LZ_HA_POS_MASK;
 
 	if (size >= LZ_HA_HASH_BYTES)
 		mf->next_hash = lz_ha_hash(window);
@@ -173,6 +173,7 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 	u32 i;
 	u32 best_len;
 	u32 cur_match;
+	u32 prev_match;
 	u32 num_matches = 0;
 
 	if (bytes_remaining <= LZ_HA_HASH_BYTES)
@@ -188,13 +189,12 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 
 	best_len = LZ_HA_HASH_BYTES - 1;
 
-	for (i = start_i;
-	     (cur_match = (array[i] & LZ_HA_POS_MASK)) != 0;
-	     i = (i - 1) & LZ_HA_SLOT_MASK)
+	for (i = start_i, prev_match = LZ_HA_POS_MASK - 1;
+	     (cur_match = (array[i] & LZ_HA_POS_MASK)) < prev_match;
+	     prev_match = cur_match, i = (i - 1) & LZ_HA_SLOT_MASK)
 	{
 		u32 len;
 		const u8 *matchptr;
-
 
 		LZ_ASSERT(cur_match < mf->base.cur_window_pos);
 
@@ -237,10 +237,7 @@ lz_ha_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 	next_i = (start_i + 1) & LZ_HA_SLOT_MASK;
 	array[0] += (u32)1 << LZ_HA_POS_BITS;
 	LZ_ASSERT((array[0] >> LZ_HA_POS_BITS) == next_i);
-	i = next_i;
-	array[i] = (next_i << LZ_HA_POS_BITS) | mf->base.cur_window_pos;
-	i = (i + 1) & LZ_HA_SLOT_MASK;
-	array[i] = (next_i << LZ_HA_POS_BITS);
+	array[next_i] = (next_i << LZ_HA_POS_BITS) | mf->base.cur_window_pos;
 out:
 	mf->base.cur_window_pos++;
 	return num_matches;
@@ -254,7 +251,6 @@ lz_ha_skip_position(struct lz_ha *mf)
 	u32 *array;
 	u32 start_i;
 	u32 next_i;
-	u32 i;
 
 	if (bytes_remaining <= LZ_HA_HASH_BYTES)
 		goto out;
@@ -268,10 +264,7 @@ lz_ha_skip_position(struct lz_ha *mf)
 	next_i = (start_i + 1) & LZ_HA_SLOT_MASK;
 	array[0] += (u32)1 << LZ_HA_POS_BITS;
 	LZ_ASSERT((array[0] >> LZ_HA_POS_BITS) == next_i);
-	i = next_i;
-	array[i] = (next_i << LZ_HA_POS_BITS) | mf->base.cur_window_pos;
-	i = (i + 1) & LZ_HA_SLOT_MASK;
-	array[i] = (next_i << LZ_HA_POS_BITS);
+	array[next_i] = (next_i << LZ_HA_POS_BITS) | mf->base.cur_window_pos;
 out:
 	mf->base.cur_window_pos++;
 }
