@@ -40,7 +40,7 @@
 
 /* Number of hash buckets.  This can be changed, but should be a power of 2 so
  * that the correct hash bucket can be selected using a fast bitwise AND.  */
-#define LZ_HA_HASH_LEN     (1 << 15)
+#define LZ_HA_HASH_LEN     (1 << 16)
 
 /* Number of bytes from which the hash code is computed at each position.  This
  * can be changed, provided that lz_ha_hash() is updated as well.  */
