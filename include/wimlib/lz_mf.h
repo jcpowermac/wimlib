@@ -184,6 +184,11 @@ enum lz_mf_algo {
 	 * TODO
 	 */
 	LZ_MF_HASH_ARRAYS = 7,
+
+	/*
+	 * TODO
+	 */
+	LZ_MF_HASH_ARRAYS_64 = 8,
 };
 
 /* Parameters for Lempel-Ziv match-finding.  */

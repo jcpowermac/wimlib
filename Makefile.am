@@ -44,6 +44,7 @@ libwim_la_SOURCES =		\
 	src/lz_binary_trees.c	\
 	src/lz_brute_force.c	\
 	src/lz_hash_arrays.c	\
+	src/lz_hash_arrays_64.c	\
 	src/lz_hash_chains.c	\
 	src/lz_lcp_interval_tree.c	\
 	src/lz_linked_suffix_array.c	\
