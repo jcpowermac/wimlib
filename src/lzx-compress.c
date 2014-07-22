@@ -2071,10 +2071,10 @@ lzx_build_params(unsigned int compression_level,
 	if (compression_level < 25) {
 		lzx_params->choose_item_func = lzx_choose_lazy_item;
 		lzx_params->num_optim_passes  = 1;
-		/*if (max_window_size <= 262144)*/
-			/*lzx_params->mf_algo = LZ_MF_HASH_ARRAYS;*/
-		/*else*/
-		lzx_params->mf_algo = LZ_MF_HASH_CHAINS;
+		if (max_window_size <= 262144)
+			lzx_params->mf_algo = LZ_MF_HASH_ARRAYS;
+		else
+			lzx_params->mf_algo = LZ_MF_HASH_ARRAYS_64;
 		lzx_params->min_match_length  = 3;
 		lzx_params->nice_match_length = 25 + compression_level * 2;
 		lzx_params->max_search_depth  = 32;
