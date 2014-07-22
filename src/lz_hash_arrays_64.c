@@ -40,7 +40,7 @@
 
 /* Number of hash buckets.  This can be changed, but should be a power of 2 so
  * that the correct hash bucket can be selected using a fast bitwise AND.  */
-#define LZ_HA64_HASH_LEN     (1 << 16)
+#define LZ_HA64_HASH_LEN     (1 << 15)
 
 /* Number of bytes from which the hash code is computed at each position.  This
  * can be changed, provided that lz_ha64_hash() is updated as well.  */
@@ -92,7 +92,7 @@ lz_ha64_hash(const u8 *p)
 #if LZ_HA64_HASH_BYTES == 4
 	hash ^= crc32_table[p[3]] << 5;
 #endif
-	return hash & (LZ_HA64_HASH_LEN - 1);
+	return hash % LZ_HA64_HASH_LEN;
 }
 
 static inline void
@@ -205,7 +205,7 @@ lz_ha64_get_matches(struct lz_mf *_mf, struct lz_match matches[])
 	prefetch_array(&mf->arrays[(mf->next_hash << LZ_HA64_SLOT_BITS)]);
 	array = &mf->arrays[hash << LZ_HA64_SLOT_BITS];
 
-	start_i = (array[0] >> LZ_HA64_POS_BITS) & LZ_HA64_SLOT_MASK;
+	start_i = ((u32)array[0] >> LZ_HA64_POS_BITS);
 	best_len = LZ_HA64_HASH_BYTES - 1;
 
 	i = start_i;
@@ -275,7 +275,6 @@ lz_ha64_skip_position(struct lz_ha64 *mf)
 	const u8 * const strptr = lz_mf_get_window_ptr(&mf->base);
 	u32 hash;
 	u64 *array;
-	u32 i;
 	u32 start_i;
 	u32 next_i;
 	u64 sequence;
@@ -292,7 +291,8 @@ lz_ha64_skip_position(struct lz_ha64 *mf)
 	hash = mf->next_hash;
 	mf->next_hash = lz_ha64_hash(strptr + 1);
 	prefetch_array(&mf->arrays[(mf->next_hash << LZ_HA64_SLOT_BITS)]);
-	start_i = (array[0] >> LZ_HA64_POS_BITS) & LZ_HA64_SLOT_MASK;
+	array = &mf->arrays[hash << LZ_HA64_SLOT_BITS];
+	start_i = ((u32)array[0] >> LZ_HA64_POS_BITS);
 
 	next_i = (start_i + 1) & LZ_HA64_SLOT_MASK;
 	array[0] = (array[0] & ~((u64)LZ_HA64_SLOT_MASK << LZ_HA64_POS_BITS)) |
