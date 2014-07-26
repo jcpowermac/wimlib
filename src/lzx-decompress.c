@@ -306,7 +306,7 @@ lzx_read_block_header(struct input_bitstream *istream,
 		      unsigned *block_size_ret,
 		      unsigned *block_type_ret,
 		      struct lzx_tables *tables,
-		      struct lzx_lru_queue *queue)
+		      u64 *queue)
 {
 	int ret;
 	unsigned block_type;
@@ -456,9 +456,12 @@ lzx_read_block_header(struct input_bitstream *istream,
 			istream->bitsleft = 0;
 			istream->bitbuf = 0;
 		}
-		queue->R[0] = le32_to_cpu(*(le32*)(istream->data + 0));
-		queue->R[1] = le32_to_cpu(*(le32*)(istream->data + 4));
-		queue->R[2] = le32_to_cpu(*(le32*)(istream->data + 8));
+		*queue = 0;
+		*queue |= le32_to_cpu(*(le32*)(istream->data + 8));
+		*queue <<= 21;
+		*queue |= le32_to_cpu(*(le32*)(istream->data + 4));
+		*queue <<= 21;
+		*queue |= le32_to_cpu(*(le32*)(istream->data + 0));
 		istream->data += 12;
 		istream->data_bytes_left -= 12;
 		/* The uncompressed data of this block directly follows and will
@@ -513,7 +516,7 @@ lzx_decode_match(unsigned main_element, int block_type,
 		 unsigned bytes_remaining, u8 *window,
 		 unsigned window_pos,
 		 const struct lzx_tables *tables,
-		 struct lzx_lru_queue *queue,
+		 u64 *queue,
 		 struct input_bitstream *istream)
 {
 	unsigned length_header;
@@ -550,9 +553,14 @@ lzx_decode_match(unsigned main_element, int block_type,
 		 * doesn't bump the R1 offset down to R2.  This quirk allows all
 		 * 3 recent offsets to be handled by the same code.  (For R0,
 		 * the swap is a no-op.)  */
-		match_offset = queue->R[position_slot];
-		queue->R[position_slot] = queue->R[0];
-		queue->R[0] = match_offset;
+		u64 R = *queue;
+		unsigned shiftN = 21 * position_slot;
+		u64 mask = (1 << 21) - 1;
+		u64 v0 = R & mask;
+		u64 vN = (R >> shiftN) & mask;
+		R = (R & ~(mask | (mask << shiftN))) | (v0 << shiftN) | vN;
+		*queue = R;
+		match_offset = vN;
 	} else {
 		/* Otherwise, the offset was not encoded as one the offsets in
 		 * the queue.  Depending on the position slot, there is a
@@ -595,9 +603,10 @@ lzx_decode_match(unsigned main_element, int block_type,
 			       verbatim_bits + aligned_bits - LZX_OFFSET_OFFSET;
 
 		/* Update the LRU queue. */
-		queue->R[2] = queue->R[1];
-		queue->R[1] = queue->R[0];
-		queue->R[0] = match_offset;
+		u64 R = *queue;
+		R <<= 21;
+		R |= match_offset;
+		*queue = R;
 	}
 
 	/* Verify that the match is in the bounds of the part of the window
@@ -644,7 +653,7 @@ lzx_decompress_block(int block_type, unsigned block_size,
 		     u8 *window,
 		     unsigned window_pos,
 		     const struct lzx_tables *tables,
-		     struct lzx_lru_queue *queue,
+		     u64 *queue,
 		     struct input_bitstream *istream)
 {
 	unsigned main_element;
@@ -682,7 +691,7 @@ lzx_decompress(const void *compressed_data, size_t compressed_size,
 {
 	struct lzx_decompressor *ctx = _ctx;
 	struct input_bitstream istream;
-	struct lzx_lru_queue queue;
+	u64 queue;
 	unsigned window_pos;
 	unsigned block_size;
 	unsigned block_type;
@@ -705,7 +714,8 @@ lzx_decompress(const void *compressed_data, size_t compressed_size,
 
 	memset(ctx->tables.maintree_lens, 0, sizeof(ctx->tables.maintree_lens));
 	memset(ctx->tables.lentree_lens, 0, sizeof(ctx->tables.lentree_lens));
-	lzx_lru_queue_init(&queue);
+
+	queue = (1ULL << 42) | (1ULL << 21) | 1;
 	init_input_bitstream(&istream, compressed_data, compressed_size);
 
 	e8_preprocessing_done = false; /* Set to true if there may be 0xe8 bytes
