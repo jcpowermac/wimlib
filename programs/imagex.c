@@ -154,6 +154,8 @@ enum {
 	IMAGEX_DEREFERENCE_OPTION,
 	IMAGEX_DEST_DIR_OPTION,
 	IMAGEX_DETAILED_OPTION,
+	IMAGEX_DUMP_STREAM_OPTION,
+	IMAGEX_DUMP_ALL_STREAMS_OPTION,
 	IMAGEX_EXTRACT_XML_OPTION,
 	IMAGEX_FLAGS_OPTION,
 	IMAGEX_FORCE_OPTION,
@@ -307,6 +309,8 @@ static const struct option extract_options[] = {
 	{T("nullglob"),     no_argument,      NULL, IMAGEX_NULLGLOB_OPTION},
 	{T("preserve-dir-structure"), no_argument, NULL, IMAGEX_PRESERVE_DIR_STRUCTURE_OPTION},
 	{T("wimboot"),     no_argument,       NULL, IMAGEX_WIMBOOT_OPTION},
+	{T("dump-stream"), required_argument,      NULL, IMAGEX_DUMP_STREAM_OPTION},
+	{T("dump-all-streams"), no_argument,      NULL, IMAGEX_DUMP_ALL_STREAMS_OPTION},
 	{NULL, 0, NULL, 0},
 };
 
@@ -983,6 +987,41 @@ stdin_get_text_contents(size_t *num_tchars_ret)
 	if (!contents)
 		return NULL;
 	return translate_text_to_tstr(contents, num_bytes, num_tchars_ret);
+}
+
+static int
+parse_sha1(const tchar *hashstr, uint8_t hash[20])
+{
+	if (tstrlen(hashstr) != 40)
+		goto invalid;
+
+	for (int i = 0; i < 20; i++) {
+		tchar high = totlower(hashstr[i * 2 + 0]);
+		tchar low = tolower(hashstr[i * 2 + 1]);
+		uint8_t byte = 0;
+
+		if (high >= '0' && high <= '9')
+			byte |= (high - '0') << 4;
+		else if (high >= 'a' && high <= 'f')
+			byte |= (high - 'a' + 10) << 4;
+		else
+			goto invalid;
+
+		if (low >= '0' && low <= '9')
+			byte |= (low - '0');
+		else if (low >= 'a' && low <= 'f')
+			byte |= (low - 'a' + 10);
+		else
+			goto invalid;
+		hash[i] = byte;
+	}
+
+	return 0;
+
+invalid:
+	imagex_error("\"%"TS"\" is not a well-formed SHA-1 message digest!",
+		     hashstr);
+	return -1;
 }
 
 #define TO_PERCENT(numerator, denominator) \
@@ -2914,6 +2953,8 @@ imagex_extract(int argc, tchar **argv, int cmd)
 			    WIMLIB_EXTRACT_FLAG_GLOB_PATHS |
 			    WIMLIB_EXTRACT_FLAG_STRICT_GLOB;
 	int notlist_extract_flags = WIMLIB_EXTRACT_FLAG_NO_PRESERVE_DIR_STRUCTURE;
+	bool dump_all_streams = false;
+	const tchar *stream_to_dump = NULL;
 
 	STRING_SET(refglobs);
 
@@ -2969,12 +3010,38 @@ imagex_extract(int argc, tchar **argv, int cmd)
 		case IMAGEX_WIMBOOT_OPTION:
 			extract_flags |= WIMLIB_EXTRACT_FLAG_WIMBOOT;
 			break;
+		case IMAGEX_DUMP_ALL_STREAMS_OPTION:
+			dump_all_streams = true;
+			break;
+		case IMAGEX_DUMP_STREAM_OPTION:
+			stream_to_dump = optarg;
+			break;
 		default:
 			goto out_usage;
 		}
 	}
 	argc -= optind;
 	argv += optind;
+
+	if (argc == 1 && (dump_all_streams || stream_to_dump)) {
+		ret = wimlib_open_wim_with_progress(argv[0], open_flags, &wim,
+						    imagex_progress_func, NULL);
+		if (ret)
+			goto out_free_refglobs;
+
+		if (dump_all_streams) {
+			ret = wimlib_dump_all_streams(wim, dest_dir, 0);
+		} else {
+			uint8_t hash[20];
+
+			ret = parse_sha1(stream_to_dump, hash);
+			if (ret)
+				goto out_wimlib_free;
+
+			ret = wimlib_dump_streams(wim, hash, 1, dest_dir, 0);
+		}
+		goto out_wimlib_free;
+	}
 
 	if (argc < 2)
 		goto out_usage;

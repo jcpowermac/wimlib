@@ -2058,3 +2058,185 @@ wimlib_extract_image(WIMStruct *wim, int image, const tchar *target,
 		return WIMLIB_ERR_INVALID_PARAM;
 	return do_wimlib_extract_image(wim, image, target, extract_flags);
 }
+
+struct dump_stream_ctx {
+	tchar *target_buf;
+	tchar *filename_ptr;
+	struct filedes fd;
+	wimlib_progress_func_t progfunc;
+	void *progctx;
+	union wimlib_progress_info progress;
+};
+
+static int
+dump_stream_begin(struct wim_lookup_table_entry *lte, void *_ctx)
+{
+	struct dump_stream_ctx *ctx = _ctx;
+	int raw_fd;
+	int open_flags;
+
+	sprint_hash(lte->hash, ctx->filename_ptr);
+
+	open_flags = O_WRONLY | O_CREAT | O_TRUNC | O_BINARY;
+#ifdef O_NOFOLLOW
+	open_flags |= O_NOFOLLOW;
+#endif
+
+	raw_fd = topen(ctx->target_buf, open_flags, 0644);
+	if (raw_fd < 0) {
+		ERROR_WITH_ERRNO("Can't open \"%"TS"\" for writing", ctx->target_buf);
+		return WIMLIB_ERR_OPEN;
+	}
+
+	filedes_init(&ctx->fd, raw_fd);
+	return 0;
+}
+
+static int
+dump_stream_extract_chunk(const void *chunk, size_t size, void *_ctx)
+{
+	struct dump_stream_ctx *ctx = _ctx;
+	int ret;
+
+	ret = full_write(&ctx->fd, chunk, size);
+	if (ret)
+		ERROR_WITH_ERRNO("Error writing to \"%"TS"\"", ctx->target_buf);
+
+	return ret;
+}
+
+static int
+dump_stream_end(struct wim_lookup_table_entry *lte, int status, void *_ctx)
+{
+	struct dump_stream_ctx *ctx = _ctx;
+	int ret = status;
+
+	ctx->progress.extract.completed_streams++;
+	ctx->progress.extract.completed_bytes += lte->size;
+
+	if (filedes_close(&ctx->fd) && !ret)
+		ret = WIMLIB_ERR_WRITE;
+
+	if (!ret) {
+		ret = call_progress(ctx->progfunc, WIMLIB_PROGRESS_MSG_EXTRACT_STREAMS,
+				    &ctx->progress, ctx->progctx);
+	}
+
+	return ret;
+}
+
+static int
+dump_stream_list(struct list_head *stream_list, const tchar *target,
+		 wimlib_progress_func_t progfunc, void *progctx)
+{
+	struct dump_stream_ctx ctx;
+	size_t target_nchars;
+	int ret;
+	struct wim_lookup_table_entry *lte;
+
+	memset(&ctx, 0, sizeof(ctx));
+
+	ret = mkdir_if_needed(target);
+	if (ret)
+		return ret;
+
+	target_nchars = tstrlen(target);
+	ctx.target_buf = MALLOC((target_nchars + 1 + SHA1_HASH_SIZE * 2 + 1) *
+				sizeof(tchar));
+	if (!ctx.target_buf)
+		return WIMLIB_ERR_NOMEM;
+
+	tmemcpy(ctx.target_buf, target, target_nchars);
+	ctx.target_buf[target_nchars] = OS_PREFERRED_PATH_SEPARATOR;
+	ctx.filename_ptr = &ctx.target_buf[target_nchars + 1];
+	ctx.progfunc = progfunc;
+	ctx.progctx = progctx;
+
+	ctx.progress.extract.target = target;
+	list_for_each_entry(lte, stream_list, extraction_list) {
+		ctx.progress.extract.total_bytes += lte->size;
+		ctx.progress.extract.total_streams++;
+	}
+
+	struct read_stream_list_callbacks cbs = {
+		.begin_stream      = dump_stream_begin,
+		.begin_stream_ctx  = &ctx,
+		.consume_chunk     = dump_stream_extract_chunk,
+		.consume_chunk_ctx = &ctx,
+		.end_stream        = dump_stream_end,
+		.end_stream_ctx    = &ctx,
+	};
+
+	ret = read_stream_list(stream_list,
+			       offsetof(struct wim_lookup_table_entry, extraction_list),
+			       &cbs, VERIFY_STREAM_HASHES);
+	FREE(ctx.target_buf);
+	return ret;
+}
+
+/* Dump the specified single-instance streams in a WIM file to a directory.  */
+WIMLIBAPI int
+wimlib_dump_streams(WIMStruct *wim, const u8 *stream_sha1s, size_t num_streams,
+		    const tchar *target, int extract_flags)
+{
+	const u8 *hashptr;
+	const u8 *hashend;
+
+	LIST_HEAD(stream_list);
+
+	if (!wim || !target || !*target)
+		return WIMLIB_ERR_INVALID_PARAM;
+
+	if (num_streams && !stream_sha1s)
+		return WIMLIB_ERR_INVALID_PARAM;
+
+	if (extract_flags)
+		return WIMLIB_ERR_INVALID_PARAM;
+
+	hashptr = stream_sha1s;
+	hashend = hashptr + (num_streams * SHA1_HASH_SIZE);
+
+	for (; hashptr != hashend; hashptr += SHA1_HASH_SIZE) {
+
+		struct wim_lookup_table_entry *lte;
+
+		lte = lookup_stream(wim->lookup_table, hashptr);
+		if (!lte) {
+			if (wimlib_print_errors) {
+				tchar hashstr[SHA1_HASH_SIZE * 2 + 1];
+				sprint_hash(hashptr, hashstr);
+				ERROR("Stream SHA1=%"TS" not found", hashstr);
+			}
+			return WIMLIB_ERR_RESOURCE_NOT_FOUND;
+		}
+		list_add(&lte->extraction_list, &stream_list);
+	}
+
+	return dump_stream_list(&stream_list, target,
+				wim->progfunc, wim->progctx);
+}
+
+static int
+append_lte_to_list(struct wim_lookup_table_entry *lte, void *_list)
+{
+	list_add(&lte->extraction_list, (struct list_head *)_list);
+	return 0;
+}
+
+/* Dump all single-instance streams in a WIM file to a directory.  */
+WIMLIBAPI int
+wimlib_dump_all_streams(WIMStruct *wim, const tchar *target, int extract_flags)
+{
+	LIST_HEAD(stream_list);
+
+	if (!wim || !target || !*target)
+		return WIMLIB_ERR_INVALID_PARAM;
+
+	if (extract_flags)
+		return WIMLIB_ERR_INVALID_PARAM;
+
+	for_lookup_table_entry(wim->lookup_table, append_lte_to_list, &stream_list);
+
+	return dump_stream_list(&stream_list, target,
+				wim->progfunc, wim->progctx);
+}

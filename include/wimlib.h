@@ -2662,6 +2662,77 @@ wimlib_delete_path(WIMStruct *wim, int image,
 		   const wimlib_tchar *path, int delete_flags);
 
 /**
+ * @ingroup G_extracting_wims
+ *
+ * Extract single-instance streams identified by SHA-1 message digest.
+ *
+ * @param wim
+ *	The ::WIMStruct for the WIM file from which to extract the streams.
+ *
+ * @param stream_sha1s
+ *	An array of SHA-1 message digests of streams to extract.  Each SHA-1
+ *	message digest is 20 bytes.
+ *
+ * @param num_streams
+ *	The number of streams to extract --- that is, the number of SHA-1
+ *	message digests specified in @p stream_sha1s.
+ *
+ * @param target
+ *	The directory to which to extract the streams.  Each stream will be
+ *	extracted to a file in this directory named after the hexadecimal
+ *	representation of its SHA-1 message digest.
+ *
+ * @param extract_flags
+ *	Reserved; must be 0.
+ *
+ * @return 0 on success; nonzero on failure.  Some of the possible error codes
+ * are:
+ *
+ * @retval ::WIMLIB_ERR_DECOMPRESSION
+ *	The compressed data of one of the streams was invalid.
+ * @retval ::WIMLIB_ERR_INVALID_RESOURCE_HASH
+ *	One of the streams was corrupted.
+ * @retval ::WIMLIB_ERR_RESOURCE_NOT_FOUND
+ *	One of the specified streams could not be found in the WIM.
+ * @retval ::WIMLIB_ERR_WRITE
+ *	Failed to write data to one of the stream dump files.
+ */
+extern int
+wimlib_dump_streams(WIMStruct *wim,
+		    const uint8_t *stream_sha1s, size_t num_streams,
+		    const wimlib_tchar *target, int extract_flags);
+
+/**
+ * @ingroup G_extracting_wims
+ *
+ * Extract all single-instance streams contained in the specified WIM file.
+ *
+ * @param wim
+ *	The ::WIMStruct for the WIM file from which to extract the streams.
+ *
+ * @param target
+ *	The directory to which to extract the streams.  Each stream will be
+ *	extracted to a file in this directory named after the hexadecimal
+ *	representation of its SHA-1 message digest.
+ *
+ * @param extract_flags
+ *	Reserved; must be 0.
+ *
+ * @return 0 on success; nonzero on failure.  Some of the possible error codes
+ * are:
+ *
+ * @retval ::WIMLIB_ERR_DECOMPRESSION
+ *	The compressed data of one of the streams was invalid.
+ * @retval ::WIMLIB_ERR_INVALID_RESOURCE_HASH
+ *	One of the streams was corrupted.
+ * @retval ::WIMLIB_ERR_WRITE
+ *	Failed to write data to one of the stream dump files.
+ */
+extern int
+wimlib_dump_all_streams(WIMStruct *wim, const wimlib_tchar *target,
+			int extract_flags);
+
+/**
  * @ingroup G_modifying_wims
  *
  * Exports an image, or all the images, from a WIM file, into another WIM file.
