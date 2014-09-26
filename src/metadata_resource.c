@@ -139,7 +139,7 @@ read_metadata_resource(WIMStruct *wim, struct wim_image_metadata *imd)
 	image_for_each_inode(inode, imd)
 		check_inode(inode, sd);
 
-	for_dentry_in_tree(root, dump_raw, NULL);
+	/*for_dentry_in_tree(root, dump_raw, NULL);*/
 
 	/* Success; fill in the image_metadata structure.  */
 	imd->root_dentry = root;

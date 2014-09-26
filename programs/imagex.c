@@ -2460,12 +2460,212 @@ print_lookup_table(WIMStruct *wim)
 	wimlib_iterate_lookup_table(wim, 0, print_resource, NULL);
 }
 
+/* Note: the data types in this header are prefixed with wimlib_ to avoid
+ * conflicts with the same types being defined in the libntfs-3g headers.  */
+
+/* Windows NT security descriptor, in self-relative format  */
+typedef struct {
+	/* Security descriptor revision; should be 1  */
+	uint8_t revision;
+
+	/* Padding  */
+	uint8_t sbz1;
+
+	/* Bitwise OR of flags defined below, such as SE_DACL_PRESENT  */
+	uint16_t control;
+
+	/* Offset of owenr SID structure in the security descriptor  */
+	uint32_t owner_offset;
+
+	/* Offset of group SID structure in the security descriptor  */
+	uint32_t group_offset;
+
+	/* Offset of System Access Control List (SACL) in security descriptor,
+	 * or 0 if no SACL is present  */
+	uint32_t sacl_offset;
+
+	/* Offset of Discretionary Access Control List (DACL) in security
+	 * descriptor, or 0 if no DACL is present  */
+	uint32_t dacl_offset;
+} wimlib_SECURITY_DESCRIPTOR_RELATIVE;
+
+#define SE_OWNER_DEFAULTED		0x0001
+#define SE_GROUP_DEFAULTED		0x0002
+#define SE_DACL_PRESENT			0x0004
+#define SE_DACL_DEFAULTED		0x0008
+#define SE_SACL_PRESENT			0x0010
+#define SE_SACL_DEFAULTED		0x0020
+#define SE_DACL_AUTO_INHERIT_REQ		0x0100
+#define SE_SACL_AUTO_INHERIT_REQ		0x0200
+#define SE_DACL_AUTO_INHERITED		0x0400
+#define SE_SACL_AUTO_INHERITED		0x0800
+#define SE_DACL_PROTECTED		0x1000
+#define SE_SACL_PROTECTED		0x2000
+#define SE_RM_CONTROL_VALID		0x4000
+#define SE_SELF_RELATIVE			0x8000
+
+/* Header of a Windows NT access control entry  */
+typedef struct {
+	/* Type of ACE  */
+	uint8_t type;
+
+	/* Bitwise OR of inherit ACE flags  */
+	uint8_t flags;
+
+	/* Size of the access control entry, including this header  */
+	uint16_t size;
+} wimlib_ACE_HEADER;
+
+/* Windows NT access control entry to grant rights to a user or group  */
+typedef struct {
+	wimlib_ACE_HEADER hdr;
+	uint32_t mask;
+	uint32_t sid_start;
+} wimlib_ACCESS_ALLOWED_ACE;
+
+/* Windows NT access control entry to deny rights to a user or group  */
+typedef struct {
+	wimlib_ACE_HEADER hdr;
+	uint32_t mask;
+	uint32_t sid_start;
+} wimlib_ACCESS_DENIED_ACE;
+
+/* Windows NT access control entry to audit access to the object  */
+typedef struct {
+	wimlib_ACE_HEADER hdr;
+	uint32_t mask;
+	uint32_t sid_start;
+} wimlib_SYSTEM_AUDIT_ACE;
+
+
+/* Header of a Windows NT access control list  */
+typedef struct {
+	/* ACL_REVISION or ACL_REVISION_DS */
+	uint8_t revision;
+
+	/* padding  */
+	uint8_t sbz1;
+
+	/* Total size of the ACL, including all access control entries  */
+	uint16_t acl_size;
+
+	/* Number of access control entry structures that follow the ACL
+	 * structure  */
+	uint16_t ace_count;
+
+	/* padding  */
+	uint16_t sbz2;
+} wimlib_ACL;
+
+/* Windows NT security identifier (user or group)  */
+typedef struct {
+
+	uint8_t  revision;
+	uint8_t  sub_authority_count;
+
+	/* Identifies the authority that issued the SID  */
+	uint8_t  identifier_authority[6];
+
+	uint32_t sub_authority[];
+} wimlib_SID;
+
 static void
-default_print_security_descriptor(const uint8_t *sd, size_t size)
+print_sid(const wimlib_SID *sid)
+{
+	print_byte_field((const void *)sid, 8 + sid->sub_authority_count * 4);
+}
+
+static void
+print_access_allowed_ace(const wimlib_ACCESS_ALLOWED_ACE *ace)
+{
+	printf("Mask=%x SID={", ace->mask);
+	print_sid((const void *)&ace->sid_start);
+	printf("}");
+}
+
+static void
+print_ace(const wimlib_ACE_HEADER *ace)
+{
+	if (ace->type == 0) {
+		printf("ALLOW ");
+		print_access_allowed_ace((const wimlib_ACCESS_ALLOWED_ACE *)ace);
+	} else if (ace->type == 1) {
+		printf("DENY ");
+		print_access_allowed_ace((const wimlib_ACCESS_ALLOWED_ACE *)ace);
+	} else if (ace->type == 17) {
+		printf("MANDATORY LABEL ");
+		print_access_allowed_ace((const wimlib_ACCESS_ALLOWED_ACE *)ace);
+	}
+}
+
+static void
+print_acl(const wimlib_ACL *acl)
+{
+	printf("Revision=%u Padding=%u,%u AceCount=%u",
+	       acl->revision, acl->sbz1, acl->sbz2, acl->ace_count);
+	const void *p = acl + 1;
+	for (unsigned i = 0; i < acl->ace_count; i++) {
+		printf("\n\t\t(");
+		print_ace(p);
+		printf(")");
+		p += ((const wimlib_ACE_HEADER *)p)->size;
+	}
+}
+
+#define TESTFLAG(flag) ({ if (sd->control & flag) printf(#flag " "); })
+	
+
+static void
+default_print_security_descriptor(const uint8_t *_sd, size_t size)
 {
 	tprintf(T("Security Descriptor = "));
-	print_byte_field(sd, size);
+	/*print_byte_field(sd, size);*/
+	const wimlib_SECURITY_DESCRIPTOR_RELATIVE *sd = (const void *)_sd;
+	printf("\tRevision=%u\n", sd->revision);
+	printf("\tPadding=%u\n", sd->sbz1);
+	printf("\tControl=%#x", sd->control);
+	if (sd->control) {
+		printf(" (");
+		TESTFLAG(SE_OWNER_DEFAULTED);
+		TESTFLAG(SE_GROUP_DEFAULTED);
+		TESTFLAG(SE_DACL_PRESENT);
+		TESTFLAG(SE_DACL_DEFAULTED);
+		TESTFLAG(SE_SACL_PRESENT);
+		TESTFLAG(SE_SACL_DEFAULTED);
+		TESTFLAG(SE_DACL_AUTO_INHERIT_REQ);
+		TESTFLAG(SE_SACL_AUTO_INHERIT_REQ);
+		TESTFLAG(SE_DACL_AUTO_INHERITED);
+		TESTFLAG(SE_SACL_AUTO_INHERITED);
+		TESTFLAG(SE_DACL_PROTECTED);
+		TESTFLAG(SE_SACL_PROTECTED);
+		TESTFLAG(SE_RM_CONTROL_VALID);
+		TESTFLAG(SE_SELF_RELATIVE);
+		printf(")");
+	}
+	printf("\n");
+
+	printf("\tOwner offset=%u\n", sd->owner_offset);
+	printf("\tGroup offset=%u\n", sd->group_offset);
+	printf("\tDACL offset=%u\n", sd->dacl_offset);
+	printf("\tSACL offset=%u\n", sd->sacl_offset);
+	printf("\tOwner:");
+	print_sid((const void *)(_sd + sd->owner_offset));
+	printf("\n");
+	printf("\tGroup:");
+	print_sid((const void *)(_sd + sd->group_offset));
+	printf("\n");
+	if (sd->dacl_offset) {
+		printf("\tDACL:");
+		print_acl((const void *)(_sd + sd->dacl_offset));
+		printf("\n");
+	}
+	if (sd->sacl_offset) {
+		printf("\tSACL:");
+		print_acl((const void *)(_sd + sd->sacl_offset));
+		printf("\n");
+	}
 	tputchar(T('\n'));
+
 }
 
 static void
