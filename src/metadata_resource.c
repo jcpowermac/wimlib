@@ -76,6 +76,7 @@ read_metadata_resource(WIMStruct *wim, struct wim_image_metadata *imd)
 
 	struct wim_lookup_table_entry l;
 
+#if 0
 	if (getenv("wimgapi")) {
 		l.size = 27207624;
 		l.file_on_disk = "/home/e/tmp-disk/wimgapi.metadata.bin";
@@ -87,6 +88,9 @@ read_metadata_resource(WIMStruct *wim, struct wim_image_metadata *imd)
 	l.dont_check_metadata_hash = 1;
 
 	metadata_lte = &l;
+#else
+	metadata_lte = imd->metadata_lte;
+#endif
 
 	DEBUG("Reading metadata resource (size=%"PRIu64").", metadata_lte->size);
 

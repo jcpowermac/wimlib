@@ -2595,6 +2595,8 @@ print_ace(const wimlib_ACE_HEADER *ace)
 	} else if (ace->type == 17) {
 		printf("MANDATORY LABEL ");
 		print_access_allowed_ace((const wimlib_ACCESS_ALLOWED_ACE *)ace);
+	} else {
+		printf("Type %u", ace->type);
 	}
 }
 
