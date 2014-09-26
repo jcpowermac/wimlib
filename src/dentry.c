@@ -220,6 +220,23 @@ struct wim_dentry_on_disk {
 	 * aligned boundary.  They are not counted in the 'length' field of the
 	 * dentry.  */
 
+int
+dump_raw(struct wim_dentry *d, void *_ignore)
+{
+	printf("%s\n", dentry_full_path(d));
+
+	wimlib_assert(d->raw_data_size >= sizeof(struct wim_dentry_on_disk));
+	struct wim_dentry_on_disk *p = (struct wim_dentry_on_disk *)d->raw_data;
+	p->length = 0xdeadbeefdeadbeef;
+	p->security_id = 0xcafebabe;
+	p->subdir_offset = 0xdeadbeef;
+	p->nonreparse.hard_link_group_id = 0xdeadbeefdeadbeef;
+
+	print_byte_field(d->raw_data, d->raw_data_size, stdout);
+	printf("\n");
+	return 0;
+}
+
 /* Calculate the minimum unaligned length, in bytes, of an on-disk WIM dentry
  * that has names of the specified lengths.  (Zero length means the
  * corresponding name actually does not exist.)  The returned value excludes
@@ -1275,6 +1292,9 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	ret = new_dentry_with_timeless_inode(NULL, &dentry);
 	if (ret)
 		return ret;
+
+	dentry->raw_data = memdup(&buf[offset], length);
+	dentry->raw_data_size = length;
 
 	inode = dentry->d_inode;
 

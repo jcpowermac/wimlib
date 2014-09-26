@@ -31,6 +31,19 @@
 #include "wimlib/security.h"
 #include "wimlib/write.h"
 
+extern int
+dump_raw(struct wim_dentry *d, void *_ignore);
+#if 0
+{
+	printf("%s\n", dentry_full_path(d));
+	print_byte_field(d->raw_data, d->raw_data_size, stdout);
+	printf("\n");
+	return 0;
+}
+#endif
+
+#include <stdlib.h>
+
 /*
  * Reads and parses a metadata resource for an image in the WIM file.
  *
@@ -61,7 +74,19 @@ read_metadata_resource(WIMStruct *wim, struct wim_image_metadata *imd)
 	struct wim_dentry *root;
 	struct wim_inode *inode;
 
-	metadata_lte = imd->metadata_lte;
+	struct wim_lookup_table_entry l;
+
+	if (getenv("wimgapi")) {
+		l.size = 27207624;
+		l.file_on_disk = "/home/e/tmp-disk/wimgapi.metadata.bin";
+	} else {
+		l.size = 26155816;
+		l.file_on_disk = "/home/e/tmp-disk/wimlib.metadata.bin";
+	}
+	l.resource_location = RESOURCE_IN_FILE_ON_DISK;
+	l.dont_check_metadata_hash = 1;
+
+	metadata_lte = &l;
 
 	DEBUG("Reading metadata resource (size=%"PRIu64").", metadata_lte->size);
 
@@ -113,6 +138,8 @@ read_metadata_resource(WIMStruct *wim, struct wim_image_metadata *imd)
 
 	image_for_each_inode(inode, imd)
 		check_inode(inode, sd);
+
+	for_dentry_in_tree(root, dump_raw, NULL);
 
 	/* Success; fill in the image_metadata structure.  */
 	imd->root_dentry = root;

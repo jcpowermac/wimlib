@@ -45,6 +45,10 @@ struct wim_lookup_table;
  * dentry_tree_fix_inodes() in inode_fixup.c.)
  */
 struct wim_dentry {
+
+	void * raw_data;
+	size_t raw_data_size;
+
 	/* Pointer to the inode for this dentry.  This will contain some
 	 * information that was factored out of the on-disk WIM dentry as common
 	 * to all dentries in a hard link group.  */
