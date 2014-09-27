@@ -30,6 +30,7 @@
 #include "wimlib/resource.h"
 #include "wimlib/security.h"
 #include "wimlib/write.h"
+#include <sys/stat.h>
 
 extern int
 dump_raw(struct wim_dentry *d, void *_ignore);
@@ -76,13 +77,14 @@ read_metadata_resource(WIMStruct *wim, struct wim_image_metadata *imd)
 
 	struct wim_lookup_table_entry l;
 
-#if 0
-	if (getenv("wimgapi")) {
-		l.size = 27207624;
-		l.file_on_disk = "/home/e/tmp-disk/wimgapi.metadata.bin";
-	} else {
-		l.size = 26155816;
-		l.file_on_disk = "/home/e/tmp-disk/wimlib.metadata.bin";
+#if 1
+	l.file_on_disk = getenv("METADATA");
+	wimlib_assert(l.file_on_disk);
+	{
+		struct stat st;
+		int ret = stat(l.file_on_disk, &st);
+		wimlib_assert(ret == 0);
+		l.size = st.st_size;
 	}
 	l.resource_location = RESOURCE_IN_FILE_ON_DISK;
 	l.dont_check_metadata_hash = 1;
