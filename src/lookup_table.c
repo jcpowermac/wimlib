@@ -1,8 +1,9 @@
 /*
  * lookup_table.c
  *
- * Lookup table, implemented as a hash table, that maps SHA1 message digests to
- * data streams; plus code to read and write the corresponding on-disk data.
+ * Lookup table, implemented as a balanced binary search tree, that maps SHA1
+ * message digests to data streams; plus code to read and write the
+ * corresponding on-disk data.
  */
 
 /*
@@ -47,41 +48,19 @@
  * This is a logical mapping from SHA1 message digests to the data streams
  * contained in a WIM.
  *
- * Here it is implemented as a hash table.
+ * Here it is implemented as a balanced binary search tree.
  *
  * Note: Everything will break horribly if there is a SHA1 collision.
  */
 struct wim_lookup_table {
-	struct hlist_head *array;
+	struct avl_tree_node *root;
 	size_t num_entries;
-	size_t capacity;
 };
 
 struct wim_lookup_table *
 new_lookup_table(size_t capacity)
 {
-	struct wim_lookup_table *table;
-	struct hlist_head *array;
-
-	table = MALLOC(sizeof(struct wim_lookup_table));
-	if (table == NULL)
-		goto oom;
-
-	array = CALLOC(capacity, sizeof(array[0]));
-	if (array == NULL) {
-		FREE(table);
-		goto oom;
-	}
-
-	table->num_entries = 0;
-	table->capacity = capacity;
-	table->array = array;
-	return table;
-
-oom:
-	ERROR("Failed to allocate memory for lookup table "
-	      "with capacity %zu", capacity);
-	return NULL;
+	return CALLOC(1, sizeof(struct wim_lookup_table));
 }
 
 static int
@@ -96,7 +75,6 @@ free_lookup_table(struct wim_lookup_table *table)
 {
 	if (table) {
 		for_lookup_table_entry(table, do_free_lookup_table_entry, NULL);
-		FREE(table->array);
 		FREE(table);
 	}
 }
@@ -298,50 +276,35 @@ lte_decrement_num_opened_fds(struct wim_lookup_table_entry *lte)
 }
 #endif
 
-static void
-lookup_table_insert_raw(struct wim_lookup_table *table,
-			struct wim_lookup_table_entry *lte)
-{
-	size_t i = lte->hash_short % table->capacity;
+#define AVL_NODE_TO_LTE(avl_node) \
+	avl_tree_entry(avl_node, struct wim_lookup_table_entry, index_node)
 
-	hlist_add_head(&lte->hash_list, &table->array[i]);
+static int
+_avl_cmp_lte_hash(const struct avl_tree_node *node1,
+		  const struct avl_tree_node *node2)
+{
+	return hashes_cmp(AVL_NODE_TO_LTE(node1)->hash,
+			  AVL_NODE_TO_LTE(node2)->hash);
 }
 
-static void
-enlarge_lookup_table(struct wim_lookup_table *table)
+static int
+_avl_cmp_hash(const void *arg1,
+	      const struct avl_tree_node *node2)
 {
-	size_t old_capacity, new_capacity;
-	struct hlist_head *old_array, *new_array;
-	struct wim_lookup_table_entry *lte;
-	struct hlist_node *cur, *tmp;
-	size_t i;
-
-	old_capacity = table->capacity;
-	new_capacity = old_capacity * 2;
-	new_array = CALLOC(new_capacity, sizeof(struct hlist_head));
-	if (new_array == NULL)
-		return;
-	old_array = table->array;
-	table->array = new_array;
-	table->capacity = new_capacity;
-
-	for (i = 0; i < old_capacity; i++) {
-		hlist_for_each_entry_safe(lte, cur, tmp, &old_array[i], hash_list) {
-			hlist_del(&lte->hash_list);
-			lookup_table_insert_raw(table, lte);
-		}
-	}
-	FREE(old_array);
+	return hashes_cmp((const u8 *)arg1,
+			  AVL_NODE_TO_LTE(node2)->hash);
 }
 
 /* Inserts an entry into the lookup table.  */
-void
+bool
 lookup_table_insert(struct wim_lookup_table *table,
 		    struct wim_lookup_table_entry *lte)
 {
-	lookup_table_insert_raw(table, lte);
-	if (++table->num_entries > table->capacity)
-		enlarge_lookup_table(table);
+	if (avl_tree_insert(&table->root, &lte->index_node,
+			    _avl_cmp_lte_hash))
+		return false;
+	table->num_entries++;
+	return true;
 }
 
 /* Unlinks a lookup table entry from the table; does not free it.  */
@@ -351,8 +314,7 @@ lookup_table_unlink(struct wim_lookup_table *table,
 {
 	wimlib_assert(!lte->unhashed);
 	wimlib_assert(table->num_entries != 0);
-
-	hlist_del(&lte->hash_list);
+	avl_tree_remove(&table->root, &lte->index_node);
 	table->num_entries--;
 }
 
@@ -361,15 +323,13 @@ lookup_table_unlink(struct wim_lookup_table *table,
 struct wim_lookup_table_entry *
 lookup_stream(const struct wim_lookup_table *table, const u8 hash[])
 {
-	size_t i;
-	struct wim_lookup_table_entry *lte;
-	struct hlist_node *pos;
+	struct avl_tree_node *res;
 
-	i = *(size_t*)hash % table->capacity;
-	hlist_for_each_entry(lte, pos, &table->array[i], hash_list)
-		if (hashes_equal(hash, lte->hash))
-			return lte;
-	return NULL;
+	res = avl_tree_lookup(table->root, hash, _avl_cmp_hash);
+	if (!res)
+		return NULL;
+
+	return AVL_NODE_TO_LTE(res);
 }
 
 /* Calls a function on all the entries in the WIM lookup table.  Stop early and
@@ -380,17 +340,14 @@ for_lookup_table_entry(struct wim_lookup_table *table,
 		       void *arg)
 {
 	struct wim_lookup_table_entry *lte;
-	struct hlist_node *pos, *tmp;
 	int ret;
 
-	for (size_t i = 0; i < table->capacity; i++) {
-		hlist_for_each_entry_safe(lte, pos, tmp, &table->array[i],
-					  hash_list)
-		{
-			ret = visitor(lte, arg);
-			if (ret)
-				return ret;
-		}
+	avl_tree_for_each_in_postorder(lte, table->root,
+				       struct wim_lookup_table_entry, index_node)
+	{
+		ret = visitor(lte, arg);
+		if (ret)
+			return ret;
 	}
 	return 0;
 }
@@ -839,7 +796,7 @@ finish_subpacks(struct wim_resource_spec **subpacks, size_t num_subpacks)
  * stream that the WIM file contains, along with its location and SHA1 message
  * digest.
  *
- * Saves lookup table entries for non-metadata streams in a hash table (set to
+ * Saves lookup table entries for non-metadata streams in a map (set to
  * wim->lookup_table), and saves the metadata entry for each image in a special
  * per-image location (the wim->image_metadata array).
  *
@@ -892,8 +849,8 @@ read_wim_lookup_table(WIMStruct *wim)
 	if (ret)
 		goto out;
 
-	/* Allocate a hash table to map SHA1 message digests into stream
-	 * specifications.  This is the in-memory "lookup table".  */
+	/* Allocate structure to hold the map of SHA1 message digests into
+	 * stream specifications.  This is the in-memory "lookup table".  */
 	table = new_lookup_table(num_entries * 2 + 1);
 	if (!table)
 		goto oom;
@@ -1079,15 +1036,13 @@ read_wim_lookup_table(WIMStruct *wim)
 		} else {
 			/* Lookup table entry for a non-metadata stream.  */
 
-			/* Ignore this stream if it's a duplicate.  */
-			if (lookup_stream(table, cur_entry->hash)) {
-				num_duplicate_entries++;
-				goto free_cur_entry_and_continue;
-			}
 
 			/* Insert the stream into the in-memory lookup table,
 			 * keyed by its SHA1 message digest.  */
-			lookup_table_insert(table, cur_entry);
+			if (!lookup_table_insert(table, cur_entry)) {
+				num_duplicate_entries++;
+				goto free_cur_entry_and_continue;
+			}
 		}
 
 		continue;

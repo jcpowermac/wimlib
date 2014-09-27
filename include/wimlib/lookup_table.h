@@ -1,6 +1,7 @@
 #ifndef _WIMLIB_LOOKUP_TABLE_H
 #define _WIMLIB_LOOKUP_TABLE_H
 
+#include "wimlib/avl_tree.h"
 #include "wimlib/list.h"
 #include "wimlib/resource.h"
 #include "wimlib/sha1.h"
@@ -78,8 +79,7 @@ struct stream_owner {
  * message digests to stream locations.  */
 struct wim_lookup_table_entry {
 
-	/* List node for a hash bucket of the lookup table.  */
-	struct hlist_node hash_list;
+	struct avl_tree_node index_node;
 
 	/* Uncompressed size of this stream.  */
 	u64 size;
@@ -291,7 +291,7 @@ free_lookup_table_entry(struct wim_lookup_table_entry *lte);
 
 /* Functions to insert and delete entries from a lookup table  */
 
-extern void
+extern bool
 lookup_table_insert(struct wim_lookup_table *table,
 		struct wim_lookup_table_entry *lte);
 
