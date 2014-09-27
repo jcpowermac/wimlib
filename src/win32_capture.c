@@ -1127,6 +1127,7 @@ winnt_build_dentry_tree_recursive(struct wim_dentry **root_ret,
 			      (cur_dir ? filename_nchars : full_path_nchars),
 			      FILE_READ_DATA |
 					FILE_READ_ATTRIBUTES |
+					FILE_READ_EA |
 					READ_CONTROL |
 					ACCESS_SYSTEM_SECURITY |
 					SYNCHRONIZE,
@@ -1315,6 +1316,25 @@ winnt_build_dentry_tree_recursive(struct wim_dentry **root_ret,
 					 (u32)status);
 			ret = WIMLIB_ERR_STAT;
 			goto out;
+		}
+	}
+
+	if (func_NtQueryEaFile) {
+		u8 buf[1024];
+		IO_STATUS_BLOCK iosb;
+
+		status = (*func_NtQueryEaFile)(h,
+					       &iosb,
+					       buf,
+					       sizeof(buf),
+					       FALSE,
+					       NULL,
+					       0,
+					       NULL,
+					       FALSE);
+		if (status != STATUS_NO_EAS_ON_FILE) {
+			fprintf(stderr, "%ls: status=0x%08"PRIx32" len=%"PRIu32"\n",
+				full_path, status, iosb.Information);
 		}
 	}
 

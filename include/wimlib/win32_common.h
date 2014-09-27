@@ -92,6 +92,16 @@ extern NTSTATUS (WINAPI *func_NtQueryVolumeInformationFile) (HANDLE FileHandle,
 							     ULONG Length,
 							     FS_INFORMATION_CLASS FsInformationClass);
 
+extern NTSTATUS (WINAPI *func_NtQueryEaFile)(HANDLE FileHandle,
+					     PIO_STATUS_BLOCK IoStatusBlock,
+					     PVOID Buffer,
+					     ULONG Length,
+					     BOOLEAN ReturnSingleEntry,
+					     PVOID EaList,
+					     ULONG EaListLength,
+					     PULONG EaIndex,
+					     BOOLEAN RestartScan);
+
 extern NTSTATUS (WINAPI *func_NtSetInformationFile)(HANDLE FileHandle,
 						    PIO_STATUS_BLOCK IoStatusBlock,
 						    PVOID FileInformation,

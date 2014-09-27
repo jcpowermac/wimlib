@@ -444,6 +444,16 @@ NTSTATUS (WINAPI *func_NtQueryVolumeInformationFile) (HANDLE FileHandle,
 						      ULONG Length,
 						      FS_INFORMATION_CLASS FsInformationClass);
 
+NTSTATUS (WINAPI *func_NtQueryEaFile)(HANDLE FileHandle,
+				      PIO_STATUS_BLOCK IoStatusBlock,
+				      PVOID Buffer,
+				      ULONG Length,
+				      BOOLEAN ReturnSingleEntry,
+				      PVOID EaList,
+				      ULONG EaListLength,
+				      PULONG EaIndex,
+				      BOOLEAN RestartScan);
+
 NTSTATUS (WINAPI *func_NtSetInformationFile)(HANDLE FileHandle,
 					     PIO_STATUS_BLOCK IoStatusBlock,
 					     PVOID FileInformation,
@@ -514,6 +524,7 @@ struct dll_spec ntdll_spec = {
 		DLL_SYM(NtQuerySecurityObject, true),
 		DLL_SYM(NtQueryDirectoryFile, true),
 		DLL_SYM(NtQueryVolumeInformationFile, true),
+		DLL_SYM(NtQueryEaFile, false),
 		DLL_SYM(NtSetInformationFile, true),
 		DLL_SYM(NtSetSecurityObject, true),
 		DLL_SYM(NtFsControlFile, true),
