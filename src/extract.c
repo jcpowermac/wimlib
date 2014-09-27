@@ -79,6 +79,8 @@
 	 WIMLIB_EXTRACT_FLAG_TO_STDOUT			|	\
 	 WIMLIB_EXTRACT_FLAG_REPLACE_INVALID_FILENAMES	|	\
 	 WIMLIB_EXTRACT_FLAG_ALL_CASE_CONFLICTS		|	\
+	 WIMLIB_EXTRACT_FLAG_ALL_DATA_STREAMS		|	\
+	 WIMLIB_EXTRACT_FLAG_ALL_METADATA_STREAMS	|	\
 	 WIMLIB_EXTRACT_FLAG_STRICT_TIMESTAMPS		|	\
 	 WIMLIB_EXTRACT_FLAG_STRICT_SHORT_NAMES		|	\
 	 WIMLIB_EXTRACT_FLAG_STRICT_SYMLINKS		|	\
@@ -560,6 +562,15 @@ extract_stream_list(struct apply_ctx *ctx,
 	}
 }
 
+static int
+extract_stream_to_stdout(struct wim_lookup_table_entry *stream)
+{
+	struct filedes _stdout;
+
+	filedes_init(&_stdout, STDOUT_FILENO);
+	return extract_full_stream_to_fd(stream, &_stdout);
+}
+
 /* Extract a WIM dentry to standard output.
  *
  * This obviously doesn't make sense in all cases.  We return an error if the
@@ -571,7 +582,6 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct wim_lookup_table_entry *lte;
-	struct filedes _stdout;
 
 	if (inode->i_attributes & (FILE_ATTRIBUTE_REPARSE_POINT |
 				   FILE_ATTRIBUTE_DIRECTORY))
@@ -589,8 +599,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 		return 0;
 	}
 
-	filedes_init(&_stdout, STDOUT_FILENO);
-	return extract_full_stream_to_fd(lte, &_stdout);
+	return extract_stream_to_stdout(lte);
 }
 
 static int
@@ -2059,128 +2068,116 @@ wimlib_extract_image(WIMStruct *wim, int image, const tchar *target,
 	return do_wimlib_extract_image(wim, image, target, extract_flags);
 }
 
-struct dump_stream_ctx {
-	tchar *target_buf;
-	tchar *filename_ptr;
-	struct filedes fd;
-	wimlib_progress_func_t progfunc;
-	void *progctx;
-	union wimlib_progress_info progress;
-};
-
+/* Extract a list of streams to the specified directory.
+ *
+ * This is somewhat of a hack: we generate a temporary WIM in memory so that we
+ * can just send it through the regular extraction code.  */
 static int
-dump_stream_begin(struct wim_lookup_table_entry *lte, void *_ctx)
+do_wimlib_extract_streams(struct list_head *stream_list, const tchar *target,
+			  wimlib_progress_func_t progfunc, void *progctx,
+			  int extract_flags)
 {
-	struct dump_stream_ctx *ctx = _ctx;
-	int raw_fd;
-	int open_flags;
+	WIMStruct *tmp_wim = NULL;
+	int ret;
+	struct wim_lookup_table_entry *stream;
+	tchar name_buf[SHA1_HASH_SIZE * 2 + 1];
+	struct wim_dentry *root_dentry;
+	struct wim_dentry *dentry;
+	struct wim_dentry *existing;
+	struct wim_image_metadata *imd;
+	const tchar *root_path = WIMLIB_WIM_ROOT_PATH;
 
-	sprint_hash(lte->hash, ctx->filename_ptr);
-
-	open_flags = O_WRONLY | O_CREAT | O_TRUNC | O_BINARY;
-#ifdef O_NOFOLLOW
-	open_flags |= O_NOFOLLOW;
-#endif
-
-	raw_fd = topen(ctx->target_buf, open_flags, 0644);
-	if (raw_fd < 0) {
-		ERROR_WITH_ERRNO("Can't open \"%"TS"\" for writing", ctx->target_buf);
-		return WIMLIB_ERR_OPEN;
+	if (extract_flags & WIMLIB_EXTRACT_FLAG_TO_STDOUT) {
+		struct wim_lookup_table_entry *stream;
+		list_for_each_entry(stream, stream_list, extraction_list) {
+			ret = extract_stream_to_stdout(stream);
+			if (ret)
+				goto out;
+		}
+		return 0;
 	}
 
-	filedes_init(&ctx->fd, raw_fd);
+	ret = wimlib_create_new_wim(WIMLIB_COMPRESSION_TYPE_NONE, &tmp_wim);
+	if (ret)
+		goto out;
+
+	wimlib_register_progress_function(tmp_wim, progfunc, progctx);
+
+	ret = wimlib_add_empty_image(tmp_wim, NULL, NULL);
+	if (ret)
+		goto out;
+
+	ret = select_wim_image(tmp_wim, 1);
+	if (ret)
+		goto out;
+
+	ret = new_filler_directory(&root_dentry);
+	if (ret)
+		goto out;
+
+	imd = wim_get_current_image_metadata(tmp_wim);
+
+	imd->root_dentry = root_dentry;
+
+	list_for_each_entry(stream, stream_list, extraction_list) {
+
+		sprint_hash(stream->hash, name_buf);
+
+		ret = new_dentry_with_inode(name_buf, &dentry);
+		if (ret)
+			goto out;
+
+		dentry->d_inode->i_resolved = 1;
+		dentry->d_inode->i_lte = stream;
+		stream->refcnt++;
+		list_add(&dentry->d_inode->i_list, &imd->inode_list);
+
+		existing = dentry_add_child(root_dentry, dentry);
+		wimlib_assert(!existing);
+	}
+
+	ret = do_wimlib_extract_paths(tmp_wim, 1, target, &root_path, 1,
+				      extract_flags);
+out:
+	wimlib_free(tmp_wim);
+	return ret;
+}
+
+static struct wim_lookup_table_entry *
+lookup_data_or_metadata_stream(WIMStruct *wim, const u8 *hash)
+{
+	struct wim_lookup_table_entry *stream;
+
+	stream = lookup_stream(wim->lookup_table, hash);
+	if (!stream && wim_has_metadata(wim)) {
+		for (int i = 0; i < wim->hdr.image_count; i++) {
+			if (hashes_equal(hash, wim->image_metadata[i]->
+					 		metadata_lte->hash))
+			{
+				stream = wim->image_metadata[i]->metadata_lte;
+				break;
+			}
+		}
+	}
+	return stream;
+}
+
+static int
+add_stream_to_list(struct wim_lookup_table_entry *stream, void *_list)
+{
+	list_add(&stream->extraction_list, (struct list_head *)_list);
 	return 0;
 }
 
-static int
-dump_stream_extract_chunk(const void *chunk, size_t size, void *_ctx)
-{
-	struct dump_stream_ctx *ctx = _ctx;
-	int ret;
-
-	ret = full_write(&ctx->fd, chunk, size);
-	if (ret)
-		ERROR_WITH_ERRNO("Error writing to \"%"TS"\"", ctx->target_buf);
-
-	return ret;
-}
-
-static int
-dump_stream_end(struct wim_lookup_table_entry *lte, int status, void *_ctx)
-{
-	struct dump_stream_ctx *ctx = _ctx;
-	int ret = status;
-
-	ctx->progress.extract.completed_streams++;
-	ctx->progress.extract.completed_bytes += lte->size;
-
-	if (filedes_close(&ctx->fd) && !ret)
-		ret = WIMLIB_ERR_WRITE;
-
-	if (!ret) {
-		ret = call_progress(ctx->progfunc, WIMLIB_PROGRESS_MSG_EXTRACT_STREAMS,
-				    &ctx->progress, ctx->progctx);
-	}
-
-	return ret;
-}
-
-static int
-dump_stream_list(struct list_head *stream_list, const tchar *target,
-		 wimlib_progress_func_t progfunc, void *progctx)
-{
-	struct dump_stream_ctx ctx;
-	size_t target_nchars;
-	int ret;
-	struct wim_lookup_table_entry *lte;
-
-	memset(&ctx, 0, sizeof(ctx));
-
-	ret = mkdir_if_needed(target);
-	if (ret)
-		return ret;
-
-	target_nchars = tstrlen(target);
-	ctx.target_buf = MALLOC((target_nchars + 1 + SHA1_HASH_SIZE * 2 + 1) *
-				sizeof(tchar));
-	if (!ctx.target_buf)
-		return WIMLIB_ERR_NOMEM;
-
-	tmemcpy(ctx.target_buf, target, target_nchars);
-	ctx.target_buf[target_nchars] = OS_PREFERRED_PATH_SEPARATOR;
-	ctx.filename_ptr = &ctx.target_buf[target_nchars + 1];
-	ctx.progfunc = progfunc;
-	ctx.progctx = progctx;
-
-	ctx.progress.extract.target = target;
-	list_for_each_entry(lte, stream_list, extraction_list) {
-		ctx.progress.extract.total_bytes += lte->size;
-		ctx.progress.extract.total_streams++;
-	}
-
-	struct read_stream_list_callbacks cbs = {
-		.begin_stream      = dump_stream_begin,
-		.begin_stream_ctx  = &ctx,
-		.consume_chunk     = dump_stream_extract_chunk,
-		.consume_chunk_ctx = &ctx,
-		.end_stream        = dump_stream_end,
-		.end_stream_ctx    = &ctx,
-	};
-
-	ret = read_stream_list(stream_list,
-			       offsetof(struct wim_lookup_table_entry, extraction_list),
-			       &cbs, VERIFY_STREAM_HASHES);
-	FREE(ctx.target_buf);
-	return ret;
-}
-
-/* Dump the specified single-instance streams in a WIM file to a directory.  */
+/* Extract the specified single-instance streams from a WIM to a directory.  */
 WIMLIBAPI int
-wimlib_dump_streams(WIMStruct *wim, const u8 *stream_sha1s, size_t num_streams,
-		    const tchar *target, int extract_flags)
+wimlib_extract_streams(WIMStruct *wim,
+		       const u8 *stream_sha1s, size_t num_streams,
+		       const tchar *target, int extract_flags)
 {
 	const u8 *hashptr;
 	const u8 *hashend;
+	struct wim_lookup_table_entry *stream;
 
 	LIST_HEAD(stream_list);
 
@@ -2190,53 +2187,49 @@ wimlib_dump_streams(WIMStruct *wim, const u8 *stream_sha1s, size_t num_streams,
 	if (num_streams && !stream_sha1s)
 		return WIMLIB_ERR_INVALID_PARAM;
 
-	if (extract_flags)
+	if (extract_flags & ~WIMLIB_EXTRACT_MASK_PUBLIC)
 		return WIMLIB_ERR_INVALID_PARAM;
 
-	hashptr = stream_sha1s;
-	hashend = hashptr + (num_streams * SHA1_HASH_SIZE);
+	extract_flags &= ~WIMLIB_EXTRACT_FLAG_GLOB_PATHS;
 
-	for (; hashptr != hashend; hashptr += SHA1_HASH_SIZE) {
+	if (extract_flags & (WIMLIB_EXTRACT_FLAG_ALL_DATA_STREAMS |
+			     WIMLIB_EXTRACT_FLAG_ALL_METADATA_STREAMS))
+	{
+		/* Add all the data streams.  */
+		if (extract_flags & WIMLIB_EXTRACT_FLAG_ALL_DATA_STREAMS)
+			for_lookup_table_entry(wim->lookup_table,
+					       add_stream_to_list,
+					       &stream_list);
 
-		struct wim_lookup_table_entry *lte;
+		/* Also add the metadata streams.  */
+		if ((extract_flags & WIMLIB_EXTRACT_FLAG_ALL_METADATA_STREAMS)
+		    && wim_has_metadata(wim))
+			for (int i = 0; i < wim->hdr.image_count; i++)
+				add_stream_to_list(wim->image_metadata[i]->
+						   		metadata_lte,
+						   &stream_list);
+	} else {
+		hashptr = stream_sha1s;
+		hashend = hashptr + (num_streams * SHA1_HASH_SIZE);
 
-		lte = lookup_stream(wim->lookup_table, hashptr);
-		if (!lte) {
-			if (wimlib_print_errors) {
-				tchar hashstr[SHA1_HASH_SIZE * 2 + 1];
-				sprint_hash(hashptr, hashstr);
-				ERROR("Stream SHA1=%"TS" not found", hashstr);
+		/* Look up each stream requested.  */
+		for (; hashptr != hashend; hashptr += SHA1_HASH_SIZE) {
+
+			stream = lookup_data_or_metadata_stream(wim, hashptr);
+			if (!stream) {
+				if (wimlib_print_errors) {
+					tchar hashstr[SHA1_HASH_SIZE * 2 + 1];
+					sprint_hash(hashptr, hashstr);
+					ERROR("Stream SHA1=%"TS" not found",
+					      hashstr);
+				}
+				return WIMLIB_ERR_RESOURCE_NOT_FOUND;
 			}
-			return WIMLIB_ERR_RESOURCE_NOT_FOUND;
+			add_stream_to_list(stream, &stream_list);
 		}
-		list_add(&lte->extraction_list, &stream_list);
 	}
 
-	return dump_stream_list(&stream_list, target,
-				wim->progfunc, wim->progctx);
-}
-
-static int
-append_lte_to_list(struct wim_lookup_table_entry *lte, void *_list)
-{
-	list_add(&lte->extraction_list, (struct list_head *)_list);
-	return 0;
-}
-
-/* Dump all single-instance streams in a WIM file to a directory.  */
-WIMLIBAPI int
-wimlib_dump_all_streams(WIMStruct *wim, const tchar *target, int extract_flags)
-{
-	LIST_HEAD(stream_list);
-
-	if (!wim || !target || !*target)
-		return WIMLIB_ERR_INVALID_PARAM;
-
-	if (extract_flags)
-		return WIMLIB_ERR_INVALID_PARAM;
-
-	for_lookup_table_entry(wim->lookup_table, append_lte_to_list, &stream_list);
-
-	return dump_stream_list(&stream_list, target,
-				wim->progfunc, wim->progctx);
+	/* Extract the streams.  */
+	return do_wimlib_extract_streams(&stream_list, target, wim->progfunc,
+					 wim->progctx, extract_flags);
 }

@@ -1879,8 +1879,11 @@ typedef int (*wimlib_iterate_lookup_table_callback_t)(const struct wimlib_resour
  * only allows the Administrator to create symbolic links.  */
 #define WIMLIB_EXTRACT_FLAG_STRICT_SYMLINKS             0x00008000
 
-/** Reserved for future use.  */
-#define WIMLIB_EXTRACT_FLAG_RESUME			0x00010000
+/** wimlib_extract_streams(): extract all data streams.  */
+#define WIMLIB_EXTRACT_FLAG_ALL_DATA_STREAMS		0x00010000
+
+/** wimlib_extract_streams(): extract all metadata streams.  */
+#define WIMLIB_EXTRACT_FLAG_ALL_METADATA_STREAMS	0x00020000
 
 /** For wimlib_extract_paths() and wimlib_extract_pathlist() only:  Treat the
  * paths to extract as wildcard patterns ("globs") which may contain the
@@ -2666,6 +2669,9 @@ wimlib_delete_path(WIMStruct *wim, int image,
  *
  * Extract single-instance streams identified by SHA-1 message digest.
  *
+ * This is a special-purpose function usually used for debugging.  You may be looking for
+ * wimlib_extract_paths().
+ *
  * @param wim
  *	The ::WIMStruct for the WIM file from which to extract the streams.
  *
@@ -2695,42 +2701,12 @@ wimlib_delete_path(WIMStruct *wim, int image,
  * @retval ::WIMLIB_ERR_RESOURCE_NOT_FOUND
  *	One of the specified streams could not be found in the WIM.
  * @retval ::WIMLIB_ERR_WRITE
- *	Failed to write data to one of the stream dump files.
+ *	Failed to write data to one of the files.
  */
 extern int
-wimlib_dump_streams(WIMStruct *wim,
-		    const uint8_t *stream_sha1s, size_t num_streams,
-		    const wimlib_tchar *target, int extract_flags);
-
-/**
- * @ingroup G_extracting_wims
- *
- * Extract all single-instance streams contained in the specified WIM file.
- *
- * @param wim
- *	The ::WIMStruct for the WIM file from which to extract the streams.
- *
- * @param target
- *	The directory to which to extract the streams.  Each stream will be
- *	extracted to a file in this directory named after the hexadecimal
- *	representation of its SHA-1 message digest.
- *
- * @param extract_flags
- *	Reserved; must be 0.
- *
- * @return 0 on success; nonzero on failure.  Some of the possible error codes
- * are:
- *
- * @retval ::WIMLIB_ERR_DECOMPRESSION
- *	The compressed data of one of the streams was invalid.
- * @retval ::WIMLIB_ERR_INVALID_RESOURCE_HASH
- *	One of the streams was corrupted.
- * @retval ::WIMLIB_ERR_WRITE
- *	Failed to write data to one of the stream dump files.
- */
-extern int
-wimlib_dump_all_streams(WIMStruct *wim, const wimlib_tchar *target,
-			int extract_flags);
+wimlib_extract_streams(WIMStruct *wim,
+		       const uint8_t *stream_sha1s, size_t num_streams,
+		       const wimlib_tchar *target, int extract_flags);
 
 /**
  * @ingroup G_modifying_wims

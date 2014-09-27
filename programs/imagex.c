@@ -155,6 +155,8 @@ enum {
 	IMAGEX_DEST_DIR_OPTION,
 	IMAGEX_DETAILED_OPTION,
 	IMAGEX_DUMP_STREAM_OPTION,
+	IMAGEX_DUMP_DATA_STREAMS_OPTION,
+	IMAGEX_DUMP_METADATA_STREAMS_OPTION,
 	IMAGEX_DUMP_ALL_STREAMS_OPTION,
 	IMAGEX_EXTRACT_XML_OPTION,
 	IMAGEX_FLAGS_OPTION,
@@ -181,7 +183,6 @@ enum {
 	IMAGEX_RECOMPRESS_OPTION,
 	IMAGEX_RECURSIVE_OPTION,
 	IMAGEX_REF_OPTION,
-	IMAGEX_RESUME_OPTION,
 	IMAGEX_RPFIX_OPTION,
 	IMAGEX_SOFT_OPTION,
 	IMAGEX_SOLID_OPTION,
@@ -213,9 +214,6 @@ static const struct option apply_options[] = {
 	{T("rpfix"),       no_argument,       NULL, IMAGEX_RPFIX_OPTION},
 	{T("norpfix"),     no_argument,       NULL, IMAGEX_NORPFIX_OPTION},
 	{T("include-invalid-names"), no_argument,       NULL, IMAGEX_INCLUDE_INVALID_NAMES_OPTION},
-
-	/* --resume is undocumented for now as it needs improvement.  */
-	{T("resume"),      no_argument,       NULL, IMAGEX_RESUME_OPTION},
 	{T("wimboot"),     no_argument,       NULL, IMAGEX_WIMBOOT_OPTION},
 	{NULL, 0, NULL, 0},
 };
@@ -309,7 +307,9 @@ static const struct option extract_options[] = {
 	{T("nullglob"),     no_argument,      NULL, IMAGEX_NULLGLOB_OPTION},
 	{T("preserve-dir-structure"), no_argument, NULL, IMAGEX_PRESERVE_DIR_STRUCTURE_OPTION},
 	{T("wimboot"),     no_argument,       NULL, IMAGEX_WIMBOOT_OPTION},
-	{T("dump-stream"), required_argument,      NULL, IMAGEX_DUMP_STREAM_OPTION},
+	{T("dump-stream"), required_argument,     NULL, IMAGEX_DUMP_STREAM_OPTION},
+	{T("dump-data-streams"), no_argument,     NULL, IMAGEX_DUMP_DATA_STREAMS_OPTION},
+	{T("dump-metadata-streams"), no_argument, NULL, IMAGEX_DUMP_METADATA_STREAMS_OPTION},
 	{T("dump-all-streams"), no_argument,      NULL, IMAGEX_DUMP_ALL_STREAMS_OPTION},
 	{NULL, 0, NULL, 0},
 };
@@ -1617,9 +1617,6 @@ imagex_apply(int argc, tchar **argv, int cmd)
 		case IMAGEX_INCLUDE_INVALID_NAMES_OPTION:
 			extract_flags |= WIMLIB_EXTRACT_FLAG_REPLACE_INVALID_FILENAMES;
 			extract_flags |= WIMLIB_EXTRACT_FLAG_ALL_CASE_CONFLICTS;
-			break;
-		case IMAGEX_RESUME_OPTION:
-			extract_flags |= WIMLIB_EXTRACT_FLAG_RESUME;
 			break;
 		case IMAGEX_WIMBOOT_OPTION:
 			extract_flags |= WIMLIB_EXTRACT_FLAG_WIMBOOT;
@@ -3010,8 +3007,15 @@ imagex_extract(int argc, tchar **argv, int cmd)
 		case IMAGEX_WIMBOOT_OPTION:
 			extract_flags |= WIMLIB_EXTRACT_FLAG_WIMBOOT;
 			break;
+		case IMAGEX_DUMP_DATA_STREAMS_OPTION:
+			extract_flags |= WIMLIB_EXTRACT_FLAG_ALL_DATA_STREAMS;
+			break;
+		case IMAGEX_DUMP_METADATA_STREAMS_OPTION:
+			extract_flags |= WIMLIB_EXTRACT_FLAG_ALL_METADATA_STREAMS;
+			break;
 		case IMAGEX_DUMP_ALL_STREAMS_OPTION:
-			dump_all_streams = true;
+			extract_flags |= WIMLIB_EXTRACT_FLAG_ALL_DATA_STREAMS |
+					 WIMLIB_EXTRACT_FLAG_ALL_METADATA_STREAMS;
 			break;
 		case IMAGEX_DUMP_STREAM_OPTION:
 			stream_to_dump = optarg;
@@ -3023,23 +3027,33 @@ imagex_extract(int argc, tchar **argv, int cmd)
 	argc -= optind;
 	argv += optind;
 
-	if (argc == 1 && (dump_all_streams || stream_to_dump)) {
+	if (stream_to_dump ||
+	    (extract_flags & (WIMLIB_EXTRACT_FLAG_ALL_DATA_STREAMS |
+			      WIMLIB_EXTRACT_FLAG_ALL_METADATA_STREAMS)))
+	{
+		uint8_t hash[20];
+		unsigned num_hashes = 0;
+
+		if (argc != 1) {
+			imagex_error(T("Can't specify an image in combination "
+				       "with any of the \"dump streams\" "
+				       "options"));
+			goto out_err;
+		}
+
 		ret = wimlib_open_wim_with_progress(argv[0], open_flags, &wim,
 						    imagex_progress_func, NULL);
 		if (ret)
 			goto out_free_refglobs;
 
-		if (dump_all_streams) {
-			ret = wimlib_dump_all_streams(wim, dest_dir, 0);
-		} else {
-			uint8_t hash[20];
-
+		if (stream_to_dump) {
 			ret = parse_sha1(stream_to_dump, hash);
 			if (ret)
 				goto out_wimlib_free;
-
-			ret = wimlib_dump_streams(wim, hash, 1, dest_dir, 0);
+			num_hashes++;
 		}
+		ret = wimlib_extract_streams(wim, hash, num_hashes, dest_dir,
+					     extract_flags);
 		goto out_wimlib_free;
 	}
 
