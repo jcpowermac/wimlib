@@ -75,25 +75,123 @@
 /* This value is chosen for fast decompression.  */
 #define XPRESS_TABLEBITS 12
 
-/* Decode the matches and literal bytes in a region of XPRESS-encoded data.  */
+typedef unsigned int bitbuf_t;
+#define BITBUF_NBITS (8 * sizeof(bitbuf_t))
+
+#define ENSURE_BITS(n)							\
+({									\
+	if (bitsleft < (n)) {						\
+		if (likely(in_end - in_next >= 2)) {			\
+			bitbuf |=					\
+ 				(bitbuf_t)get_unaligned_u16_le(in_next) \
+					<< (16 - bitsleft);		\
+			in_next += 2;					\
+		}							\
+		bitsleft += 16;						\
+	}								\
+})
+
+#define BITS(n)								\
+({									\
+	bitbuf_t bits = 0;						\
+	if ((n) != 0)							\
+		bits = bitbuf >> (BITBUF_NBITS - (n));			\
+	bits;								\
+})
+
+#define REMOVE_BITS(n)							\
+({									\
+									\
+ 	bitbuf <<= (n);							\
+	bitsleft -= (n);						\
+})
+
+#define POP_BITS(n)							\
+({									\
+	bitbuf_t bits = BITS(n);					\
+	REMOVE_BITS(n);							\
+	bits;								\
+})
+
+#define READ_BYTE()							\
+({									\
+	u8 v = 0;							\
+	if (likely(in_end != in_next))					\
+		v = *in_next++;						\
+	v;								\
+})
+
+#define READ_U16()							\
+({									\
+	u16 v = 0;							\
+	if (likely(in_end - in_next >= 2)) {				\
+		v = get_unaligned_u16_le(in_next);			\
+		in_next += 2;						\
+	}								\
+	v;								\
+})
+
 static int
-xpress_decode_window(struct input_bitstream *istream, const u16 *decode_table,
-		     u8 *window, unsigned window_size)
+xpress_decompress(const void *compressed_data, size_t compressed_size,
+		  void *uncompressed_data, size_t uncompressed_size, void *_ctx)
 {
-	u8 *window_ptr = window;
-	u8 *window_end = &window[window_size];
+	const u8 *in_next = compressed_data;
+	const u8 *const in_end = in_next + compressed_size;
+	u8 *const out_begin = uncompressed_data;
+	u8 *out_next = out_begin;
+	u8 *const out_end = out_next + uncompressed_size;
+	union {
+		u8 lens[XPRESS_NUM_SYMBOLS];
+		u16 decode_table[(1 << XPRESS_TABLEBITS) + 2 * XPRESS_NUM_SYMBOLS]
+				_aligned_attribute(DECODE_TABLE_ALIGNMENT);
+	} u;
+	bitbuf_t bitbuf = 0;
+	unsigned bitsleft = 0;
 	unsigned sym;
 	unsigned match_len;
 	unsigned offset_high_bit;
 	unsigned match_offset;
 
-	while (window_ptr != window_end) {
+	if (in_end - in_next < XPRESS_NUM_SYMBOLS / 2)
+		return -1;
 
-		sym = read_huffsym(istream, decode_table,
-				   XPRESS_TABLEBITS, XPRESS_MAX_CODEWORD_LEN);
+	for (unsigned i = 0; i < XPRESS_NUM_SYMBOLS / 2; i++) {
+		u.lens[i * 2] = *in_next & 0xf;
+		u.lens[i * 2 + 1] = *in_next >> 4;
+		in_next++;
+	}
+
+	if (make_huffman_decode_table(u.decode_table, XPRESS_NUM_SYMBOLS,
+				      XPRESS_TABLEBITS, u.lens,
+				      XPRESS_MAX_CODEWORD_LEN))
+		return -1;
+
+	while (out_next != out_end) {
+		unsigned entry;
+		unsigned key_bits;
+
+		ENSURE_BITS(XPRESS_MAX_CODEWORD_LEN);
+		key_bits = BITS(XPRESS_TABLEBITS);
+		entry = u.decode_table[key_bits];
+		if (likely(entry < 0xC000)) {
+			REMOVE_BITS(entry >> 11);
+			sym = entry & 0x7FF;
+		} else {
+			/* Slow case: The codeword for the symbol is longer than
+			 * table_bits, so the symbol does not have an entry
+			 * directly in the first (1 << table_bits) entries of the
+			 * decode table.  Traverse the appropriate binary tree
+			 * bit-by-bit to decode the symbol.  */
+			REMOVE_BITS(XPRESS_TABLEBITS);
+			do {
+				key_bits = (entry & 0x3FFF) + POP_BITS(1);
+			} while ((entry = u.decode_table[key_bits]) >= 0xC000);
+			sym = entry;
+		}
+
 		if (sym < XPRESS_NUM_CHARS) {
 			/* Literal  */
-			*window_ptr++ = sym;
+			*out_next++ = sym;
 			continue;
 		}
 
@@ -101,65 +199,30 @@ xpress_decode_window(struct input_bitstream *istream, const u16 *decode_table,
 		match_len = sym & 0xf;
 		offset_high_bit = (sym >> 4) & 0xf;
 
-		bitstream_ensure_bits(istream, 16);
+		ENSURE_BITS(16);
 
-		match_offset = (1 << offset_high_bit) |
-				bitstream_pop_bits(istream, offset_high_bit);
+		match_offset = (1 << offset_high_bit) | POP_BITS(offset_high_bit);
 
 		if (match_len == 0xf) {
-			match_len += bitstream_read_byte(istream);
+			match_len += READ_BYTE();
 			if (match_len == 0xf + 0xff)
-				match_len = bitstream_read_u16(istream);
+				match_len = READ_U16();
 		}
 		match_len += XPRESS_MIN_MATCH_LEN;
 
-		if (unlikely(match_offset > window_ptr - window))
+		if (unlikely(match_offset > out_next - out_begin))
 			return -1;
 
-		if (unlikely(match_len > window_end - window_ptr))
+		if (unlikely(match_len > out_end - out_next))
 			return -1;
 
-		lz_copy(window_ptr, match_len, match_offset, window_end,
+		lz_copy(out_next, match_len, match_offset, out_end,
 			XPRESS_MIN_MATCH_LEN);
 
-		window_ptr += match_len;
+		out_next += match_len;
 	}
+
 	return 0;
-}
-
-static int
-xpress_decompress(const void *compressed_data, size_t compressed_size,
-		  void *uncompressed_data, size_t uncompressed_size, void *_ctx)
-{
-	const u8 *cdata = compressed_data;
-	u8 lens[XPRESS_NUM_SYMBOLS];
-	u8 *lens_p;
-	u16 decode_table[(1 << XPRESS_TABLEBITS) + 2 * XPRESS_NUM_SYMBOLS]
-			_aligned_attribute(DECODE_TABLE_ALIGNMENT);
-	struct input_bitstream istream;
-
-	/* XPRESS uses only one Huffman code.  It contains 512 symbols, and the
-	 * code lengths of these symbols are given literally as 4-bit integers
-	 * in the first 256 bytes of the compressed data.  */
-	if (compressed_size < XPRESS_NUM_SYMBOLS / 2)
-		return -1;
-
-	lens_p = lens;
-	for (unsigned i = 0; i < XPRESS_NUM_SYMBOLS / 2; i++) {
-		*lens_p++ = cdata[i] & 0xf;
-		*lens_p++ = cdata[i] >> 4;
-	}
-
-	if (make_huffman_decode_table(decode_table, XPRESS_NUM_SYMBOLS,
-				      XPRESS_TABLEBITS, lens,
-				      XPRESS_MAX_CODEWORD_LEN))
-		return -1;
-
-	init_input_bitstream(&istream, cdata + XPRESS_NUM_SYMBOLS / 2,
-			     compressed_size - XPRESS_NUM_SYMBOLS / 2);
-
-	return xpress_decode_window(&istream, decode_table,
-				    uncompressed_data, uncompressed_size);
 }
 
 static int
