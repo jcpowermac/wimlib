@@ -261,17 +261,15 @@ struct lzms_input_bitstream {
 
 struct lzms_decompressor {
 
-	/* Range decoder, which reads bits from the beginning of the compressed
-	 * block, going forwards  */
 	struct lzms_range_decoder rd;
 
-	/* Input bitstream, which reads from the end of the compressed block,
-	 * going backwards  */
 	struct lzms_input_bitstream is;
+
+	struct lzms_lru_queues lru;
 
 	u32 num_offset_slots;
 
-	/* States and probability tables for range decoding  */
+	/* Range decoding  */
 
 	u32 main_state;
 	struct lzms_probability_entry main_prob_entries[
@@ -297,7 +295,8 @@ struct lzms_decompressor {
 	struct lzms_probability_entry delta_repeat_match_prob_entries[
 			LZMS_NUM_RECENT_OFFSETS - 1][LZMS_NUM_DELTA_REPEAT_MATCH_STATES];
 
-	/* Huffman decoders  */
+	/* Huffman decoding  */
+
 	u32 num_literals_read;
 	u32 literal_freqs[LZMS_NUM_LITERAL_SYMS];
 	u16 literal_decode_table[(1 << LZMS_DECODE_TABLE_BITS) +
@@ -331,10 +330,7 @@ struct lzms_decompressor {
 	u32 codewords[LZMS_MAX_NUM_SYMS];
 	u8 lens[LZMS_MAX_NUM_SYMS];
 
-	/* LRU (least-recently-used) queues for match offsets  */
-	struct lzms_lru_queues lru;
-
-	/* Used for postprocessing  */
+	/* Postprocessing  */
 	s32 last_target_usages[65536];
 };
 
