@@ -330,15 +330,6 @@ struct lzms_huffman_decoder {
 /* State of the LZMS decompressor.  */
 struct lzms_decompressor {
 
-	/* Pointer to the beginning of the uncompressed data buffer.  */
-	u8 *out_begin;
-
-	/* Pointer to the next position in the uncompressed data buffer.  */
-	u8 *out_next;
-
-	/* Pointer to one past the end of the uncompressed data buffer.  */
-	u8 *out_end;
-
 	/* Range decoder, which reads bits from the beginning of the compressed
 	 * block, going forwards.  */
 	struct lzms_range_decoder_raw rd;
@@ -643,195 +634,6 @@ lzms_decode_value(struct lzms_huffman_decoder *dec)
 	return dec->slot_base_tab[slot] + extra_bits;
 }
 
-/* Copy a literal to the output buffer.  */
-static int
-lzms_copy_literal(struct lzms_decompressor *ctx, u8 literal)
-{
-	*ctx->out_next++ = literal;
-	return 0;
-}
-
-/* Validate an LZ match and copy it to the output buffer.  */
-static int
-lzms_copy_lz_match(struct lzms_decompressor *ctx, u32 length, u32 offset)
-{
-	u8 *out_next;
-
-	if (length > ctx->out_end - ctx->out_next) {
-		LZMS_DEBUG("Match overrun!");
-		return -1;
-	}
-	if (offset > ctx->out_next - ctx->out_begin) {
-		LZMS_DEBUG("Match underrun!");
-		return -1;
-	}
-
-	out_next = ctx->out_next;
-
-	lz_copy(out_next, length, offset, ctx->out_end, 1);
-	ctx->out_next = out_next + length;
-
-	return 0;
-}
-
-/* Validate a delta match and copy it to the output buffer.  */
-static int
-lzms_copy_delta_match(struct lzms_decompressor *ctx, u32 length,
-		      u32 power, u32 raw_offset)
-{
-	u32 offset1 = 1U << power;
-	u32 offset2 = raw_offset << power;
-	u32 offset = offset1 + offset2;
-	u8 *out_next;
-	u8 *matchptr1;
-	u8 *matchptr2;
-	u8 *matchptr;
-
-	if (length > ctx->out_end - ctx->out_next) {
-		LZMS_DEBUG("Match overrun!");
-		return -1;
-	}
-	if (offset > ctx->out_next - ctx->out_begin) {
-		LZMS_DEBUG("Match underrun!");
-		return -1;
-	}
-
-	out_next = ctx->out_next;
-	matchptr1 = out_next - offset1;
-	matchptr2 = out_next - offset2;
-	matchptr = out_next - offset;
-
-	while (length--)
-		*out_next++ = *matchptr1++ + *matchptr2++ - *matchptr++;
-
-	ctx->out_next = out_next;
-	return 0;
-}
-
-/* Decode a (length, offset) pair from the input.  */
-static int
-lzms_decode_lz_match(struct lzms_decompressor *ctx)
-{
-	int bit;
-	u32 length, offset;
-
-	/* Decode the match offset.  The next range-encoded bit indicates
-	 * whether it's a repeat offset or an explicit offset.  */
-
-	bit = lzms_range_decode_bit(&ctx->lz_match_range_decoder);
-	if (bit == 0) {
-		/* Explicit offset.  */
-		offset = lzms_decode_value(&ctx->lz_offset_decoder);
-	} else {
-		/* Repeat offset.  */
-		int i;
-
-		for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
-			if (!lzms_range_decode_bit(&ctx->lz_repeat_match_range_decoders[i]))
-				break;
-
-		offset = ctx->lru.lz.recent_offsets[i];
-
-		for (; i < LZMS_NUM_RECENT_OFFSETS; i++)
-			ctx->lru.lz.recent_offsets[i] = ctx->lru.lz.recent_offsets[i + 1];
-	}
-
-	/* Decode match length, which is always given explicitly (there is no
-	 * LRU queue for repeat lengths).  */
-	length = lzms_decode_value(&ctx->length_decoder);
-
-	ctx->lru.lz.upcoming_offset = offset;
-
-	LZMS_DEBUG("Decoded %s LZ match: length=%u, offset=%u",
-		   (bit ? "repeat" : "explicit"), length, offset);
-
-	/* Validate the match and copy it to the output.  */
-	return lzms_copy_lz_match(ctx, length, offset);
-}
-
-/* Decodes a "delta" match from the input.  */
-static int
-lzms_decode_delta_match(struct lzms_decompressor *ctx)
-{
-	int bit;
-	u32 length, power, raw_offset;
-
-	/* Decode the match power and raw offset.  The next range-encoded bit
-	 * indicates whether these data are a repeat, or given explicitly.  */
-
-	bit = lzms_range_decode_bit(&ctx->delta_match_range_decoder);
-	if (bit == 0) {
-		power = lzms_huffman_decode_symbol(&ctx->delta_power_decoder);
-		raw_offset = lzms_decode_value(&ctx->delta_offset_decoder);
-	} else {
-		int i;
-
-		for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
-			if (!lzms_range_decode_bit(&ctx->delta_repeat_match_range_decoders[i]))
-				break;
-
-		power = ctx->lru.delta.recent_powers[i];
-		raw_offset = ctx->lru.delta.recent_offsets[i];
-
-		for (; i < LZMS_NUM_RECENT_OFFSETS; i++) {
-			ctx->lru.delta.recent_powers[i] = ctx->lru.delta.recent_powers[i + 1];
-			ctx->lru.delta.recent_offsets[i] = ctx->lru.delta.recent_offsets[i + 1];
-		}
-	}
-
-	length = lzms_decode_value(&ctx->length_decoder);
-
-	ctx->lru.delta.upcoming_power = power;
-	ctx->lru.delta.upcoming_offset = raw_offset;
-
-	LZMS_DEBUG("Decoded %s delta match: length=%u, power=%u, raw_offset=%u",
-		   (bit ? "repeat" : "explicit"), length, power, raw_offset);
-
-	/* Validate the match and copy it to the output.  */
-	return lzms_copy_delta_match(ctx, length, power, raw_offset);
-}
-
-/* Decode an LZ or delta match.  */
-static int
-lzms_decode_match(struct lzms_decompressor *ctx)
-{
-	if (!lzms_range_decode_bit(&ctx->match_range_decoder))
-		return lzms_decode_lz_match(ctx);
-	else
-		return lzms_decode_delta_match(ctx);
-}
-
-/* Decode a literal byte encoded using the literal Huffman code.  */
-static int
-lzms_decode_literal(struct lzms_decompressor *ctx)
-{
-	u8 literal = lzms_huffman_decode_symbol(&ctx->literal_decoder);
-	LZMS_DEBUG("Decoded literal: 0x%02x", literal);
-	return lzms_copy_literal(ctx, literal);
-}
-
-/* Decode the next LZMS match or literal.  */
-static int
-lzms_decode_item(struct lzms_decompressor *ctx)
-{
-	int ret;
-
-	ctx->lru.lz.upcoming_offset = 0;
-	ctx->lru.delta.upcoming_power = 0;
-	ctx->lru.delta.upcoming_offset = 0;
-
-	if (lzms_range_decode_bit(&ctx->main_range_decoder))
-		ret = lzms_decode_match(ctx);
-	else
-		ret = lzms_decode_literal(ctx);
-
-	if (ret)
-		return ret;
-
-	lzms_update_lru_queues(&ctx->lru);
-	return 0;
-}
-
 static void
 lzms_init_range_decoder(struct lzms_range_decoder *dec,
 			struct lzms_range_decoder_raw *rd, u32 num_states)
@@ -870,13 +672,6 @@ lzms_init_decompressor(struct lzms_decompressor *ctx,
 		       void *ubuf, unsigned ulen)
 {
 	unsigned num_offset_slots;
-
-	LZMS_DEBUG("Initializing decompressor (clen=%u, ulen=%u)", clen, ulen);
-
-	/* Initialize output pointers.  */
-	ctx->out_begin = ubuf;
-	ctx->out_next = ubuf;
-	ctx->out_end = (u8*)ubuf + ulen;
 
 	/* Initialize the raw range decoder (reading forwards).  */
 	lzms_range_decoder_raw_init(&ctx->rd, cdata, clen / 2);
@@ -951,17 +746,123 @@ lzms_init_decompressor(struct lzms_decompressor *ctx,
 /* Decode the series of literals and matches from the LZMS-compressed data.
  * Returns 0 on success; nonzero if the compressed data is invalid.  */
 static int
-lzms_decode_items(const u8 *cdata, size_t clen, u8 *ubuf, size_t ulen,
+lzms_decode_items(const u8 *cdata, size_t clen, u8 *out, size_t out_nbytes,
 		  struct lzms_decompressor *ctx)
 {
-	/* Initialize the LZMS decompressor.  */
-	lzms_init_decompressor(ctx, cdata, clen, ubuf, ulen);
+	u8 *out_next = out;
+	u8 * const out_end = out + out_nbytes;
 
-	/* Decode the sequence of items.  */
-	while (ctx->out_next != ctx->out_end) {
-		LZMS_DEBUG("Position %u", ctx->out_next - ctx->out_begin);
-		if (lzms_decode_item(ctx))
-			return -1;
+	lzms_init_decompressor(ctx, cdata, clen, out, out_nbytes);
+
+	while (out_next != out_end) {
+
+		ctx->lru.lz.upcoming_offset = 0;
+		ctx->lru.delta.upcoming_power = 0;
+		ctx->lru.delta.upcoming_offset = 0;
+
+		if (!lzms_range_decode_bit(&ctx->main_range_decoder)) {
+			/* Literal  */
+			*out_next++ = lzms_huffman_decode_symbol(&ctx->literal_decoder);
+		} else if (!lzms_range_decode_bit(&ctx->match_range_decoder)) {
+
+			/* LZ match  */
+
+			u32 length, offset;
+
+			/* Decode the offset  */
+			if (!lzms_range_decode_bit(&ctx->lz_match_range_decoder)) {
+				/* Explicit offset  */
+				offset = lzms_decode_value(&ctx->lz_offset_decoder);
+			} else {
+				/* Repeat offset  */
+				int i;
+
+				for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++) {
+					if (!lzms_range_decode_bit(
+							&ctx->lz_repeat_match_range_decoders[i]))
+						break;
+				}
+
+				offset = ctx->lru.lz.recent_offsets[i];
+
+				for (; i < LZMS_NUM_RECENT_OFFSETS; i++) {
+					ctx->lru.lz.recent_offsets[i] =
+						ctx->lru.lz.recent_offsets[i + 1];
+				}
+			}
+			ctx->lru.lz.upcoming_offset = offset;
+
+			/* Decode the length  */
+			length = lzms_decode_value(&ctx->length_decoder);
+
+			/* Validate and copy the match  */
+
+			if (unlikely(length > out_end - out_next))
+				return -1;
+			if (unlikely(offset > out_next - out))
+				return -1;
+			lz_copy(out_next, length, offset, out_end, 1);
+			out_next += length;
+		} else {
+			u32 length, power, raw_offset;
+
+			/* Delta match  */
+
+			/* Decode the offset  */
+			if (!lzms_range_decode_bit(&ctx->delta_match_range_decoder)) {
+				/* Explicit offset  */
+				power = lzms_huffman_decode_symbol(&ctx->delta_power_decoder);
+				raw_offset = lzms_decode_value(&ctx->delta_offset_decoder);
+			} else {
+				/* Repeat offset  */
+				int i;
+
+				for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++) {
+					if (!lzms_range_decode_bit(
+							&ctx->delta_repeat_match_range_decoders[i]))
+						break;
+				}
+
+				power = ctx->lru.delta.recent_powers[i];
+				raw_offset = ctx->lru.delta.recent_offsets[i];
+
+				for (; i < LZMS_NUM_RECENT_OFFSETS; i++) {
+					ctx->lru.delta.recent_powers[i] =
+						ctx->lru.delta.recent_powers[i + 1];
+					ctx->lru.delta.recent_offsets[i] =
+						ctx->lru.delta.recent_offsets[i + 1];
+				}
+			}
+			ctx->lru.delta.upcoming_power = power;
+			ctx->lru.delta.upcoming_offset = raw_offset;
+
+			/* Decode the length  */
+			length = lzms_decode_value(&ctx->length_decoder);
+
+			/* Validate and copy the match  */
+			u32 offset1 = (u32)1 << power;
+			u32 offset2 = raw_offset << power;
+			u32 offset = offset1 + offset2;
+			u8 *matchptr1;
+			u8 *matchptr2;
+			u8 *matchptr;
+
+			if (unlikely(length > out_end - out_next))
+				return -1;
+
+			if (unlikely(offset > out_next - out))
+				return -1;
+
+			matchptr1 = out_next - offset1;
+			matchptr2 = out_next - offset2;
+			matchptr = out_next - offset;
+
+			do {
+				*out_next++ = *matchptr1++ + *matchptr2++ - *matchptr++;
+			} while (--length);
+		}
+
+		lzms_update_lru_queues(&ctx->lru);
 	}
 	return 0;
 }
