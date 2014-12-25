@@ -261,6 +261,11 @@ struct lzms_input_bitstream {
 
 struct lzms_decompressor {
 
+	/* ('last_target_usages' is in union with everything else because it is
+	 * only used for postprocessing.)  */
+	union {
+	struct {
+
 	struct lzms_range_decoder rd;
 
 	struct lzms_input_bitstream is;
@@ -330,8 +335,10 @@ struct lzms_decompressor {
 	u32 codewords[LZMS_MAX_NUM_SYMS];
 	u8 lens[LZMS_MAX_NUM_SYMS];
 
-	/* Postprocessing  */
+	}; // struct
+
 	s32 last_target_usages[65536];
+	}; // union
 };
 
 /* Initialize the input bitstream @is to read forwards from the specified
@@ -542,16 +549,16 @@ lzms_decode_delta_repeat_match_bit(struct lzms_decompressor *d, int idx)
 				     d->delta_repeat_match_prob_entries[idx]);
 }
 
-static inline u32
+static inline unsigned
 lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 			   u16 decode_table[], unsigned table_bits,
 			   u32 *num_syms_read, u32 rebuild_freq,
 			   u32 freqs[], u32 codewords[], u8 lens[],
 			   unsigned num_syms)
 {
-	u32 entry;
-	u32 key_bits;
-	u32 sym;
+	unsigned entry;
+	unsigned key_bits;
+	unsigned sym;
 
 	/* The Huffman codes used in LZMS are adaptive and must be rebuilt
 	 * whenever a certain number of symbols have been read.  Each such
@@ -601,7 +608,7 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 	return sym;
 }
 
-static u32
+static unsigned
 lzms_decode_literal(struct lzms_decompressor *d)
 {
 	return lzms_decode_huffman_symbol(&d->is,
@@ -618,15 +625,15 @@ lzms_decode_literal(struct lzms_decompressor *d)
 static u32
 lzms_decode_length(struct lzms_decompressor *d)
 {
-	u32 slot = lzms_decode_huffman_symbol(&d->is,
-					      d->length_decode_table,
-					      LZMS_DECODE_TABLE_BITS,
-					      &d->num_lengths_read,
-					      LZMS_LENGTH_CODE_REBUILD_FREQ,
-					      d->length_freqs,
-					      d->codewords,
-					      d->lens,
-					      LZMS_NUM_LEN_SYMS);
+	unsigned slot = lzms_decode_huffman_symbol(&d->is,
+						   d->length_decode_table,
+						   LZMS_DECODE_TABLE_BITS,
+						   &d->num_lengths_read,
+						   LZMS_LENGTH_CODE_REBUILD_FREQ,
+						   d->length_freqs,
+						   d->codewords,
+						   d->lens,
+						   LZMS_NUM_LEN_SYMS);
 	return lzms_length_slot_base[slot] +
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_length_bits[slot]);
 }
@@ -634,15 +641,15 @@ lzms_decode_length(struct lzms_decompressor *d)
 static u32
 lzms_decode_lz_offset(struct lzms_decompressor *d)
 {
-	u32 slot = lzms_decode_huffman_symbol(&d->is,
-					      d->lz_offset_decode_table,
-					      LZMS_DECODE_TABLE_BITS,
-					      &d->num_lz_offsets_read,
-					      LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
-					      d->lz_offset_freqs,
-					      d->codewords,
-					      d->lens,
-					      d->num_offset_slots);
+	unsigned slot = lzms_decode_huffman_symbol(&d->is,
+						   d->lz_offset_decode_table,
+						   LZMS_DECODE_TABLE_BITS,
+						   &d->num_lz_offsets_read,
+						   LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
+						   d->lz_offset_freqs,
+						   d->codewords,
+						   d->lens,
+						   d->num_offset_slots);
 	return lzms_offset_slot_base[slot] +
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
@@ -650,20 +657,20 @@ lzms_decode_lz_offset(struct lzms_decompressor *d)
 static inline u32
 lzms_decode_delta_offset(struct lzms_decompressor *d)
 {
-	u32 slot = lzms_decode_huffman_symbol(&d->is,
-					      d->delta_offset_decode_table,
-					      LZMS_DECODE_TABLE_BITS,
-					      &d->num_delta_offsets_read,
-					      LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
-					      d->delta_offset_freqs,
-					      d->codewords,
-					      d->lens,
-					      d->num_offset_slots);
+	unsigned slot = lzms_decode_huffman_symbol(&d->is,
+						   d->delta_offset_decode_table,
+						   LZMS_DECODE_TABLE_BITS,
+						   &d->num_delta_offsets_read,
+						   LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
+						   d->delta_offset_freqs,
+						   d->codewords,
+						   d->lens,
+						   d->num_offset_slots);
 	return lzms_offset_slot_base[slot] +
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
 
-static inline u32
+static inline unsigned
 lzms_decode_delta_power(struct lzms_decompressor *d)
 {
 	return lzms_decode_huffman_symbol(&d->is,
