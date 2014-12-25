@@ -675,6 +675,124 @@ lzms_decode_value(struct lzms_huffman_decoder *dec)
 	return dec->slot_base_tab[slot] + extra_bits;
 }
 
+/* Decode the series of literals and matches from the LZMS-compressed data.
+ * Returns 0 on success; nonzero if the compressed data is invalid.  */
+static int
+lzms_decode_items(struct lzms_decompressor * const restrict d,
+		  u8 * const restrict out, const size_t out_nbytes)
+{
+	u8 *out_next = out;
+	u8 * const out_end = out + out_nbytes;
+
+	while (out_next != out_end) {
+
+		d->lru.lz.upcoming_offset = 0;
+		d->lru.delta.upcoming_power = 0;
+		d->lru.delta.upcoming_offset = 0;
+
+		if (!lzms_decode_main_bit(d)) {
+			/* Literal  */
+			*out_next++ = lzms_huffman_decode_symbol(&d->literal_decoder);
+		} else if (!lzms_decode_match_bit(d)) {
+
+			/* LZ match  */
+
+			u32 length, offset;
+
+			/* Decode the offset  */
+			if (!lzms_decode_lz_match_bit(d)) {
+				/* Explicit offset  */
+				offset = lzms_decode_value(&d->lz_offset_decoder);
+			} else {
+				/* Repeat offset  */
+				int i;
+
+				for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+					if (!lzms_decode_lz_repeat_match_bit(d, i))
+						break;
+
+				offset = d->lru.lz.recent_offsets[i];
+
+				for (; i < LZMS_NUM_RECENT_OFFSETS; i++) {
+					d->lru.lz.recent_offsets[i] =
+						d->lru.lz.recent_offsets[i + 1];
+				}
+			}
+			d->lru.lz.upcoming_offset = offset;
+
+			/* Decode the length  */
+			length = lzms_decode_value(&d->length_decoder);
+
+			/* Validate and copy the match  */
+
+			if (unlikely(length > out_end - out_next))
+				return -1;
+			if (unlikely(offset > out_next - out))
+				return -1;
+			lz_copy(out_next, length, offset, out_end, 1);
+			out_next += length;
+		} else {
+			u32 length, power, raw_offset;
+
+			/* Delta match  */
+
+			/* Decode the offset  */
+			if (!lzms_decode_delta_match_bit(d)) {
+				/* Explicit offset  */
+				power = lzms_huffman_decode_symbol(&d->delta_power_decoder);
+				raw_offset = lzms_decode_value(&d->delta_offset_decoder);
+			} else {
+				/* Repeat offset  */
+				int i;
+
+				for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+					if (!lzms_decode_delta_repeat_match_bit(d, i))
+						break;
+
+				power = d->lru.delta.recent_powers[i];
+				raw_offset = d->lru.delta.recent_offsets[i];
+
+				for (; i < LZMS_NUM_RECENT_OFFSETS; i++) {
+					d->lru.delta.recent_powers[i] =
+						d->lru.delta.recent_powers[i + 1];
+					d->lru.delta.recent_offsets[i] =
+						d->lru.delta.recent_offsets[i + 1];
+				}
+			}
+			d->lru.delta.upcoming_power = power;
+			d->lru.delta.upcoming_offset = raw_offset;
+
+			/* Decode the length  */
+			length = lzms_decode_value(&d->length_decoder);
+
+			/* Validate and copy the match  */
+			u32 offset1 = (u32)1 << power;
+			u32 offset2 = raw_offset << power;
+			u32 offset = offset1 + offset2;
+			u8 *matchptr1;
+			u8 *matchptr2;
+			u8 *matchptr;
+
+			if (unlikely(length > out_end - out_next))
+				return -1;
+
+			if (unlikely(offset > out_next - out))
+				return -1;
+
+			matchptr1 = out_next - offset1;
+			matchptr2 = out_next - offset2;
+			matchptr = out_next - offset;
+
+			do {
+				*out_next++ = *matchptr1++ + *matchptr2++ - *matchptr++;
+			} while (--length);
+		}
+
+		lzms_update_lru_queues(&d->lru);
+	}
+	return 0;
+}
+
 static void
 lzms_init_huffman_decoder(struct lzms_huffman_decoder *dec,
 			  struct lzms_input_bitstream *is,
@@ -767,126 +885,6 @@ lzms_init_decompressor(struct lzms_decompressor *d,
 	lzms_init_lru_queues(&d->lru);
 }
 
-/* Decode the series of literals and matches from the LZMS-compressed data.
- * Returns 0 on success; nonzero if the compressed data is invalid.  */
-static int
-lzms_decode_items(struct lzms_decompressor * const restrict d,
-		  u8 * const restrict out, const size_t out_nbytes)
-{
-	u8 *out_next = out;
-	u8 * const out_end = out + out_nbytes;
-
-	while (out_next != out_end) {
-
-		d->lru.lz.upcoming_offset = 0;
-		d->lru.delta.upcoming_power = 0;
-		d->lru.delta.upcoming_offset = 0;
-
-		if (!lzms_decode_main_bit(d)) {
-			/* Literal  */
-			*out_next++ = lzms_huffman_decode_symbol(&d->literal_decoder);
-		} else if (!lzms_decode_match_bit(d)) {
-
-			/* LZ match  */
-
-			u32 length, offset;
-
-			/* Decode the offset  */
-			if (!lzms_decode_lz_match_bit(d)) {
-				/* Explicit offset  */
-				offset = lzms_decode_value(&d->lz_offset_decoder);
-			} else {
-				/* Repeat offset  */
-				int i;
-
-				for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++) {
-					if (!lzms_decode_lz_repeat_match_bit(d, i))
-						break;
-				}
-
-				offset = d->lru.lz.recent_offsets[i];
-
-				for (; i < LZMS_NUM_RECENT_OFFSETS; i++) {
-					d->lru.lz.recent_offsets[i] =
-						d->lru.lz.recent_offsets[i + 1];
-				}
-			}
-			d->lru.lz.upcoming_offset = offset;
-
-			/* Decode the length  */
-			length = lzms_decode_value(&d->length_decoder);
-
-			/* Validate and copy the match  */
-
-			if (unlikely(length > out_end - out_next))
-				return -1;
-			if (unlikely(offset > out_next - out))
-				return -1;
-			lz_copy(out_next, length, offset, out_end, 1);
-			out_next += length;
-		} else {
-			u32 length, power, raw_offset;
-
-			/* Delta match  */
-
-			/* Decode the offset  */
-			if (!lzms_decode_delta_match_bit(d)) {
-				/* Explicit offset  */
-				power = lzms_huffman_decode_symbol(&d->delta_power_decoder);
-				raw_offset = lzms_decode_value(&d->delta_offset_decoder);
-			} else {
-				/* Repeat offset  */
-				int i;
-
-				for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++) {
-					if (!lzms_decode_delta_repeat_match_bit(d, i))
-						break;
-				}
-
-				power = d->lru.delta.recent_powers[i];
-				raw_offset = d->lru.delta.recent_offsets[i];
-
-				for (; i < LZMS_NUM_RECENT_OFFSETS; i++) {
-					d->lru.delta.recent_powers[i] =
-						d->lru.delta.recent_powers[i + 1];
-					d->lru.delta.recent_offsets[i] =
-						d->lru.delta.recent_offsets[i + 1];
-				}
-			}
-			d->lru.delta.upcoming_power = power;
-			d->lru.delta.upcoming_offset = raw_offset;
-
-			/* Decode the length  */
-			length = lzms_decode_value(&d->length_decoder);
-
-			/* Validate and copy the match  */
-			u32 offset1 = (u32)1 << power;
-			u32 offset2 = raw_offset << power;
-			u32 offset = offset1 + offset2;
-			u8 *matchptr1;
-			u8 *matchptr2;
-			u8 *matchptr;
-
-			if (unlikely(length > out_end - out_next))
-				return -1;
-
-			if (unlikely(offset > out_next - out))
-				return -1;
-
-			matchptr1 = out_next - offset1;
-			matchptr2 = out_next - offset2;
-			matchptr = out_next - offset;
-
-			do {
-				*out_next++ = *matchptr1++ + *matchptr2++ - *matchptr++;
-			} while (--length);
-		}
-
-		lzms_update_lru_queues(&d->lru);
-	}
-	return 0;
-}
-
 static int
 lzms_decompress(const void *compressed_data, size_t compressed_size,
 		void *uncompressed_data, size_t uncompressed_size, void *_d)
@@ -904,7 +902,7 @@ lzms_decompress(const void *compressed_data, size_t compressed_size,
 		return -1;
 
 	/* Handle the trivial case where nothing needs to be decompressed.
-	 * (Necessary because a window of size 0 does not have a valid offset
+	 * (Necessary because a block of size 0 does not have a valid offset
 	 * slot.)  */
 	if (uncompressed_size == 0)
 		return 0;
@@ -943,7 +941,7 @@ lzms_create_decompressor(size_t max_block_size, void **d_ret)
 		return WIMLIB_ERR_INVALID_PARAM;
 
 	d = ALIGNED_MALLOC(sizeof(struct lzms_decompressor),
-			     DECODE_TABLE_ALIGNMENT);
+			   DECODE_TABLE_ALIGNMENT);
 	if (!d)
 		return WIMLIB_ERR_NOMEM;
 
