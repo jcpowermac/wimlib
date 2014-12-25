@@ -1288,7 +1288,7 @@ lzms_prepare_compressor(struct lzms_compressor *c, const u8 *udata, u32 ulen,
 				  LZMS_LZ_OFFSET_CODE_REBUILD_FREQ);
 
 	lzms_init_huffman_encoder(&c->length_encoder, &c->os,
-				  LZMS_NUM_LEN_SYMS,
+				  LZMS_NUM_LENGTH_SYMS,
 				  LZMS_LENGTH_CODE_REBUILD_FREQ);
 
 	lzms_init_huffman_encoder(&c->delta_offset_encoder, &c->os,
@@ -1485,8 +1485,6 @@ lzms_create_compressor(size_t max_block_size, unsigned int compression_level,
 	if (!c->optimum)
 		goto oom;
 	c->optimum_end = &c->optimum[params.optim_array_length];
-
-	lzms_init_slots();
 
 	lzms_init_rc_costs();
 

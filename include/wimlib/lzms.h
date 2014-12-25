@@ -74,15 +74,12 @@ struct lzms_lru_queues {
 };
 
 /* Offset slot tables  */
-extern u32 lzms_offset_slot_base[LZMS_MAX_NUM_OFFSET_SYMS + 1];
-extern u8 lzms_extra_offset_bits[LZMS_MAX_NUM_OFFSET_SYMS];
+extern const u32 lzms_offset_slot_base[LZMS_MAX_NUM_OFFSET_SYMS + 1];
+extern const u8 lzms_extra_offset_bits[LZMS_MAX_NUM_OFFSET_SYMS];
 
 /* Length slot tables  */
-extern u32 lzms_length_slot_base[LZMS_NUM_LEN_SYMS + 1];
-extern u8 lzms_extra_length_bits[LZMS_NUM_LEN_SYMS];
-
-extern void
-lzms_init_slots(void);
+extern const u32 lzms_length_slot_base[LZMS_NUM_LENGTH_SYMS + 1];
+extern const u8 lzms_extra_length_bits[LZMS_NUM_LENGTH_SYMS];
 
 extern unsigned
 lzms_get_slot(u32 value, const u32 slot_base_tab[], unsigned num_slots);
@@ -98,8 +95,11 @@ lzms_get_offset_slot(u32 offset)
 static inline unsigned
 lzms_get_length_slot(u32 length)
 {
-	return lzms_get_slot(length, lzms_length_slot_base, LZMS_NUM_LEN_SYMS);
+	return lzms_get_slot(length, lzms_length_slot_base, LZMS_NUM_LENGTH_SYMS);
 }
+
+unsigned
+lzms_get_num_offset_slots(size_t uncompressed_size);
 
 extern void
 lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t count);
