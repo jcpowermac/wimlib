@@ -242,25 +242,24 @@ struct lzms_range_decoder {
 	size_t num_le16_remaining;
 };
 
+typedef u64 bitbuf_t;
+
 /* Structure used for reading raw bits backwards.  This is the second logical
  * bitstream mentioned above.  */
 struct lzms_input_bitstream {
 	/* Holding variable for bits that have been read from the compressed
 	 * data.  The bits are ordered from high-order to low-order.  */
-	/* XXX:  Without special-case code to handle reading more than 17 bits
-	 * at a time, this needs to be 64 bits rather than 32 bits.  */
-	u64 bitbuf;
+	bitbuf_t bitbuf;
 
 	/* Number of bits in @bitbuf that are used.  */
-	unsigned num_filled_bits;
+	unsigned bitsleft;
 
 	/* Pointer to the one past the next little-endian 16-bit integer in the
 	 * compressed input data (reading backwards).  */
-	const le16 *in;
+	const u8 *next;
 
-	/* Number of 16-bit integers remaining in the compressed input data
-	 * (reading backwards).  */
-	size_t num_le16_remaining;
+	/* Pointer to the beginning of the compressed input buffer  */
+	const u8 *begin;
 };
 
 struct lzms_huffman_rebuild_info {
@@ -355,77 +354,82 @@ struct lzms_decompressor {
 };
 
 /* Initialize the input bitstream @is to read forwards from the specified
- * compressed data buffer @in that is @in_limit 16-bit integers long.  */
+ * compressed data buffer @in that is @in_nbytes bytes long.  */
 static void
 lzms_input_bitstream_init(struct lzms_input_bitstream *is,
-			  const le16 *in, size_t in_limit)
+			  const u8 *in, size_t in_nbytes)
 {
 	is->bitbuf = 0;
-	is->num_filled_bits = 0;
-	is->in = in + in_limit;
-	is->num_le16_remaining = in_limit;
+	is->bitsleft = 0;
+	is->next = in + (in_nbytes & ~1);
+	is->begin = in;
 }
 
 /* Ensures that @num_bits bits are buffered in the input bitstream.  */
-static int
+static inline void
 lzms_input_bitstream_ensure_bits(struct lzms_input_bitstream *is,
-				 unsigned num_bits)
+				 const unsigned num_bits)
 {
-	while (is->num_filled_bits < num_bits) {
-		u64 next;
+	if (is->bitsleft >= num_bits)
+		return;
 
-		LZMS_ASSERT(is->num_filled_bits + 16 <= sizeof(is->bitbuf) * 8);
+	if (unlikely(is->next == is->begin))
+		goto overflow;
+	is->bitbuf |= (bitbuf_t)get_unaligned_u16_le(is->next - 2) 
+			<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
+	is->next -= 2;
+	is->bitsleft += 16;
 
-		if (unlikely(is->num_le16_remaining == 0))
-			return -1;
-
-		next = get_unaligned_u16_le(--is->in);
-		is->num_le16_remaining--;
-
-		is->bitbuf |= next << (sizeof(is->bitbuf) * 8 - is->num_filled_bits - 16);
-		is->num_filled_bits += 16;
+	if (num_bits > 16 && is->bitsleft < num_bits) {
+		if (unlikely(is->next == is->begin))
+			goto overflow;
+		is->bitbuf |= (bitbuf_t)get_unaligned_u16_le(is->next - 2) 
+				<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
+		is->next -= 2;
+		is->bitsleft += 16;
 	}
-	return 0;
+	return;
 
+overflow:
+	is->bitsleft = num_bits;
 }
 
 /* Returns the next @num_bits bits that are buffered in the input bitstream.  */
-static u32
+static inline bitbuf_t
 lzms_input_bitstream_peek_bits(struct lzms_input_bitstream *is,
 			       unsigned num_bits)
 {
-	LZMS_ASSERT(is->num_filled_bits >= num_bits);
+	if (unlikely(num_bits == 0))
+		return 0;
 	return is->bitbuf >> (sizeof(is->bitbuf) * 8 - num_bits);
 }
 
 /* Removes the next @num_bits bits that are buffered in the input bitstream.  */
-static void
+static inline void
 lzms_input_bitstream_remove_bits(struct lzms_input_bitstream *is,
 				 unsigned num_bits)
 {
-	LZMS_ASSERT(is->num_filled_bits >= num_bits);
 	is->bitbuf <<= num_bits;
-	is->num_filled_bits -= num_bits;
+	is->bitsleft -= num_bits;
 }
 
 /* Removes and returns the next @num_bits bits that are buffered in the input
  * bitstream.  */
-static u32
+static inline bitbuf_t
 lzms_input_bitstream_pop_bits(struct lzms_input_bitstream *is,
 			      unsigned num_bits)
 {
-	u32 bits = lzms_input_bitstream_peek_bits(is, num_bits);
+	bitbuf_t bits = lzms_input_bitstream_peek_bits(is, num_bits);
 	lzms_input_bitstream_remove_bits(is, num_bits);
 	return bits;
 }
 
 /* Reads the next @num_bits from the input bitstream.  */
-static u32
+static inline bitbuf_t
 lzms_input_bitstream_read_bits(struct lzms_input_bitstream *is,
 			       unsigned num_bits)
 {
-	if (unlikely(lzms_input_bitstream_ensure_bits(is, num_bits)))
-		return 0;
+	lzms_input_bitstream_ensure_bits(is, num_bits);
 	return lzms_input_bitstream_pop_bits(is, num_bits);
 }
 
@@ -827,7 +831,7 @@ lzms_init_decompressor(struct lzms_decompressor *d,
 
 	/* Initialize the input bitstream for Huffman symbols (reading
 	 * backwards)  */
-	lzms_input_bitstream_init(&d->is, cdata, clen / 2);
+	lzms_input_bitstream_init(&d->is, cdata, clen);
 
 	/* Calculate the number of offset slots needed for this compressed
 	 * block.  */
