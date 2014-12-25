@@ -300,13 +300,13 @@ struct lzms_decompressor {
 	struct lzms_probability_entry lz_match_prob_entries[
 			LZMS_NUM_LZ_MATCH_STATES];
 
-	u32 lz_repeat_match_states[LZMS_NUM_RECENT_OFFSETS - 1];
-	struct lzms_probability_entry lz_repeat_match_prob_entries[
-			LZMS_NUM_RECENT_OFFSETS - 1][LZMS_NUM_LZ_REPEAT_MATCH_STATES];
-
 	u32 delta_match_state;
 	struct lzms_probability_entry delta_match_prob_entries[
 			LZMS_NUM_DELTA_MATCH_STATES];
+
+	u32 lz_repeat_match_states[LZMS_NUM_RECENT_OFFSETS - 1];
+	struct lzms_probability_entry lz_repeat_match_prob_entries[
+			LZMS_NUM_RECENT_OFFSETS - 1][LZMS_NUM_LZ_REPEAT_MATCH_STATES];
 
 	u32 delta_repeat_match_states[LZMS_NUM_RECENT_OFFSETS - 1];
 	struct lzms_probability_entry delta_repeat_match_prob_entries[
@@ -529,19 +529,19 @@ lzms_decode_lz_match_bit(struct lzms_decompressor *d)
 }
 
 static int
-lzms_decode_lz_repeat_match_bit(struct lzms_decompressor *d, int idx)
-{
-	return lzms_range_decode_bit(&d->rd, &d->lz_repeat_match_states[idx],
-				     LZMS_NUM_LZ_REPEAT_MATCH_STATES,
-				     d->lz_repeat_match_prob_entries[idx]);
-}
-
-static int
 lzms_decode_delta_match_bit(struct lzms_decompressor *d)
 {
 	return lzms_range_decode_bit(&d->rd, &d->delta_match_state,
 				     LZMS_NUM_DELTA_MATCH_STATES,
 				     d->delta_match_prob_entries);
+}
+
+static int
+lzms_decode_lz_repeat_match_bit(struct lzms_decompressor *d, int idx)
+{
+	return lzms_range_decode_bit(&d->rd, &d->lz_repeat_match_states[idx],
+				     LZMS_NUM_LZ_REPEAT_MATCH_STATES,
+				     d->lz_repeat_match_prob_entries[idx]);
 }
 
 static int
