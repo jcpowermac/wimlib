@@ -7,8 +7,9 @@
 #ifndef _WIMLIB_LZMS_H
 #define _WIMLIB_LZMS_H
 
+#include "wimlib/compiler.h"
 #include "wimlib/lzms_constants.h"
-#include "wimlib/util.h"
+#include "wimlib/types.h"
 
 //#define ENABLE_LZMS_DEBUG
 #ifdef ENABLE_LZMS_DEBUG

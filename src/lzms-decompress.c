@@ -51,14 +51,14 @@
  * A traditional LZ match consists of a length and offset; it asserts that the
  * sequence of bytes beginning at the current position and extending for the
  * length is exactly equal to the equal-length sequence of bytes at the offset
- * back in the window.  On the other hand, a delta match consists of a length,
- * raw offset, and power.  It asserts that the sequence of bytes beginning at
- * the current position and extending for the length is equal to the bytewise
- * sum of the two equal-length sequences of bytes (2**power) and (raw_offset *
- * 2**power) bytes before the current position, minus bytewise the sequence of
- * bytes beginning at (2**power + raw_offset * 2**power) bytes before the
- * current position.  Although not generally as useful as traditional LZ
- * matches, delta matches can be helpful on some types of data.  Both LZ and
+ * back in the data buffer.  On the other hand, a delta match consists of a
+ * length, raw offset, and power.  It asserts that the sequence of bytes
+ * beginning at the current position and extending for the length is equal to
+ * the bytewise sum of the two equal-length sequences of bytes (2**power) and
+ * (raw_offset * 2**power) bytes before the current position, minus bytewise the
+ * sequence of bytes beginning at (2**power + raw_offset * 2**power) bytes
+ * before the current position.  Although not generally as useful as traditional
+ * LZ matches, delta matches can be helpful on some types of data.  Both LZ and
  * delta matches may overlap with the current position; in fact, the minimum
  * offset is 1, regardless of match length.
  *
@@ -204,8 +204,6 @@
 #  include "config.h"
 #endif
 
-#include <limits.h>
-
 #include "wimlib/compress_common.h"
 #include "wimlib/decompressor_ops.h"
 #include "wimlib/decompress_common.h"
@@ -213,8 +211,9 @@
 #include "wimlib/lzms.h"
 #include "wimlib/util.h"
 
+/* The TABLEBITS values can be changed; they only affect decoding speed.  */
 #define LZMS_LITERAL_TABLEBITS		10
-#define LZMS_LENGTH_TABLEBITS		9
+#define LZMS_LENGTH_TABLEBITS		10
 #define LZMS_LZ_OFFSET_TABLEBITS	10
 #define LZMS_DELTA_OFFSET_TABLEBITS	10
 #define LZMS_DELTA_POWER_TABLEBITS	8
@@ -246,21 +245,23 @@ typedef u64 bitbuf_t;
 /* Structure used for reading raw bits backwards.  This is the second logical
  * bitstream mentioned above.  */
 struct lzms_input_bitstream {
+
 	/* Holding variable for bits that have been read from the compressed
-	 * data.  The bits are ordered from high-order to low-order.  */
+	 * data.  The bit ordering is high to low.  */
 	bitbuf_t bitbuf;
 
-	/* Number of bits in @bitbuf that are used.  */
+	/* Number of bits currently held in @bitbuf.  */
 	unsigned bitsleft;
 
 	/* Pointer to the one past the next little-endian 16-bit integer in the
 	 * compressed input data (reading backwards).  */
 	const le16 *next;
 
-	/* Pointer to the beginning of the compressed input buffer  */
+	/* Pointer to the beginning of the compressed input data.  */
 	const le16 *begin;
 };
 
+/* Bookkeeping information for an adaptive Huffman code  */
 struct lzms_huffman_rebuild_info {
 	unsigned num_syms_until_rebuild;
 	unsigned rebuild_freq;
@@ -352,8 +353,8 @@ struct lzms_decompressor {
 	}; // union
 };
 
-/* Initialize the input bitstream @is to read forwards from the specified
- * compressed data buffer @in that is @count 16-bit integers long.  */
+/* Initialize the input bitstream @is to read forwards from the compressed data
+ * buffer @in that is @count 16-bit integers long.  */
 static void
 lzms_input_bitstream_init(struct lzms_input_bitstream *is,
 			  const le16 *in, size_t count)
@@ -364,88 +365,76 @@ lzms_input_bitstream_init(struct lzms_input_bitstream *is,
 	is->begin = in;
 }
 
-/* Ensures that @num_bits bits are buffered in the input bitstream.  */
+/* Ensure that at least @num_bits bits are in the bitbuffer variable.  */
 static inline void
-lzms_input_bitstream_ensure_bits(struct lzms_input_bitstream *is,
-				 const unsigned num_bits)
+lzms_ensure_bits(struct lzms_input_bitstream *is, const unsigned num_bits)
 {
 	if (is->bitsleft >= num_bits)
 		return;
 
-	if (unlikely(is->next == is->begin))
-		goto overflow;
-	is->bitbuf |= (bitbuf_t)le16_to_cpu(*--is->next)
-			<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
-	is->bitsleft += 16;
-
-	if (num_bits > 16 && is->bitsleft < num_bits) {
-		if (unlikely(is->next == is->begin))
-			goto overflow;
+	if (likely(is->next != is->begin))
 		is->bitbuf |= (bitbuf_t)le16_to_cpu(*--is->next)
 				<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
+	is->bitsleft += 16;
+
+	if (unlikely(num_bits > 16 && is->bitsleft < num_bits)) {
+		if (likely(is->next != is->begin))
+			is->bitbuf |= (bitbuf_t)le16_to_cpu(*--is->next)
+					<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
 		is->bitsleft += 16;
 	}
-	return;
-
-overflow:
-	is->bitsleft = num_bits;
 }
 
-/* Returns the next @num_bits bits that are buffered in the input bitstream.  */
+/* Get @num_bits bits from the bitbuffer variable.  */
 static inline bitbuf_t
-lzms_input_bitstream_peek_bits(struct lzms_input_bitstream *is,
-			       unsigned num_bits)
+lzms_peek_bits(struct lzms_input_bitstream *is, unsigned num_bits)
 {
 	if (unlikely(num_bits == 0))
 		return 0;
 	return is->bitbuf >> (sizeof(is->bitbuf) * 8 - num_bits);
 }
 
-/* Removes the next @num_bits bits that are buffered in the input bitstream.  */
+/* Remove @num_bits bits from the bitbuffer variable.  */
 static inline void
-lzms_input_bitstream_remove_bits(struct lzms_input_bitstream *is,
-				 unsigned num_bits)
+lzms_remove_bits(struct lzms_input_bitstream *is, unsigned num_bits)
 {
 	is->bitbuf <<= num_bits;
 	is->bitsleft -= num_bits;
 }
 
-/* Removes and returns the next @num_bits bits that are buffered in the input
- * bitstream.  */
+/* Remove and return @num_bits bits from the bitbuffer variable.  */
 static inline bitbuf_t
-lzms_input_bitstream_pop_bits(struct lzms_input_bitstream *is,
-			      unsigned num_bits)
+lzms_pop_bits(struct lzms_input_bitstream *is, unsigned num_bits)
 {
-	bitbuf_t bits = lzms_input_bitstream_peek_bits(is, num_bits);
-	lzms_input_bitstream_remove_bits(is, num_bits);
+	bitbuf_t bits = lzms_peek_bits(is, num_bits);
+	lzms_remove_bits(is, num_bits);
 	return bits;
 }
 
-/* Reads the next @num_bits from the input bitstream.  */
+/* Read @num_bits bits from the input bitstream.  */
 static inline bitbuf_t
-lzms_input_bitstream_read_bits(struct lzms_input_bitstream *is,
-			       unsigned num_bits)
+lzms_read_bits(struct lzms_input_bitstream *is, unsigned num_bits)
 {
-	lzms_input_bitstream_ensure_bits(is, num_bits);
-	return lzms_input_bitstream_pop_bits(is, num_bits);
+	lzms_ensure_bits(is, num_bits);
+	return lzms_pop_bits(is, num_bits);
 }
 
 /* Initialize the range decoder @rd to read forwards from the specified
- * compressed data buffer @in that is @in_limit 16-bit integers long.  */
+ * compressed data buffer @in that is @count 16-bit integers long.  */
 static void
 lzms_range_decoder_init(struct lzms_range_decoder *rd,
-			const le16 *in, size_t in_limit)
+			const le16 *in, size_t count)
 {
 	rd->range = 0xffffffff;
 	rd->code = ((u32)le16_to_cpu(in[0]) << 16) |
 		   ((u32)le16_to_cpu(in[1]) <<  0);
 	rd->in = in + 2;
-	rd->num_le16_remaining = in_limit - 2;
+	rd->num_le16_remaining = count - 2;
 }
 
-/* Ensures the current range of the range decoder has at least 16 bits of
+/* Ensure the current range of the range decoder has at least 16 bits of
  * precision.  */
-static int
+static inline int
 lzms_range_decoder_normalize(struct lzms_range_decoder *rd)
 {
 	if (rd->range <= 0xffff) {
@@ -462,7 +451,7 @@ lzms_range_decoder_normalize(struct lzms_range_decoder *rd)
  *
  * @prob is the chance out of LZMS_PROBABILITY_MAX that the next bit is 0.
  */
-static int
+static inline int
 lzms_range_decoder_decode_bit(struct lzms_range_decoder *rd, u32 prob)
 {
 	u32 bound;
@@ -515,7 +504,7 @@ lzms_range_decode_bit(struct lzms_range_decoder *rd,
 	return bit;
 }
 
-static inline int
+static int
 lzms_decode_main_bit(struct lzms_decompressor *d)
 {
 	return lzms_range_decode_bit(&d->rd, &d->main_state,
@@ -523,7 +512,7 @@ lzms_decode_main_bit(struct lzms_decompressor *d)
 				     d->main_prob_entries);
 }
 
-static inline int
+static int
 lzms_decode_match_bit(struct lzms_decompressor *d)
 {
 	return lzms_range_decode_bit(&d->rd, &d->match_state,
@@ -531,7 +520,7 @@ lzms_decode_match_bit(struct lzms_decompressor *d)
 				     d->match_prob_entries);
 }
 
-static inline int
+static int
 lzms_decode_lz_match_bit(struct lzms_decompressor *d)
 {
 	return lzms_range_decode_bit(&d->rd, &d->lz_match_state,
@@ -539,7 +528,7 @@ lzms_decode_lz_match_bit(struct lzms_decompressor *d)
 				     d->lz_match_prob_entries);
 }
 
-static inline int
+static int
 lzms_decode_lz_repeat_match_bit(struct lzms_decompressor *d, int idx)
 {
 	return lzms_range_decode_bit(&d->rd, &d->lz_repeat_match_states[idx],
@@ -547,7 +536,7 @@ lzms_decode_lz_repeat_match_bit(struct lzms_decompressor *d, int idx)
 				     d->lz_repeat_match_prob_entries[idx]);
 }
 
-static inline int
+static int
 lzms_decode_delta_match_bit(struct lzms_decompressor *d)
 {
 	return lzms_range_decode_bit(&d->rd, &d->delta_match_state,
@@ -555,7 +544,7 @@ lzms_decode_delta_match_bit(struct lzms_decompressor *d)
 				     d->delta_match_prob_entries);
 }
 
-static inline int
+static int
 lzms_decode_delta_repeat_match_bit(struct lzms_decompressor *d, int idx)
 {
 	return lzms_range_decode_bit(&d->rd, &d->delta_repeat_match_states[idx],
@@ -619,16 +608,16 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 	 * adaptable.  */
 	lzms_rebuild_huffman_code_if_needed(rebuild_info);
 
-	lzms_input_bitstream_ensure_bits(is, LZMS_MAX_CODEWORD_LEN);
+	lzms_ensure_bits(is, LZMS_MAX_CODEWORD_LEN);
 
 	/* Index the decode table by the next table_bits bits of the input.  */
-	key_bits = lzms_input_bitstream_peek_bits(is, table_bits);
+	key_bits = lzms_peek_bits(is, table_bits);
 	entry = decode_table[key_bits];
 	if (likely(entry < 0xC000)) {
 		/* Fast case: The decode table directly provided the symbol and
 		 * codeword length.  The low 11 bits are the symbol, and the
 		 * high 5 bits are the codeword length.  */
-		lzms_input_bitstream_remove_bits(is, entry >> 11);
+		lzms_remove_bits(is, entry >> 11);
 		sym = entry & 0x7FF;
 	} else {
 		/* Slow case: The codeword for the symbol is longer than
@@ -636,9 +625,9 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 		 * the first (1 << table_bits) entries of the decode table.
 		 * Traverse the appropriate binary tree bit-by-bit in order to
 		 * decode the symbol.  */
-		lzms_input_bitstream_remove_bits(is, table_bits);
+		lzms_remove_bits(is, table_bits);
 		do {
-			key_bits = (entry & 0x3FFF) + lzms_input_bitstream_pop_bits(is, 1);
+			key_bits = (entry & 0x3FFF) + lzms_pop_bits(is, 1);
 		} while ((entry = decode_table[key_bits]) >= 0xC000);
 		sym = entry;
 	}
@@ -664,8 +653,12 @@ lzms_decode_length(struct lzms_decompressor *d)
 						   d->length_decode_table,
 						   LZMS_LENGTH_TABLEBITS,
 						   &d->length_rebuild_info);
-	return lzms_length_slot_base[slot] +
-	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_length_bits[slot]);
+	u32 length = lzms_length_slot_base[slot];
+	unsigned num_extra_bits = lzms_extra_length_bits[slot];
+	/* Usually most lengths are short and there are no extra bits.  */
+	if (num_extra_bits)
+		length += lzms_read_bits(&d->is, num_extra_bits);
+	return length;
 }
 
 static u32
@@ -676,7 +669,7 @@ lzms_decode_lz_offset(struct lzms_decompressor *d)
 						   LZMS_LZ_OFFSET_TABLEBITS,
 						   &d->lz_offset_rebuild_info);
 	return lzms_offset_slot_base[slot] +
-	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
+	       lzms_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
 
 static u32
@@ -687,7 +680,7 @@ lzms_decode_delta_offset(struct lzms_decompressor *d)
 						   LZMS_DELTA_OFFSET_TABLEBITS,
 						   &d->delta_offset_rebuild_info);
 	return lzms_offset_slot_base[slot] +
-	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
+	       lzms_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
 
 static unsigned
@@ -753,7 +746,7 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 				return -1;
 			if (unlikely(offset > out_next - out))
 				return -1;
-			lz_copy(out_next, length, offset, out_end, 1);
+			lz_copy(out_next, length, offset, out_end, LZMS_MIN_MATCH_LEN);
 			out_next += length;
 		} else {
 			u32 length, power, raw_offset;
@@ -827,7 +820,7 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 
 	/* Range decoding  */
 
-	lzms_range_decoder_init(&d->rd, in, in_nbytes / 2);
+	lzms_range_decoder_init(&d->rd, in, in_nbytes / sizeof(le16));
 
 	d->main_state = 0;
 	lzms_init_probability_entries(d->main_prob_entries, LZMS_NUM_MAIN_STATES);
@@ -850,7 +843,7 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 
 	/* Huffman decoding  */
 
-	lzms_input_bitstream_init(&d->is, in, in_nbytes / 2);
+	lzms_input_bitstream_init(&d->is, in, in_nbytes / sizeof(le16));
 
 	lzms_init_huffman_rebuild_info(&d->literal_rebuild_info,
 				       LZMS_LITERAL_CODE_REBUILD_FREQ,
@@ -917,7 +910,7 @@ lzms_create_decompressor(size_t max_bufsize, void **d_ret)
 
 /* Decompress @in_nbytes bytes of LZMS-compressed data at @in and write the
  * uncompressed data, which had original size @out_nbytes, to @out.  Return 0 if
- * successful or nonzero if unsuccessful.  */
+ * successful, or nonzero if the compressed data is invalid.  */
 static int
 lzms_decompress(const void *in, size_t in_nbytes, void *out, size_t out_nbytes,
 		void *_d)
@@ -925,14 +918,14 @@ lzms_decompress(const void *in, size_t in_nbytes, void *out, size_t out_nbytes,
 	struct lzms_decompressor *d = _d;
 
 	/*
-	 * Requirements on compressed data:
+	 * Requirements on the compressed data:
 	 *
-	 * - LZMS-compressed data is a series of 16-bit integers, so the
-	 *   compressed data buffer cannot take up an odd number of bytes.
-	 * - To prevent poor performance on some architectures we require that
-	 *   the compressed data buffer is 2-byte aligned.
-	 * - There must be at least 4 bytes of compressed data, since otherwise
-	 *   we cannot even initialize the range decoder.
+	 * 1. LZMS-compressed data is a series of 16-bit integers, so the
+	 *    compressed data buffer cannot take up an odd number of bytes.
+	 * 2. To prevent poor performance on some architectures we require that
+	 *    the compressed data buffer is 2-byte aligned.
+	 * 3. There must be at least 4 bytes of compressed data, since otherwise
+	 *    we cannot even initialize the range decoder.
 	 */
 	if ((in_nbytes & 1) || ((uintptr_t)in & 1) || (in_nbytes < 4))
 		return -1;
