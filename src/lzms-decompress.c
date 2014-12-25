@@ -204,6 +204,8 @@
 #  include "config.h"
 #endif
 
+#include <limits.h>
+
 #include "wimlib/compress_common.h"
 #include "wimlib/decompressor_ops.h"
 #include "wimlib/decompress_common.h"
@@ -212,9 +214,11 @@
 #include "wimlib/unaligned.h"
 #include "wimlib/util.h"
 
-#include <limits.h>
-
-#define LZMS_DECODE_TABLE_BITS	10
+#define LZMS_LITERAL_TABLEBITS		10
+#define LZMS_LENGTH_TABLEBITS		9
+#define LZMS_LZ_OFFSET_TABLEBITS	10
+#define LZMS_DELTA_OFFSET_TABLEBITS	10
+#define LZMS_DELTA_POWER_TABLEBITS	8
 
 /* Structure used for range decoding, reading bits forwards.  This is the first
  * logical bitstream mentioned above.  */
@@ -259,6 +263,17 @@ struct lzms_input_bitstream {
 	size_t num_le16_remaining;
 };
 
+struct lzms_huffman_rebuild_info {
+	unsigned num_syms_until_rebuild;
+	unsigned rebuild_freq;
+	u16 *decode_table;
+	unsigned table_bits;
+	u32 *freqs;
+	u32 *codewords;
+	u8 *lens;
+	unsigned num_syms;
+};
+
 struct lzms_decompressor {
 
 	/* ('last_target_usages' is in union with everything else because it is
@@ -271,8 +286,6 @@ struct lzms_decompressor {
 	struct lzms_input_bitstream is;
 
 	struct lzms_lru_queues lru;
-
-	u32 num_offset_slots;
 
 	/* Range decoding  */
 
@@ -302,35 +315,35 @@ struct lzms_decompressor {
 
 	/* Huffman decoding  */
 
-	u32 num_literals_until_rebuild;
-	u32 literal_freqs[LZMS_NUM_LITERAL_SYMS];
-	u16 literal_decode_table[(1 << LZMS_DECODE_TABLE_BITS) +
+	u16 literal_decode_table[(1 << LZMS_LITERAL_TABLEBITS) +
 				 (2 * LZMS_NUM_LITERAL_SYMS)]
 		_aligned_attribute(DECODE_TABLE_ALIGNMENT);
+	u32 literal_freqs[LZMS_NUM_LITERAL_SYMS];
+	struct lzms_huffman_rebuild_info literal_rebuild_info;
 
-	u32 num_lengths_until_rebuild;
-	u32 length_freqs[LZMS_NUM_LEN_SYMS];
-	u16 length_decode_table[(1 << LZMS_DECODE_TABLE_BITS) +
+	u16 length_decode_table[(1 << LZMS_LENGTH_TABLEBITS) +
 				(2 * LZMS_NUM_LEN_SYMS)]
 		_aligned_attribute(DECODE_TABLE_ALIGNMENT);
+	u32 length_freqs[LZMS_NUM_LEN_SYMS];
+	struct lzms_huffman_rebuild_info length_rebuild_info;
 
-	u32 num_lz_offsets_until_rebuild;
-	u32 lz_offset_freqs[LZMS_MAX_NUM_OFFSET_SYMS];
-	u16 lz_offset_decode_table[(1 << LZMS_DECODE_TABLE_BITS) +
+	u16 lz_offset_decode_table[(1 << LZMS_LZ_OFFSET_TABLEBITS) +
 				   ( 2 * LZMS_MAX_NUM_OFFSET_SYMS)]
 		_aligned_attribute(DECODE_TABLE_ALIGNMENT);
+	u32 lz_offset_freqs[LZMS_MAX_NUM_OFFSET_SYMS];
+	struct lzms_huffman_rebuild_info lz_offset_rebuild_info;
 
-	u32 num_delta_offsets_until_rebuild;
-	u32 delta_offset_freqs[LZMS_MAX_NUM_OFFSET_SYMS];
-	u16 delta_offset_decode_table[(1 << LZMS_DECODE_TABLE_BITS) +
+	u16 delta_offset_decode_table[(1 << LZMS_DELTA_OFFSET_TABLEBITS) +
 				      (2 * LZMS_MAX_NUM_OFFSET_SYMS)]
 		_aligned_attribute(DECODE_TABLE_ALIGNMENT);
+	u32 delta_offset_freqs[LZMS_MAX_NUM_OFFSET_SYMS];
+	struct lzms_huffman_rebuild_info delta_offset_rebuild_info;
 
-	u32 num_delta_powers_until_rebuild;
-	u32 delta_power_freqs[LZMS_NUM_DELTA_POWER_SYMS];
-	u16 delta_power_decode_table[(1 << LZMS_DECODE_TABLE_BITS) +
+	u16 delta_power_decode_table[(1 << LZMS_DELTA_POWER_TABLEBITS) +
 				     (2 * LZMS_NUM_DELTA_POWER_SYMS)]
 		_aligned_attribute(DECODE_TABLE_ALIGNMENT);
+	u32 delta_power_freqs[LZMS_NUM_DELTA_POWER_SYMS];
+	struct lzms_huffman_rebuild_info delta_power_rebuild_info;
 
 	u32 codewords[LZMS_MAX_NUM_SYMS];
 	u8 lens[LZMS_MAX_NUM_SYMS];
@@ -549,12 +562,48 @@ lzms_decode_delta_repeat_match_bit(struct lzms_decompressor *d, int idx)
 				     d->delta_repeat_match_prob_entries[idx]);
 }
 
+static void
+lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
+			       unsigned rebuild_freq,
+			       u16 *decode_table, unsigned table_bits,
+			       u32 *freqs, u32 *codewords, u8 *lens,
+			       unsigned num_syms)
+{
+	info->num_syms_until_rebuild = 1;
+	info->rebuild_freq = rebuild_freq;
+	info->decode_table = decode_table;
+	info->table_bits = table_bits;
+	info->freqs = freqs;
+	info->codewords = codewords;
+	info->lens = lens;
+	info->num_syms = num_syms;
+	lzms_init_symbol_frequencies(freqs, num_syms);
+}
+
+static noinline void
+lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
+{
+	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
+				    info->freqs, info->lens, info->codewords);
+	make_huffman_decode_table(info->decode_table, info->num_syms,
+				  info->table_bits, info->lens,
+				  LZMS_MAX_CODEWORD_LEN);
+	for (unsigned i = 0; i < info->num_syms; i++)
+		info->freqs[i] = (info->freqs[i] >> 1) + 1;
+	info->num_syms_until_rebuild = info->rebuild_freq;
+}
+
+static inline void
+lzms_rebuild_huffman_code_if_needed(struct lzms_huffman_rebuild_info *info)
+{
+	if (unlikely(--info->num_syms_until_rebuild == 0))
+		lzms_rebuild_huffman_code(info);
+}
+
 static inline unsigned
 lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 			   u16 decode_table[], unsigned table_bits,
-			   u32 *num_syms_until_rebuild, u32 rebuild_freq,
-			   u32 freqs[], u32 codewords[], u8 lens[],
-			   unsigned num_syms)
+			   struct lzms_huffman_rebuild_info *rebuild_info)
 {
 	unsigned entry;
 	unsigned key_bits;
@@ -567,16 +616,7 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 	 * rebuild.  This diminishes the effect of old symbols on the current
 	 * Huffman codes, thereby causing the Huffman codes to be more locally
 	 * adaptable.  */
-	if (unlikely(--*num_syms_until_rebuild == 0)) {
-		make_canonical_huffman_code(num_syms, LZMS_MAX_CODEWORD_LEN,
-					    freqs, lens, codewords);
-		make_huffman_decode_table(decode_table, num_syms,
-					  table_bits, lens,
-					  LZMS_MAX_CODEWORD_LEN);
-		for (unsigned i = 0; i < num_syms; i++)
-			freqs[i] = (freqs[i] >> 1) + 1;
-		*num_syms_until_rebuild = rebuild_freq;
-	}
+	lzms_rebuild_huffman_code_if_needed(rebuild_info);
 
 	lzms_input_bitstream_ensure_bits(is, LZMS_MAX_CODEWORD_LEN);
 
@@ -595,7 +635,7 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 		 * the first (1 << table_bits) entries of the decode table.
 		 * Traverse the appropriate binary tree bit-by-bit in order to
 		 * decode the symbol.  */
-		lzms_input_bitstream_remove_bits(is, LZMS_DECODE_TABLE_BITS);
+		lzms_input_bitstream_remove_bits(is, table_bits);
 		do {
 			key_bits = (entry & 0x3FFF) + lzms_input_bitstream_pop_bits(is, 1);
 		} while ((entry = decode_table[key_bits]) >= 0xC000);
@@ -603,7 +643,7 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 	}
 
 	/* Tally and return the decoded symbol.  */
-	freqs[sym]++;
+	rebuild_info->freqs[sym]++;
 	return sym;
 }
 
@@ -612,13 +652,8 @@ lzms_decode_literal(struct lzms_decompressor *d)
 {
 	return lzms_decode_huffman_symbol(&d->is,
 					  d->literal_decode_table,
-					  LZMS_DECODE_TABLE_BITS,
-					  &d->num_literals_until_rebuild,
-					  LZMS_LITERAL_CODE_REBUILD_FREQ,
-					  d->literal_freqs,
-					  d->codewords,
-					  d->lens,
-					  LZMS_NUM_LITERAL_SYMS);
+					  LZMS_LITERAL_TABLEBITS,
+					  &d->literal_rebuild_info);
 }
 
 static u32
@@ -626,13 +661,8 @@ lzms_decode_length(struct lzms_decompressor *d)
 {
 	unsigned slot = lzms_decode_huffman_symbol(&d->is,
 						   d->length_decode_table,
-						   LZMS_DECODE_TABLE_BITS,
-						   &d->num_lengths_until_rebuild,
-						   LZMS_LENGTH_CODE_REBUILD_FREQ,
-						   d->length_freqs,
-						   d->codewords,
-						   d->lens,
-						   LZMS_NUM_LEN_SYMS);
+						   LZMS_LENGTH_TABLEBITS,
+						   &d->length_rebuild_info);
 	return lzms_length_slot_base[slot] +
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_length_bits[slot]);
 }
@@ -642,13 +672,8 @@ lzms_decode_lz_offset(struct lzms_decompressor *d)
 {
 	unsigned slot = lzms_decode_huffman_symbol(&d->is,
 						   d->lz_offset_decode_table,
-						   LZMS_DECODE_TABLE_BITS,
-						   &d->num_lz_offsets_until_rebuild,
-						   LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
-						   d->lz_offset_freqs,
-						   d->codewords,
-						   d->lens,
-						   d->num_offset_slots);
+						   LZMS_LZ_OFFSET_TABLEBITS,
+						   &d->lz_offset_rebuild_info);
 	return lzms_offset_slot_base[slot] +
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
@@ -658,13 +683,8 @@ lzms_decode_delta_offset(struct lzms_decompressor *d)
 {
 	unsigned slot = lzms_decode_huffman_symbol(&d->is,
 						   d->delta_offset_decode_table,
-						   LZMS_DECODE_TABLE_BITS,
-						   &d->num_delta_offsets_until_rebuild,
-						   LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
-						   d->delta_offset_freqs,
-						   d->codewords,
-						   d->lens,
-						   d->num_offset_slots);
+						   LZMS_DELTA_OFFSET_TABLEBITS,
+						   &d->delta_offset_rebuild_info);
 	return lzms_offset_slot_base[slot] +
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
@@ -674,13 +694,8 @@ lzms_decode_delta_power(struct lzms_decompressor *d)
 {
 	return lzms_decode_huffman_symbol(&d->is,
 					  d->delta_power_decode_table,
-					  LZMS_DECODE_TABLE_BITS,
-					  &d->num_delta_powers_until_rebuild,
-					  LZMS_DELTA_POWER_CODE_REBUILD_FREQ,
-					  d->delta_power_freqs,
-					  d->codewords,
-					  d->lens,
-					  LZMS_NUM_DELTA_POWER_SYMS);
+					  LZMS_DELTA_POWER_TABLEBITS,
+					  &d->delta_power_rebuild_info);
 }
 
 /* Decode the series of literals and matches from the LZMS-compressed data.
@@ -816,19 +831,49 @@ lzms_init_decompressor(struct lzms_decompressor *d,
 
 	/* Calculate the number of offset slots needed for this compressed
 	 * block.  */
-	d->num_offset_slots = lzms_get_offset_slot(ulen - 1) + 1;
+	unsigned num_offset_slots = lzms_get_offset_slot(ulen - 1) + 1;
 
 	/* Prepare for Huffman decoding  */
-	d->num_literals_until_rebuild = 1;
-	d->num_lengths_until_rebuild = 1;
-	d->num_lz_offsets_until_rebuild = 1;
-	d->num_delta_offsets_until_rebuild = 1;
-	d->num_delta_powers_until_rebuild = 1;
-	lzms_init_symbol_frequencies(d->literal_freqs, LZMS_NUM_LITERAL_SYMS);
-	lzms_init_symbol_frequencies(d->length_freqs, LZMS_NUM_LEN_SYMS);
-	lzms_init_symbol_frequencies(d->lz_offset_freqs, d->num_offset_slots);
-	lzms_init_symbol_frequencies(d->delta_offset_freqs, d->num_offset_slots);
-	lzms_init_symbol_frequencies(d->delta_power_freqs, LZMS_NUM_DELTA_POWER_SYMS);
+	lzms_init_huffman_rebuild_info(&d->literal_rebuild_info,
+				       LZMS_LITERAL_CODE_REBUILD_FREQ,
+				       d->literal_decode_table,
+				       LZMS_LITERAL_TABLEBITS,
+				       d->literal_freqs,
+				       d->codewords,
+				       d->lens,
+				       LZMS_NUM_LITERAL_SYMS);
+	lzms_init_huffman_rebuild_info(&d->length_rebuild_info,
+				       LZMS_LENGTH_CODE_REBUILD_FREQ,
+				       d->length_decode_table,
+				       LZMS_LENGTH_TABLEBITS,
+				       d->length_freqs,
+				       d->codewords,
+				       d->lens,
+				       LZMS_NUM_LEN_SYMS);
+	lzms_init_huffman_rebuild_info(&d->lz_offset_rebuild_info,
+				       LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
+				       d->lz_offset_decode_table,
+				       LZMS_LZ_OFFSET_TABLEBITS,
+				       d->lz_offset_freqs,
+				       d->codewords,
+				       d->lens,
+				       num_offset_slots);
+	lzms_init_huffman_rebuild_info(&d->delta_offset_rebuild_info,
+				       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
+				       d->delta_offset_decode_table,
+				       LZMS_DELTA_OFFSET_TABLEBITS,
+				       d->delta_offset_freqs,
+				       d->codewords,
+				       d->lens,
+				       num_offset_slots);
+	lzms_init_huffman_rebuild_info(&d->delta_power_rebuild_info,
+				       LZMS_DELTA_POWER_CODE_REBUILD_FREQ,
+				       d->delta_power_decode_table,
+				       LZMS_DELTA_POWER_TABLEBITS,
+				       d->delta_power_freqs,
+				       d->codewords,
+				       d->lens,
+				       LZMS_NUM_DELTA_POWER_SYMS);
 
 	/* Initialize states and probability entries for range decoding  */
 
