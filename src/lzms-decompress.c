@@ -678,7 +678,7 @@ lzms_decode_lz_offset(struct lzms_decompressor *d)
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
 
-static inline u32
+static u32
 lzms_decode_delta_offset(struct lzms_decompressor *d)
 {
 	unsigned slot = lzms_decode_huffman_symbol(&d->is,
@@ -689,7 +689,7 @@ lzms_decode_delta_offset(struct lzms_decompressor *d)
 	       lzms_input_bitstream_read_bits(&d->is, lzms_extra_offset_bits[slot]);
 }
 
-static inline unsigned
+static unsigned
 lzms_decode_delta_power(struct lzms_decompressor *d)
 {
 	return lzms_decode_huffman_symbol(&d->is,
