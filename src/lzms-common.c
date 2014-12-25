@@ -153,6 +153,13 @@ lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t cou
 	}
 }
 
+void
+lzms_init_symbol_frequencies(u32 freqs[], size_t num_syms)
+{
+	for (size_t i = 0; i < num_syms; i++)
+		freqs[i] = 1;
+}
+
 /*
  * Translate relative addresses embedded in x86 instructions into absolute
  * addresses (@undo == %false), or undo this translation (@undo == %true).

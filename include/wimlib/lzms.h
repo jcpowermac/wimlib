@@ -40,9 +40,6 @@ struct lzms_probability_entry {
 	u64 recent_bits;
 };
 
-extern void
-lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t count);
-
 /* LRU queues for LZ matches.  */
 struct lzms_lz_lru_queues {
 
@@ -103,6 +100,12 @@ lzms_get_length_slot(u32 length)
 {
 	return lzms_get_slot(length, lzms_length_slot_base, LZMS_NUM_LEN_SYMS);
 }
+
+extern void
+lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t count);
+
+extern void
+lzms_init_symbol_frequencies(u32 freqs[], size_t num_syms);
 
 extern void
 lzms_init_lz_lru_queues(struct lzms_lz_lru_queues *lz);
