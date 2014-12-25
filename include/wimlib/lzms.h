@@ -113,14 +113,39 @@ lzms_init_delta_lru_queues(struct lzms_delta_lru_queues *delta);
 extern void
 lzms_init_lru_queues(struct lzms_lru_queues *lru);
 
-extern void
-lzms_update_lz_lru_queue(struct lzms_lz_lru_queues *lz);
+static inline void
+lzms_update_lz_lru_queue(struct lzms_lz_lru_queues *lz)
+{
+	if (lz->prev_offset != 0) {
+		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
+			lz->recent_offsets[i + 1] = lz->recent_offsets[i];
+		lz->recent_offsets[0] = lz->prev_offset;
+	}
+	lz->prev_offset = lz->upcoming_offset;
+}
 
-extern void
-lzms_update_delta_lru_queues(struct lzms_delta_lru_queues *delta);
+static inline void
+lzms_update_delta_lru_queues(struct lzms_delta_lru_queues *delta)
+{
+	if (delta->prev_offset != 0) {
+		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--) {
+			delta->recent_offsets[i + 1] = delta->recent_offsets[i];
+			delta->recent_powers[i + 1] = delta->recent_powers[i];
+		}
+		delta->recent_offsets[0] = delta->prev_offset;
+		delta->recent_powers[0] = delta->prev_power;
+	}
 
-extern void
-lzms_update_lru_queues(struct lzms_lru_queues *lru);
+	delta->prev_offset = delta->upcoming_offset;
+	delta->prev_power = delta->upcoming_power;
+}
+
+static inline void
+lzms_update_lru_queues(struct lzms_lru_queues *lru)
+{
+	lzms_update_lz_lru_queue(&lru->lz);
+	lzms_update_delta_lru_queues(&lru->delta);
+}
 
 /* Given a decoded bit, update the probability entry.  */
 static inline void

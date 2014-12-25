@@ -307,15 +307,15 @@ struct lzms_huffman_decoder {
 				_aligned_attribute(DECODE_TABLE_ALIGNMENT);
 };
 
-/* State of the LZMS decompressor.  */
+/* The main LZMS decompressor structure  */
 struct lzms_decompressor {
 
 	/* Range decoder, which reads bits from the beginning of the compressed
-	 * block, going forwards.  */
+	 * block, going forwards  */
 	struct lzms_range_decoder rd;
 
 	/* Input bitstream, which reads from the end of the compressed block,
-	 * going backwards.  */
+	 * going backwards  */
 	struct lzms_input_bitstream is;
 
 	/* States and probability tables for range decoding  */
@@ -344,17 +344,17 @@ struct lzms_decompressor {
 	struct lzms_probability_entry delta_repeat_match_prob_entries[
 			LZMS_NUM_RECENT_OFFSETS - 1][LZMS_NUM_DELTA_REPEAT_MATCH_STATES];
 
-	/* Huffman decoders.  */
+	/* Huffman decoders  */
 	struct lzms_huffman_decoder literal_decoder;
 	struct lzms_huffman_decoder lz_offset_decoder;
 	struct lzms_huffman_decoder length_decoder;
 	struct lzms_huffman_decoder delta_power_decoder;
 	struct lzms_huffman_decoder delta_offset_decoder;
 
-	/* LRU (least-recently-used) queues for match information.  */
+	/* LRU (least-recently-used) queues for match offsets  */
 	struct lzms_lru_queues lru;
 
-	/* Used for postprocessing.  */
+	/* Used for postprocessing  */
 	s32 last_target_usages[65536];
 };
 

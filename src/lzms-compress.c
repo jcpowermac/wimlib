@@ -1234,10 +1234,7 @@ lzms_init_range_encoder(struct lzms_range_encoder *enc,
 	enc->state = 0;
 	LZMS_ASSERT(is_power_of_2(num_states));
 	enc->mask = num_states - 1;
-	for (u32 i = 0; i < num_states; i++) {
-		enc->prob_entries[i].num_recent_zero_bits = LZMS_INITIAL_PROBABILITY;
-		enc->prob_entries[i].recent_bits = LZMS_INITIAL_RECENT_BITS;
-	}
+	lzms_init_probability_entries(enc->prob_entries, num_states);
 }
 
 static void
