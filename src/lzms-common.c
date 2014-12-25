@@ -144,6 +144,15 @@ lzms_init_slots(void)
 	pthread_once(&once, lzms_compute_slots);
 }
 
+void
+lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t count)
+{
+	for (size_t i = 0; i < count; i++) {
+		entries[i].num_recent_zero_bits = LZMS_INITIAL_PROBABILITY;
+		entries[i].recent_bits = LZMS_INITIAL_RECENT_BITS;
+	}
+}
+
 /*
  * Translate relative addresses embedded in x86 instructions into absolute
  * addresses (@undo == %false), or undo this translation (@undo == %true).

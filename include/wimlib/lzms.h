@@ -40,6 +40,9 @@ struct lzms_probability_entry {
 	u64 recent_bits;
 };
 
+extern void
+lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t count);
+
 /* LRU queues for LZ matches.  */
 struct lzms_lz_lru_queues {
 
