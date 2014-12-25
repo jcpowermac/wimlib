@@ -365,7 +365,8 @@ lzms_input_bitstream_init(struct lzms_input_bitstream *is,
 	is->begin = in;
 }
 
-/* Ensure that at least @num_bits bits are in the bitbuffer variable.  */
+/* Ensure that at least @num_bits bits are in the bitbuffer variable.
+ * @num_bits cannot be more than 32.  */
 static inline void
 lzms_ensure_bits(struct lzms_input_bitstream *is, const unsigned num_bits)
 {
@@ -377,12 +378,10 @@ lzms_ensure_bits(struct lzms_input_bitstream *is, const unsigned num_bits)
 				<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
 	is->bitsleft += 16;
 
-	if (unlikely(num_bits > 16 && is->bitsleft < num_bits)) {
-		if (likely(is->next != is->begin))
-			is->bitbuf |= (bitbuf_t)le16_to_cpu(*--is->next)
-					<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
-		is->bitsleft += 16;
-	}
+	if (likely(is->next != is->begin))
+		is->bitbuf |= (bitbuf_t)le16_to_cpu(*--is->next)
+				<< (sizeof(is->bitbuf) * 8 - is->bitsleft - 16);
+	is->bitsleft += 16;
 }
 
 /* Get @num_bits bits from the bitbuffer variable.  */
