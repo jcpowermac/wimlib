@@ -831,6 +831,9 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 	d->lz_match_state = 0;
 	lzms_init_probability_entries(d->lz_match_prob_entries, LZMS_NUM_LZ_MATCH_STATES);
 
+	d->delta_match_state = 0;
+	lzms_init_probability_entries(d->delta_match_prob_entries, LZMS_NUM_DELTA_MATCH_STATES);
+
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++) {
 		d->lz_repeat_match_states[i] = 0;
 		lzms_init_probability_entries(d->lz_repeat_match_prob_entries[i],

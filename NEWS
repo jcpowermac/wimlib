@@ -8,8 +8,8 @@ Version 1.7.4-BETA:
 	the target files do not yet exist.
 
 	Made more improvements to compression and decompression.  Most notable
-	is about 10% faster XPRESS compression with a tiny improvement in
-	compression ratio.
+	are performance improvements in XPRESS compression and LZMS
+	decompression.
 
 	Removed the --with-imagex-progname and --enable-more-assertions
 	configure options.
