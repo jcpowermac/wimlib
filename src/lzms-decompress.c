@@ -770,13 +770,11 @@ lzms_init_decompressor(struct lzms_decompressor *d,
 /* Decode the series of literals and matches from the LZMS-compressed data.
  * Returns 0 on success; nonzero if the compressed data is invalid.  */
 static int
-lzms_decode_items(const u8 *cdata, size_t clen, u8 *out, size_t out_nbytes,
-		  struct lzms_decompressor *d)
+lzms_decode_items(struct lzms_decompressor * const restrict d,
+		  u8 * const restrict out, const size_t out_nbytes)
 {
 	u8 *out_next = out;
 	u8 * const out_end = out + out_nbytes;
-
-	lzms_init_decompressor(d, cdata, clen, out, out_nbytes);
 
 	while (out_next != out_end) {
 
@@ -911,9 +909,12 @@ lzms_decompress(const void *compressed_data, size_t compressed_size,
 	if (uncompressed_size == 0)
 		return 0;
 
+	/* Initialize the decompressor.  */
+	lzms_init_decompressor(d, compressed_data, compressed_size,
+			       uncompressed_data, uncompressed_size);
+
 	/* Decode the literals and matches.  */
-	if (lzms_decode_items(compressed_data, compressed_size,
-			      uncompressed_data, uncompressed_size, d))
+	if (lzms_decode_items(d, uncompressed_data, uncompressed_size))
 		return -1;
 
 	/* Postprocess the data.  */
