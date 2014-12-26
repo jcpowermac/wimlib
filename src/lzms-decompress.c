@@ -272,8 +272,14 @@ struct lzms_decompressor {
 	struct {
 
 	struct lzms_range_decoder rd;
-
 	struct lzms_input_bitstream is;
+
+	u32 recent_lz_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
+	u64 recent_delta_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
+	u32 pending_lz_offset;
+	u64 pending_delta_offset;
+	const u8 *lz_offset_still_pending;
+	const u8 *delta_offset_still_pending;
 
 	/* Range decoding  */
 
@@ -673,12 +679,6 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 	u8 * const out_end = out + out_nbytes;
 
 	BUILD_BUG_ON(4 != LZMS_NUM_RECENT_OFFSETS + 1);
-	u32 recent_lz_offsets[4] = {1, 2, 3, 4};
-	u64 recent_delta_offsets[4] = {1, 2, 3, 4};
-	u32 pending_lz_offset = 0;
-	u64 pending_delta_offset = 0;
-	const u8 *lz_offset_still_pending = NULL;
-	const u8 *delta_offset_still_pending = NULL;
 
 	while (out_next != out_end) {
 
@@ -694,13 +694,13 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			u32 offset;
 			u32 length;
 
-			if (pending_lz_offset != 0 && out_next != lz_offset_still_pending) {
+			if (d->pending_lz_offset != 0 && out_next != d->lz_offset_still_pending) {
 				BUILD_BUG_ON(LZMS_NUM_RECENT_OFFSETS != 3);
-				recent_lz_offsets[3] = recent_lz_offsets[2];
-				recent_lz_offsets[2] = recent_lz_offsets[1];
-				recent_lz_offsets[1] = recent_lz_offsets[0];
-				recent_lz_offsets[0] = pending_lz_offset;
-				pending_lz_offset = 0;
+				d->recent_lz_offsets[3] = d->recent_lz_offsets[2];
+				d->recent_lz_offsets[2] = d->recent_lz_offsets[1];
+				d->recent_lz_offsets[1] = d->recent_lz_offsets[0];
+				d->recent_lz_offsets[0] = d->pending_lz_offset;
+				d->pending_lz_offset = 0;
 			}
 
 			if (!lzms_decode_lz_match_bit(d)) {
@@ -711,28 +711,28 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 				BUILD_BUG_ON(LZMS_NUM_RECENT_OFFSETS != 3);
 				if (!lzms_decode_lz_repeat_match_bit(d, 0)) {
-					offset = recent_lz_offsets[0];
-					recent_lz_offsets[0] = recent_lz_offsets[1];
-					recent_lz_offsets[1] = recent_lz_offsets[2];
-					recent_lz_offsets[2] = recent_lz_offsets[3];
+					offset = d->recent_lz_offsets[0];
+					d->recent_lz_offsets[0] = d->recent_lz_offsets[1];
+					d->recent_lz_offsets[1] = d->recent_lz_offsets[2];
+					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
 				} else if (!lzms_decode_lz_repeat_match_bit(d, 1)) {
-					offset = recent_lz_offsets[1];
-					recent_lz_offsets[1] = recent_lz_offsets[2];
-					recent_lz_offsets[2] = recent_lz_offsets[3];
+					offset = d->recent_lz_offsets[1];
+					d->recent_lz_offsets[1] = d->recent_lz_offsets[2];
+					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
 				} else {
-					offset = recent_lz_offsets[2];
-					recent_lz_offsets[2] = recent_lz_offsets[3];
+					offset = d->recent_lz_offsets[2];
+					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
 				}
 			}
 
-			if (pending_lz_offset != 0) {
+			if (d->pending_lz_offset != 0) {
 				BUILD_BUG_ON(LZMS_NUM_RECENT_OFFSETS != 3);
-				recent_lz_offsets[3] = recent_lz_offsets[2];
-				recent_lz_offsets[2] = recent_lz_offsets[1];
-				recent_lz_offsets[1] = recent_lz_offsets[0];
-				recent_lz_offsets[0] = pending_lz_offset;
+				d->recent_lz_offsets[3] = d->recent_lz_offsets[2];
+				d->recent_lz_offsets[2] = d->recent_lz_offsets[1];
+				d->recent_lz_offsets[1] = d->recent_lz_offsets[0];
+				d->recent_lz_offsets[0] = d->pending_lz_offset;
 			}
-			pending_lz_offset = offset;
+			d->pending_lz_offset = offset;
 
 			length = lzms_decode_length(d);
 
@@ -744,7 +744,7 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			lz_copy(out_next, length, offset, out_end, LZMS_MIN_MATCH_LEN);
 			out_next += length;
 
-			lz_offset_still_pending = out_next;
+			d->lz_offset_still_pending = out_next;
 		} else {
 			/* Delta match  */
 
@@ -753,13 +753,13 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			const u8 *matchptr1, *matchptr2, *matchptr;
 			u32 length;
 
-			if (pending_delta_offset != 0 && out_next != delta_offset_still_pending) {
+			if (d->pending_delta_offset != 0 && out_next != d->delta_offset_still_pending) {
 				BUILD_BUG_ON(LZMS_NUM_RECENT_OFFSETS != 3);
-				recent_delta_offsets[3] = recent_delta_offsets[2];
-				recent_delta_offsets[2] = recent_delta_offsets[1];
-				recent_delta_offsets[1] = recent_delta_offsets[0];
-				recent_delta_offsets[0] = pending_delta_offset;
-				pending_delta_offset = 0;
+				d->recent_delta_offsets[3] = d->recent_delta_offsets[2];
+				d->recent_delta_offsets[2] = d->recent_delta_offsets[1];
+				d->recent_delta_offsets[1] = d->recent_delta_offsets[0];
+				d->recent_delta_offsets[0] = d->pending_delta_offset;
+				d->pending_delta_offset = 0;
 			}
 
 			if (!lzms_decode_delta_match_bit(d)) {
@@ -772,31 +772,31 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 				BUILD_BUG_ON(LZMS_NUM_RECENT_OFFSETS != 3);
 				if (!lzms_decode_delta_repeat_match_bit(d, 0)) {
-					val = recent_delta_offsets[0];
-					recent_delta_offsets[0] = recent_delta_offsets[1];
-					recent_delta_offsets[1] = recent_delta_offsets[2];
-					recent_delta_offsets[2] = recent_delta_offsets[3];
+					val = d->recent_delta_offsets[0];
+					d->recent_delta_offsets[0] = d->recent_delta_offsets[1];
+					d->recent_delta_offsets[1] = d->recent_delta_offsets[2];
+					d->recent_delta_offsets[2] = d->recent_delta_offsets[3];
 				} else if (!lzms_decode_delta_repeat_match_bit(d, 1)) {
-					val = recent_delta_offsets[1];
-					recent_delta_offsets[1] = recent_delta_offsets[2];
-					recent_delta_offsets[2] = recent_delta_offsets[3];
+					val = d->recent_delta_offsets[1];
+					d->recent_delta_offsets[1] = d->recent_delta_offsets[2];
+					d->recent_delta_offsets[2] = d->recent_delta_offsets[3];
 				} else {
-					val = recent_delta_offsets[2];
-					recent_delta_offsets[2] = recent_delta_offsets[3];
+					val = d->recent_delta_offsets[2];
+					d->recent_delta_offsets[2] = d->recent_delta_offsets[3];
 				}
 				power = val >> 32;
 				raw_offset = (u32)val;
 			}
 
-			if (pending_delta_offset != 0) {
+			if (d->pending_delta_offset != 0) {
 				BUILD_BUG_ON(LZMS_NUM_RECENT_OFFSETS != 3);
-				recent_delta_offsets[3] = recent_delta_offsets[2];
-				recent_delta_offsets[2] = recent_delta_offsets[1];
-				recent_delta_offsets[1] = recent_delta_offsets[0];
-				recent_delta_offsets[0] = pending_delta_offset;
-				pending_delta_offset = 0;
+				d->recent_delta_offsets[3] = d->recent_delta_offsets[2];
+				d->recent_delta_offsets[2] = d->recent_delta_offsets[1];
+				d->recent_delta_offsets[1] = d->recent_delta_offsets[0];
+				d->recent_delta_offsets[0] = d->pending_delta_offset;
+				d->pending_delta_offset = 0;
 			}
-			pending_delta_offset = raw_offset | ((u64)power << 32);
+			d->pending_delta_offset = raw_offset | ((u64)power << 32);
 
 			length = lzms_decode_length(d);
 
@@ -826,7 +826,7 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 				*out_next++ = *matchptr1++ + *matchptr2++ - *matchptr++;
 			} while (--length);
 
-			delta_offset_still_pending = out_next;
+			d->delta_offset_still_pending = out_next;
 		}
 	}
 	return 0;
@@ -836,6 +836,13 @@ static void
 lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 		       size_t in_nbytes, unsigned num_offset_slots)
 {
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++) {
+		d->recent_lz_offsets[i] = i + 1;
+		d->recent_delta_offsets[i] = i + 1;
+	}
+	d->pending_lz_offset = 0;
+	d->pending_delta_offset = 0;
+
 	/* Range decoding  */
 
 	lzms_range_decoder_init(&d->rd, in, in_nbytes / sizeof(le16));
