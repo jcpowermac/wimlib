@@ -605,7 +605,6 @@ lzms_sort_symbols_by_frequency(u32 * const restrict A,
 			       u32 * const restrict freqs,
 			       const unsigned num_syms)
 {
-#if 0
 	unsigned num_counters = (DIV_ROUND_UP(num_syms, 4) + 3) & ~3;
 	unsigned counters[num_counters];
 	unsigned cumulative_count;
@@ -630,13 +629,6 @@ lzms_sort_symbols_by_frequency(u32 * const restrict A,
 
 	heapsort(&A[counters[num_counters - 2]],
 		 counters[num_counters - 1] - counters[num_counters - 2]);
-#else
-	for (unsigned sym = 0; sym < num_syms; sym++) {
-		A[sym] = sym | (freqs[sym] << NUM_SYMBOL_BITS);
-		freqs[sym] = (freqs[sym] >> 1) + 1;
-	}
-	heapsort(A, num_syms);
-#endif
 }
 
 static void
