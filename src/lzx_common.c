@@ -71,20 +71,20 @@ const u8 lzx_extra_offset_bits[LZX_MAX_OFFSET_SLOTS] = {
 	17
 };
 
-/* Round the specified compression block size (not LZX block size) up to the
- * next valid LZX window size, and return its order (log2).  Or, if the block
- * size is 0 or greater than the largest valid LZX window size, return 0.  */
+/* Round the specified buffer size up to the next valid LZX window size, and
+ * return its order (log2).  Or, if the buffer size is 0 or greater than the
+ * largest valid LZX window size, return 0.  */
 unsigned
-lzx_get_window_order(size_t max_block_size)
+lzx_get_window_order(size_t max_bufsize)
 {
 	unsigned order;
 
-	if (max_block_size == 0 || max_block_size > LZX_MAX_WINDOW_SIZE)
+	if (max_bufsize == 0 || max_bufsize > LZX_MAX_WINDOW_SIZE)
 		return 0;
 
-	order = fls32(max_block_size);
+	order = fls32(max_bufsize);
 
-	if (((u32)1 << order) != max_block_size)
+	if (((u32)1 << order) != max_bufsize)
 		order++;
 
 	return max(order, LZX_MIN_WINDOW_ORDER);

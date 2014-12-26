@@ -47,9 +47,11 @@ lzx_get_offset_slot_raw(u32 adjusted_offset)
 	}
 }
 
-extern unsigned lzx_get_window_order(size_t max_block_size);
+extern unsigned
+lzx_get_window_order(size_t max_bufsize);
 
-extern unsigned lzx_get_num_main_syms(unsigned window_order);
+extern unsigned
+lzx_get_num_main_syms(unsigned window_order);
 
 /* Least-recently used queue for match offsets.  */
 struct lzx_lru_queue {
