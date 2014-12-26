@@ -206,6 +206,33 @@ struct lzms_compressor {
 	u8 offset_slot_fast[LZMS_NUM_FAST_OFFSETS];
 };
 
+struct lzms_lz_lru_queue {
+	u32 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
+	u32 prev_offset;
+	u32 upcoming_offset;
+};
+
+static void
+lzms_init_lz_lru_queue(struct lzms_lz_lru_queue *queue)
+{
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
+		queue->recent_offsets[i] = i + 1;
+
+	queue->prev_offset = 0;
+	queue->upcoming_offset = 0;
+}
+
+static void
+lzms_update_lz_lru_queue(struct lzms_lz_lru_queue *queue)
+{
+	if (queue->prev_offset != 0) {
+		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
+			queue->recent_offsets[i + 1] = queue->recent_offsets[i];
+		queue->recent_offsets[0] = queue->prev_offset;
+	}
+	queue->prev_offset = queue->upcoming_offset;
+}
+
 /*
  * Match chooser position data:
  *
@@ -258,7 +285,7 @@ struct lzms_mc_pos_data {
 	 * entries or current Huffman codewords.  Those aren't maintained
 	 * per-position and are only updated occassionally.  */
 	struct lzms_adaptive_state {
-		struct lzms_lz_lru_queues lru;
+		struct lzms_lz_lru_queue lru;
 		u8 main_state;
 		u8 match_state;
 		u8 lz_match_state;
@@ -898,7 +925,7 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 {
 	unsigned i;
 
-	lzms_init_lz_lru_queues(&state->lru);
+	lzms_init_lz_lru_queue(&state->lru);
 	state->main_state = 0;
 	state->match_state = 0;
 	state->lz_match_state = 0;

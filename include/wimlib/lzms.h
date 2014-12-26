@@ -41,39 +41,6 @@ struct lzms_probability_entry {
 	u64 recent_bits;
 };
 
-/* LRU queues for LZ matches.  */
-struct lzms_lz_lru_queues {
-
-        /* Recent LZ match offsets  */
-	u32 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
-
-        /* These variables are used to delay updates to the LRU queues by one
-         * decoded item.  */
-	u32 prev_offset;
-	u32 upcoming_offset;
-};
-
-/* LRU queues for delta matches.  */
-struct lzms_delta_lru_queues {
-
-        /* Recent delta match powers and offsets  */
-	u32 recent_powers[LZMS_NUM_RECENT_OFFSETS + 1];
-	u32 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
-
-        /* These variables are used to delay updates to the LRU queues by one
-         * decoded item.  */
-	u32 prev_power;
-	u32 prev_offset;
-	u32 upcoming_power;
-	u32 upcoming_offset;
-};
-
-/* LRU (least-recently-used) queues for match information.  */
-struct lzms_lru_queues {
-        struct lzms_lz_lru_queues lz;
-        struct lzms_delta_lru_queues delta;
-};
-
 /* Offset slot tables  */
 extern const u32 lzms_offset_slot_base[LZMS_MAX_NUM_OFFSET_SYMS + 1];
 extern const u8 lzms_extra_offset_bits[LZMS_MAX_NUM_OFFSET_SYMS];
@@ -107,49 +74,6 @@ lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t cou
 
 extern void
 lzms_init_symbol_frequencies(u32 freqs[], size_t num_syms);
-
-extern void
-lzms_init_lz_lru_queues(struct lzms_lz_lru_queues *lz);
-
-extern void
-lzms_init_delta_lru_queues(struct lzms_delta_lru_queues *delta);
-
-extern void
-lzms_init_lru_queues(struct lzms_lru_queues *lru);
-
-static inline void
-lzms_update_lz_lru_queue(struct lzms_lz_lru_queues *lz)
-{
-	if (lz->prev_offset != 0) {
-		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
-			lz->recent_offsets[i + 1] = lz->recent_offsets[i];
-		lz->recent_offsets[0] = lz->prev_offset;
-	}
-	lz->prev_offset = lz->upcoming_offset;
-}
-
-static inline void
-lzms_update_delta_lru_queues(struct lzms_delta_lru_queues *delta)
-{
-	if (delta->prev_offset != 0) {
-		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--) {
-			delta->recent_offsets[i + 1] = delta->recent_offsets[i];
-			delta->recent_powers[i + 1] = delta->recent_powers[i];
-		}
-		delta->recent_offsets[0] = delta->prev_offset;
-		delta->recent_powers[0] = delta->prev_power;
-	}
-
-	delta->prev_offset = delta->upcoming_offset;
-	delta->prev_power = delta->upcoming_power;
-}
-
-static inline void
-lzms_update_lru_queues(struct lzms_lru_queues *lru)
-{
-	lzms_update_lz_lru_queue(&lru->lz);
-	lzms_update_delta_lru_queues(&lru->delta);
-}
 
 /* Given a decoded bit, update the probability entry.  */
 static inline void
