@@ -719,9 +719,9 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			lz_copy(out_next, length, offset, out_end, LZMS_MIN_MATCH_LEN);
 			out_next += length;
 		} else {
-			u32 length, power, raw_offset;
-
 			/* Delta match  */
+
+			u32 length, power, raw_offset;
 
 			if (!lzms_decode_delta_match_bit(d)) {
 				/* Explicit offset  */
