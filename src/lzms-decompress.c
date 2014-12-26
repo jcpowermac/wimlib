@@ -199,6 +199,8 @@
 #  include "config.h"
 #endif
 
+#include <string.h>
+
 #include "wimlib/compress_common.h"
 #include "wimlib/decompressor_ops.h"
 #include "wimlib/decompress_common.h"
@@ -554,17 +556,281 @@ lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
 	lzms_init_symbol_frequencies(freqs, num_syms);
 }
 
+#define NUM_SYMBOL_BITS 10
+#define SYMBOL_MASK ((1 << NUM_SYMBOL_BITS) - 1)
+
+static void
+heapify_subtree(u32 A[], unsigned length, unsigned subtree_idx)
+{
+	unsigned parent_idx;
+	unsigned child_idx;
+	u32 v;
+
+	v = A[subtree_idx];
+	parent_idx = subtree_idx;
+	while ((child_idx = parent_idx * 2) <= length) {
+		if (child_idx < length && A[child_idx + 1] > A[child_idx])
+			child_idx++;
+		if (v >= A[child_idx])
+			break;
+		A[parent_idx] = A[child_idx];
+		parent_idx = child_idx;
+	}
+	A[parent_idx] = v;
+}
+
+static void
+heapify_array(u32 A[], unsigned length)
+{
+	for (unsigned subtree_idx = length / 2; subtree_idx >= 1; subtree_idx--)
+		heapify_subtree(A, length, subtree_idx);
+}
+
+static void
+heapsort(u32 A[], unsigned length)
+{
+	A--;
+
+	heapify_array(A, length);
+
+	while (length >= 2) {
+		swap(A[1], A[length]);
+		length--;
+		heapify_subtree(A, length, 1);
+	}
+}
+
+static void
+lzms_sort_symbols(u32 * const restrict A,
+		  u32 * const restrict freqs,
+		  const unsigned num_syms)
+{
+	unsigned num_counters = (DIV_ROUND_UP(num_syms, 4) + 3) & ~3;
+	unsigned counters[num_counters];
+	unsigned cumulative_count;
+
+	memset(counters, 0, sizeof(counters));
+
+	for (unsigned sym = 0; sym < num_syms; sym++)
+		counters[min(freqs[sym], num_counters - 1)]++;
+
+	cumulative_count = 0;
+	for (unsigned i = 0; i < num_counters; i++) {
+		unsigned count = counters[i];
+		counters[i] = cumulative_count;
+		cumulative_count += count;
+	}
+
+	for (unsigned sym = 0; sym < num_syms; sym++) {
+		A[counters[min(freqs[sym], num_counters - 1)]++] =
+			sym | (freqs[sym] << NUM_SYMBOL_BITS);
+		freqs[sym] = (freqs[sym] >> 1) + 1;
+	}
+
+	heapsort(&A[counters[num_counters - 2]],
+		 counters[num_counters - 1] - counters[num_counters - 2]);
+}
+
+static void
+lzms_build_huffman_tree(u32 * const restrict A, const unsigned num_syms)
+{
+	unsigned i = 0;
+	unsigned b = 0;
+	unsigned e = 0;
+
+	do {
+		unsigned m, n;
+		u32 freq_shifted;
+
+		if (i != num_syms &&
+		    (b == e || (A[i] >> NUM_SYMBOL_BITS) <= (A[b] >> NUM_SYMBOL_BITS)))
+			m = i++;
+		else
+			m = b++;
+
+		if (i != num_syms &&
+		    (b == e || (A[i] >> NUM_SYMBOL_BITS) <= (A[b] >> NUM_SYMBOL_BITS)))
+			n = i++;
+		else
+			n = b++;
+		freq_shifted = (A[m] & ~SYMBOL_MASK) + (A[n] & ~SYMBOL_MASK);
+		A[m] = (A[m] & SYMBOL_MASK) | (e << NUM_SYMBOL_BITS);
+		A[n] = (A[n] & SYMBOL_MASK) | (e << NUM_SYMBOL_BITS);
+		A[e] = (A[e] & SYMBOL_MASK) | freq_shifted;
+		e++;
+	} while (num_syms - e > 1);
+}
+
+static void
+lzms_generate_length_counts(u32 * const restrict A,
+			    unsigned * const restrict len_counts,
+			    const unsigned num_syms)
+{
+
+	for (unsigned len = 0; len <= LZMS_MAX_CODEWORD_LEN; len++)
+		len_counts[len] = 0;
+
+	len_counts[1] = 2;
+
+	A[num_syms - 2] &= SYMBOL_MASK;
+
+	for (int node = (int)num_syms - 3; node >= 0; node--) {
+
+		unsigned parent = A[node] >> NUM_SYMBOL_BITS;
+		unsigned parent_depth = A[parent] >> NUM_SYMBOL_BITS;
+		unsigned depth = parent_depth + 1;
+		unsigned len = depth;
+
+		A[node] = (A[node] & SYMBOL_MASK) | (depth << NUM_SYMBOL_BITS);
+		len_counts[len]--;
+		len_counts[len + 1] += 2;
+	}
+}
+
+/* Construct a direct mapping entry in the lookup table.  */
+#define MAKE_DIRECT_ENTRY(symbol, length) ((symbol) | ((length) << 11))
+
+static void
+lzms_fill_decode_table(u16 * const restrict decode_table,
+		       const unsigned table_bits,
+		       const unsigned * const restrict len_counts,
+		       const u32 * const restrict A)
+{
+	u16 *decode_table_ptr = decode_table;
+	const unsigned table_num_entries = 1U << table_bits;
+	unsigned sym_idx = 0;
+	unsigned codeword_len = 1;
+	unsigned stores_per_loop = (1 << (table_bits - codeword_len));
+	unsigned decode_table_pos;
+	for (; stores_per_loop != 0; codeword_len++, stores_per_loop >>= 1) {
+		unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
+		for (; sym_idx < end_sym_idx; sym_idx++) {
+			u16 entry;
+			u16 *p;
+			unsigned n;
+
+			entry = MAKE_DIRECT_ENTRY(A[sym_idx] & SYMBOL_MASK, codeword_len);
+
+			p = (u16*)decode_table_ptr;
+			n = stores_per_loop;
+
+			do {
+				*p++ = entry;
+			} while (--n);
+
+			decode_table_ptr = p;
+		}
+	}
+
+	/* If we've filled in the entire table, we are done.  Otherwise,
+	 * there are codewords longer than table_bits for which we must
+	 * generate binary trees.  */
+
+	decode_table_pos = (u16*)decode_table_ptr - decode_table;
+	if (decode_table_pos != table_num_entries) {
+		unsigned j;
+		unsigned next_free_tree_slot;
+		unsigned cur_codeword;
+
+		/* First, zero out the remaining entries.  This is
+		 * necessary so that these entries appear as
+		 * "unallocated" in the next part.  Each of these entries
+		 * will eventually be filled with the representation of
+		 * the root node of a binary tree.  */
+		j = decode_table_pos;
+		do {
+			decode_table[j] = 0;
+		} while (++j != table_num_entries);
+
+		/* We allocate child nodes starting at the end of the
+		 * direct lookup table.  Note that there should be
+		 * 2*num_syms extra entries for this purpose, although
+		 * fewer than this may actually be needed.  */
+		next_free_tree_slot = table_num_entries;
+
+		/* Iterate through each codeword with length greater than
+		 * 'table_bits', primarily in order of codeword length
+		 * and secondarily in order of symbol.  */
+		for (cur_codeword = decode_table_pos << 1;
+		     codeword_len <= LZMS_MAX_CODEWORD_LEN;
+		     codeword_len++, cur_codeword <<= 1)
+		{
+			unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
+			for (; sym_idx < end_sym_idx; sym_idx++, cur_codeword++)
+			{
+				/* 'sym' is the symbol represented by the
+				 * codeword.  */
+				unsigned sym = A[sym_idx] & SYMBOL_MASK;
+
+				unsigned extra_bits = codeword_len - table_bits;
+
+				unsigned node_idx = cur_codeword >> extra_bits;
+
+				/* Go through each bit of the current codeword
+				 * beyond the prefix of length @table_bits and
+				 * walk the appropriate binary tree, allocating
+				 * any slots that have not yet been allocated.
+				 *
+				 * Note that the 'pointer' entry to the binary
+				 * tree, which is stored in the direct lookup
+				 * portion of the table, is represented
+				 * identically to other internal (non-leaf)
+				 * nodes of the binary tree; it can be thought
+				 * of as simply the root of the tree.  The
+				 * representation of these internal nodes is
+				 * simply the index of the left child combined
+				 * with the special bits 0xC000 to distingush
+				 * the entry from direct mapping and leaf node
+				 * entries.  */
+				do {
+
+					/* At least one bit remains in the
+					 * codeword, but the current node is an
+					 * unallocated leaf.  Change it to an
+					 * internal node.  */
+					if (decode_table[node_idx] == 0) {
+						decode_table[node_idx] =
+							next_free_tree_slot | 0xC000;
+						decode_table[next_free_tree_slot++] = 0;
+						decode_table[next_free_tree_slot++] = 0;
+					}
+
+					/* Go to the left child if the next bit
+					 * in the codeword is 0; otherwise go to
+					 * the right child.  */
+					node_idx = decode_table[node_idx] & 0x3FFF;
+					--extra_bits;
+					node_idx += (cur_codeword >> extra_bits) & 1;
+				} while (extra_bits != 0);
+
+				/* We've traversed the tree using the entire
+				 * codeword, and we're now at the entry where
+				 * the actual symbol will be stored.  This is
+				 * distinguished from internal nodes by not
+				 * having its high two bits set.  */
+				decode_table[node_idx] = sym;
+			}
+		}
+	}
+}
+
 static noinline void
 lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
 {
-	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
-				    info->freqs, info->lens, info->codewords);
-	make_huffman_decode_table(info->decode_table, info->num_syms,
-				  info->table_bits, info->lens,
-				  LZMS_MAX_CODEWORD_LEN);
-	for (unsigned i = 0; i < info->num_syms; i++)
-		info->freqs[i] = (info->freqs[i] >> 1) + 1;
+	u32 * const A = info->codewords;
+	unsigned len_counts[LZMS_MAX_CODEWORD_LEN + 1];
+
 	info->num_syms_until_rebuild = info->rebuild_freq;
+
+	lzms_sort_symbols(A, info->freqs, info->num_syms);
+
+	lzms_build_huffman_tree(A, info->num_syms);
+
+	lzms_generate_length_counts(A, len_counts, info->num_syms);
+	for (unsigned i = 0; i <= LZMS_MAX_CODEWORD_LEN; i++)
+		printf("len_counts[%u] = %u\n", len_counts[i]);
+
+	lzms_fill_decode_table(info->decode_table, info->table_bits, len_counts, A);
 }
 
 static inline void
