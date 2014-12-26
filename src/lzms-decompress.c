@@ -687,7 +687,8 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 			/* LZ match  */
 
-			u32 length, offset;
+			u32 offset;
+			u32 length;
 
 			if (!lzms_decode_lz_match_bit(d)) {
 				/* Explicit offset  */
@@ -721,7 +722,10 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 		} else {
 			/* Delta match  */
 
-			u32 length, power, raw_offset;
+			u32 power;
+			u32 raw_offset, offset1, offset2, offset;
+			const u8 *matchptr1, *matchptr2, *matchptr;
+			u32 length;
 
 			if (!lzms_decode_delta_match_bit(d)) {
 				/* Explicit offset  */
@@ -750,12 +754,9 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 			length = lzms_decode_length(d);
 
-			u32 offset1 = (u32)1 << power;
-			u32 offset2 = raw_offset << power;
-			u32 offset = offset1 + offset2;
-			u8 *matchptr1;
-			u8 *matchptr2;
-			u8 *matchptr;
+			offset1 = (u32)1 << power;
+			offset2 = raw_offset << power;
+			offset = offset1 + offset2;
 
 			if (unlikely((offset2 >> power) != raw_offset))
 				return -1;
