@@ -559,7 +559,7 @@ lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
 #define NUM_SYMBOL_BITS 10
 #define SYMBOL_MASK ((1 << NUM_SYMBOL_BITS) - 1)
 
-static void
+static inline void
 heapify_subtree(u32 A[], unsigned length, unsigned subtree_idx)
 {
 	unsigned parent_idx;
@@ -730,31 +730,38 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 	const unsigned table_num_entries = 1U << table_bits;
 	unsigned sym_idx = 0;
 	unsigned codeword_len = 1;
-	unsigned stores_per_loop = (1 << (table_bits - codeword_len));
+	unsigned stores_per_loop;
 	unsigned decode_table_pos;
+
+	stores_per_loop = (1 << (table_bits - codeword_len)) / 4;
 	for (; stores_per_loop != 0; codeword_len++, stores_per_loop >>= 1) {
 		unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
 		for (; sym_idx < end_sym_idx; sym_idx++) {
-			u16 entry;
-			u16 *p;
-			unsigned n;
-
-			entry = MAKE_DIRECT_ENTRY(sorted_syms[sym_idx], codeword_len);
-
-			p = (u16*)decode_table_ptr;
-			n = stores_per_loop;
-
+			u16 entry = MAKE_DIRECT_ENTRY(sorted_syms[sym_idx], codeword_len);
+			u64 v = entry;
+			v|=v<<16;
+			v|=v<<32;
+			u64 *p = (u64*)decode_table_ptr;
+			unsigned n = stores_per_loop;
+			do {
+				*p++ = v;
+			} while (--n);
+			decode_table_ptr = (u16*)p;
+		}
+	}
+	stores_per_loop = (1 << (table_bits - codeword_len));
+	for (; stores_per_loop != 0; codeword_len++, stores_per_loop >>= 1) {
+		unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
+		for (; sym_idx < end_sym_idx; sym_idx++) {
+			u16 entry = MAKE_DIRECT_ENTRY(sorted_syms[sym_idx], codeword_len);
+			u16 *p = decode_table_ptr;
+			unsigned n = stores_per_loop;
 			do {
 				*p++ = entry;
 			} while (--n);
-
 			decode_table_ptr = p;
 		}
 	}
-
-	/* If we've filled in the entire table, we are done.  Otherwise,
-	 * there are codewords longer than table_bits for which we must
-	 * generate binary trees.  */
 
 	decode_table_pos = (u16*)decode_table_ptr - decode_table;
 	if (decode_table_pos != table_num_entries) {
@@ -762,81 +769,32 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 		unsigned next_free_tree_slot;
 		unsigned cur_codeword;
 
-		/* First, zero out the remaining entries.  This is
-		 * necessary so that these entries appear as
-		 * "unallocated" in the next part.  Each of these entries
-		 * will eventually be filled with the representation of
-		 * the root node of a binary tree.  */
 		j = decode_table_pos;
 		do {
 			decode_table[j] = 0;
 		} while (++j != table_num_entries);
 
-		/* We allocate child nodes starting at the end of the
-		 * direct lookup table.  Note that there should be
-		 * 2*num_syms extra entries for this purpose, although
-		 * fewer than this may actually be needed.  */
 		next_free_tree_slot = table_num_entries;
-
-		/* Iterate through each codeword with length greater than
-		 * 'table_bits', primarily in order of codeword length
-		 * and secondarily in order of symbol.  */
 		for (cur_codeword = decode_table_pos << 1;
 		     codeword_len <= LZMS_MAX_CODEWORD_LEN;
 		     codeword_len++, cur_codeword <<= 1)
 		{
 			unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
 			for (; sym_idx < end_sym_idx; sym_idx++, cur_codeword++) {
-				/* 'sym' is the symbol represented by the
-				 * codeword.  */
 				unsigned sym = sorted_syms[sym_idx];
-
 				unsigned extra_bits = codeword_len - table_bits;
-
 				unsigned node_idx = cur_codeword >> extra_bits;
-
-				/* Go through each bit of the current codeword
-				 * beyond the prefix of length @table_bits and
-				 * walk the appropriate binary tree, allocating
-				 * any slots that have not yet been allocated.
-				 *
-				 * Note that the 'pointer' entry to the binary
-				 * tree, which is stored in the direct lookup
-				 * portion of the table, is represented
-				 * identically to other internal (non-leaf)
-				 * nodes of the binary tree; it can be thought
-				 * of as simply the root of the tree.  The
-				 * representation of these internal nodes is
-				 * simply the index of the left child combined
-				 * with the special bits 0xC000 to distingush
-				 * the entry from direct mapping and leaf node
-				 * entries.  */
 				do {
-
-					/* At least one bit remains in the
-					 * codeword, but the current node is an
-					 * unallocated leaf.  Change it to an
-					 * internal node.  */
 					if (decode_table[node_idx] == 0) {
 						decode_table[node_idx] =
 							next_free_tree_slot | 0xC000;
 						decode_table[next_free_tree_slot++] = 0;
 						decode_table[next_free_tree_slot++] = 0;
 					}
-
-					/* Go to the left child if the next bit
-					 * in the codeword is 0; otherwise go to
-					 * the right child.  */
 					node_idx = decode_table[node_idx] & 0x3FFF;
 					--extra_bits;
 					node_idx += (cur_codeword >> extra_bits) & 1;
 				} while (extra_bits != 0);
-
-				/* We've traversed the tree using the entire
-				 * codeword, and we're now at the entry where
-				 * the actual symbol will be stored.  This is
-				 * distinguished from internal nodes by not
-				 * having its high two bits set.  */
 				decode_table[node_idx] = sym;
 			}
 		}
