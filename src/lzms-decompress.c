@@ -209,10 +209,10 @@
 #include "wimlib/util.h"
 
 /* The TABLEBITS values can be changed; they only affect decoding speed.  */
-#define LZMS_LITERAL_TABLEBITS		10
-#define LZMS_LENGTH_TABLEBITS		10
-#define LZMS_LZ_OFFSET_TABLEBITS	10
-#define LZMS_DELTA_OFFSET_TABLEBITS	10
+#define LZMS_LITERAL_TABLEBITS		15
+#define LZMS_LENGTH_TABLEBITS		15
+#define LZMS_LZ_OFFSET_TABLEBITS	15
+#define LZMS_DELTA_OFFSET_TABLEBITS	15
 #define LZMS_DELTA_POWER_TABLEBITS	8
 
 struct lzms_range_decoder {
@@ -605,6 +605,7 @@ lzms_sort_symbols(u32 * const restrict A,
 		  u32 * const restrict freqs,
 		  const unsigned num_syms)
 {
+#if 0
 	unsigned num_counters = (DIV_ROUND_UP(num_syms, 4) + 3) & ~3;
 	unsigned counters[num_counters];
 	unsigned cumulative_count;
@@ -629,6 +630,13 @@ lzms_sort_symbols(u32 * const restrict A,
 
 	heapsort(&A[counters[num_counters - 2]],
 		 counters[num_counters - 1] - counters[num_counters - 2]);
+#else
+	for (unsigned sym = 0; sym < num_syms; sym++) {
+		A[sym] = sym | (freqs[sym] << NUM_SYMBOL_BITS);
+		freqs[sym] = (freqs[sym] >> 1) + 1;
+	}
+	heapsort(A, num_syms);
+#endif
 }
 
 static void
@@ -693,18 +701,21 @@ lzms_generate_length_counts(u32 * const restrict A,
 static void
 lzms_fill_decode_table(u16 * const restrict decode_table,
 		       const unsigned table_bits,
+		       const unsigned num_syms,
 		       const unsigned * const restrict len_counts,
 		       const u32 * const restrict A)
 {
 	u16 *decode_table_ptr = decode_table;
 	const unsigned table_num_entries = 1U << table_bits;
-	unsigned sym_idx = 0;
+	unsigned sym_idx;
+	unsigned range_begin;
+	unsigned range_end = num_syms;
 	unsigned codeword_len = 1;
 	unsigned stores_per_loop = (1 << (table_bits - codeword_len));
 	unsigned decode_table_pos;
 	for (; stores_per_loop != 0; codeword_len++, stores_per_loop >>= 1) {
-		unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
-		for (; sym_idx < end_sym_idx; sym_idx++) {
+		range_begin = range_end - len_counts[codeword_len];
+		for (sym_idx = range_begin; sym_idx < range_end; sym_idx++) {
 			u16 entry;
 			u16 *p;
 			unsigned n;
@@ -720,6 +731,7 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 
 			decode_table_ptr = p;
 		}
+		range_end = range_begin;
 	}
 
 	/* If we've filled in the entire table, we are done.  Otherwise,
@@ -728,6 +740,7 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 
 	decode_table_pos = (u16*)decode_table_ptr - decode_table;
 	if (decode_table_pos != table_num_entries) {
+		assert(0);
 		unsigned j;
 		unsigned next_free_tree_slot;
 		unsigned cur_codeword;
@@ -755,9 +768,8 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 		     codeword_len <= LZMS_MAX_CODEWORD_LEN;
 		     codeword_len++, cur_codeword <<= 1)
 		{
-			unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
-			for (; sym_idx < end_sym_idx; sym_idx++, cur_codeword++)
-			{
+			range_begin = range_end - len_counts[codeword_len];
+			for (sym_idx = range_begin; sym_idx < range_end; sym_idx++) {
 				/* 'sym' is the symbol represented by the
 				 * codeword.  */
 				unsigned sym = A[sym_idx] & SYMBOL_MASK;
@@ -810,6 +822,7 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 				 * having its high two bits set.  */
 				decode_table[node_idx] = sym;
 			}
+			range_end = range_begin;
 		}
 	}
 }
@@ -820,6 +833,15 @@ lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
 	u32 * const A = info->codewords;
 	unsigned len_counts[LZMS_MAX_CODEWORD_LEN + 1];
 
+	u8 reference_lens[info->num_syms];
+	u32 reference_codewords[info->num_syms];
+	unsigned reference_len_counts[LZMS_MAX_CODEWORD_LEN + 1] = {};
+	make_canonical_huffman_code(info->num_syms,LZMS_MAX_CODEWORD_LEN,
+				    info->freqs, reference_lens,
+				    reference_codewords);
+	for (unsigned sym = 0; sym < info->num_syms; sym++)
+		reference_len_counts[reference_lens[sym]]++;
+
 	info->num_syms_until_rebuild = info->rebuild_freq;
 
 	lzms_sort_symbols(A, info->freqs, info->num_syms);
@@ -827,10 +849,12 @@ lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
 	lzms_build_huffman_tree(A, info->num_syms);
 
 	lzms_generate_length_counts(A, len_counts, info->num_syms);
-	for (unsigned i = 0; i <= LZMS_MAX_CODEWORD_LEN; i++)
-		printf("len_counts[%u] = %u\n", len_counts[i]);
 
-	lzms_fill_decode_table(info->decode_table, info->table_bits, len_counts, A);
+	for (unsigned i = 0; i <= LZMS_MAX_CODEWORD_LEN; i++)
+		assert(len_counts[i] == reference_len_counts[i]);
+
+	lzms_fill_decode_table(info->decode_table, info->table_bits,
+			       info->num_syms, len_counts, A);
 }
 
 static inline void
