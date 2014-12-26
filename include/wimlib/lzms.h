@@ -99,7 +99,7 @@ lzms_get_length_slot(u32 length)
 	return lzms_get_slot(length, lzms_length_slot_base, LZMS_NUM_LENGTH_SYMS);
 }
 
-unsigned
+extern unsigned
 lzms_get_num_offset_slots(size_t uncompressed_size);
 
 extern void

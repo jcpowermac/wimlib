@@ -37,10 +37,10 @@
  * directions.  One logical bitstream starts at the front of the block and
  * proceeds forwards.  Another logical bitstream starts at the end of the block
  * and proceeds backwards.  Bits read from the forwards bitstream constitute
- * range-encoded data, whereas bits read from the backwards bitstream constitute
- * Huffman-encoded symbols or verbatim bits.  For both bitstreams, the ordering
- * of the bits within the 16-bit coding units is such that the first bit is the
- * high-order bit and the last bit is the low-order bit.
+ * binary range-encoded data, whereas bits read from the backwards bitstream
+ * constitute Huffman-encoded symbols or verbatim bits.  For both bitstreams,
+ * the ordering of the bits within the 16-bit coding units is such that the
+ * first bit is the high-order bit and the last bit is the low-order bit.
  *
  * From these two logical bitstreams, an LZMS decompressor can reconstitute the
  * series of items that make up the LZMS data representation.  Each such item
@@ -81,27 +81,27 @@
  * queue must be initialized to {0, 0, 0, 0}, and the raw offset queue must be
  * initialized to {1, 2, 3, 4}.
  *
- * Bits from the range decoder must be used to disambiguate item types.  The
- * range decoder must hold two state variables: the range, which must initially
- * be set to 0xffffffff, and the current code, which must initially be set to
- * the first 32 bits read from the forwards bitstream.  The range must be
+ * Bits from the binary range decoder must be used to disambiguate item types.
+ * The range decoder must hold two state variables: the range, which must
+ * initially be set to 0xffffffff, and the current code, which must initially be
+ * set to the first 32 bits read from the forwards bitstream.  The range must be
  * maintained above 0xffff; when it falls below 0xffff, both the range and code
  * must be left-shifted by 16 bits and the low 16 bits of the code must be
  * filled in with the next 16 bits from the forwards bitstream.
  *
- * To decode each bit, the range decoder requires a probability that is
+ * To decode each bit, the binary range decoder requires a probability that is
  * logically a real number between 0 and 1.  Multiplying this probability by the
- * current range and taking the floor gives the bound between the 0-bit region
- * of the range and the 1-bit region of the range.  However, in LZMS,
- * probabilities are restricted to values of n/64 where n is an integer is
- * between 1 and 63 inclusively, so the implementation may use integer
- * operations instead.  Following calculation of the bound, if the current code
- * is in the 0-bit region, the new range becomes the current code and the
- * decoded bit is 0; otherwise, the bound must be subtracted from both the range
- * and the code, and the decoded bit is 1.  More information about range coding
- * can be found at https://en.wikipedia.org/wiki/Range_encoding.  Furthermore,
- * note that the LZMA format also uses range coding and has public domain code
- * available for it.
+ * current range and taking the floor gives the bound between the 0-bit region of
+ * the range and the 1-bit region of the range.  However, in LZMS, probabilities
+ * are restricted to values of n/64 where n is an integer is between 1 and 63
+ * inclusively, so the implementation may use integer operations instead.
+ * Following calculation of the bound, if the current code is in the 0-bit
+ * region, the new range becomes the current code and the decoded bit is 0;
+ * otherwise, the bound must be subtracted from both the range and the code, and
+ * the decoded bit is 1.  More information about range coding can be found at
+ * https://en.wikipedia.org/wiki/Range_encoding.  Furthermore, note that the
+ * LZMA format also uses range coding and has public domain code available for
+ * it.
  *
  * The probability used to range-decode each bit must be taken from a table, of
  * which one instance must exist for each distinct context in which a
@@ -159,25 +159,24 @@
  *    of the 8 symbols corresponds to a power.  This code must be rebuilt
  *    whenever 512 symbols have been decoded with it.
  *
- * All the LZMS Huffman codes must be built adaptively based on symbol
- * frequencies.  Initially, each code must be built assuming that all symbols
- * have equal frequency.  Following that, each code must be rebuilt whenever a
- * certain number of symbols has been decoded with it.
+ * Initially, each Huffman code must be built assuming that each symbol in that
+ * code has frequency 1.  Following that, each code must be rebuilt each time a
+ * certain number of symbols, as noted above, has been decoded with it.  The
+ * symbol frequencies for a code must be halved after each rebuild of that code;
+ * this makes the codes adapt to the more recent data.
  *
  * Like other compression formats such as XPRESS, LZX, and DEFLATE, the LZMS
  * format requires that all Huffman codes be constructed in canonical form.
  * This form requires that same-length codewords be lexicographically ordered
  * the same way as the corresponding symbols and that all shorter codewords
  * lexicographically precede longer codewords.  Such a code can be constructed
- * directly from codeword lengths, although in LZMS this is not actually
- * necessary because the codes are built using adaptive symbol frequencies.
+ * directly from codeword lengths.
  *
  * Even with the canonical code restriction, the same frequencies can be used to
  * construct multiple valid Huffman codes.  Therefore, the decompressor needs to
  * construct the right one.  Specifically, the LZMS format requires that the
  * Huffman code be constructed as if the well-known priority queue algorithm is
- * used and frequency ties are always broken in favor of leaf nodes.  See
- * make_canonical_huffman_code() in compress_common.c for more information.
+ * used and frequency ties are always broken in favor of leaf nodes.
  *
  * Codewords in LZMS are guaranteed to not exceed 15 bits.  The format otherwise
  * places no restrictions on codeword length.  Therefore, the Huffman code
@@ -186,10 +185,6 @@
  * of being shared among multiple compression algorithms), the details of how it
  * does so are unimportant, provided that the maximum codeword length parameter
  * is set to at least 15 bits.
- *
- * An LZMS-compressed block seemingly cannot have a compressed size greater than
- * or equal to the uncompressed size.  In such cases the block must be stored
- * uncompressed.
  *
  * After all LZMS items have been decoded, the data must be postprocessed to
  * translate absolute address encoded in x86 instructions into their original
@@ -218,9 +213,8 @@
 #define LZMS_DELTA_OFFSET_TABLEBITS	10
 #define LZMS_DELTA_POWER_TABLEBITS	8
 
-/* Structure used for range decoding, reading bits forwards.  This is the first
- * logical bitstream mentioned above.  */
 struct lzms_range_decoder {
+
 	/* The relevant part of the current range.  Although the logical range
 	 * for range decoding is a very large integer, only a small portion
 	 * matters at any given time, and it can be normalized (shifted left)
@@ -233,17 +227,14 @@ struct lzms_range_decoder {
 
 	/* Pointer to the next little-endian 16-bit integer in the compressed
 	 * input data (reading forwards).  */
-	const le16 *in;
+	const le16 *next;
 
-	/* Number of 16-bit integers remaining in the compressed input data
-	 * (reading forwards).  */
-	size_t num_le16_remaining;
+	/* Pointer to the end of the compressed input data.  */
+	const le16 *end;
 };
 
 typedef u64 bitbuf_t;
 
-/* Structure used for reading raw bits backwards.  This is the second logical
- * bitstream mentioned above.  */
 struct lzms_input_bitstream {
 
 	/* Holding variable for bits that have been read from the compressed
@@ -350,10 +341,11 @@ struct lzms_decompressor {
 	}; // struct
 
 	s32 last_target_usages[65536];
+
 	}; // union
 };
 
-/* Initialize the input bitstream @is to read forwards from the compressed data
+/* Initialize the input bitstream @is to read backwards from the compressed data
  * buffer @in that is @count 16-bit integers long.  */
 static void
 lzms_input_bitstream_init(struct lzms_input_bitstream *is,
@@ -418,32 +410,16 @@ lzms_read_bits(struct lzms_input_bitstream *is, unsigned num_bits)
 	return lzms_pop_bits(is, num_bits);
 }
 
-/* Initialize the range decoder @rd to read forwards from the specified
- * compressed data buffer @in that is @count 16-bit integers long.  */
+/* Initialize the range decoder @rd to read forwards from the compressed data
+ * buffer @in that is @count 16-bit integers long.  */
 static void
 lzms_range_decoder_init(struct lzms_range_decoder *rd,
 			const le16 *in, size_t count)
 {
 	rd->range = 0xffffffff;
-	rd->code = ((u32)le16_to_cpu(in[0]) << 16) |
-		   ((u32)le16_to_cpu(in[1]) <<  0);
-	rd->in = in + 2;
-	rd->num_le16_remaining = count - 2;
-}
-
-/* Ensure the current range of the range decoder has at least 16 bits of
- * precision.  */
-static inline int
-lzms_range_decoder_normalize(struct lzms_range_decoder *rd)
-{
-	if (rd->range <= 0xffff) {
-		rd->range <<= 16;
-		if (unlikely(rd->num_le16_remaining == 0))
-			return -1;
-		rd->code = (rd->code << 16) | le16_to_cpu(*rd->in++);
-		rd->num_le16_remaining--;
-	}
-	return 0;
+	rd->code = ((u32)le16_to_cpu(in[0]) << 16) | le16_to_cpu(in[1]);
+	rd->next = in + 2;
+	rd->end = in + count;
 }
 
 /* Decode and return the next bit from the range decoder.
@@ -456,7 +432,12 @@ lzms_range_decoder_decode_bit(struct lzms_range_decoder *rd, u32 prob)
 	u32 bound;
 
 	/* Ensure the range has at least 16 bits of precision.  */
-	lzms_range_decoder_normalize(rd);
+	if (rd->range <= 0xffff) {
+		rd->range <<= 16;
+		rd->code <<= 16;
+		if (likely(rd->next != rd->end))
+			rd->code |= le16_to_cpu(*rd->next++);
+	}
 
 	/* Based on the probability, calculate the bound between the 0-bit
 	 * region and the 1-bit region of the range.  */
@@ -476,7 +457,7 @@ lzms_range_decoder_decode_bit(struct lzms_range_decoder *rd, u32 prob)
 
 /* Decode and return the next bit from the range decoder.  This wraps around
  * lzms_range_decoder_decode_bit() to handle using and updating the appropriate
- * probability table.  */
+ * state and probability entry.  */
 static inline int
 lzms_range_decode_bit(struct lzms_range_decoder *rd,
 		      u32 *state_p, u32 num_states,
@@ -594,17 +575,10 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 			   u16 decode_table[], unsigned table_bits,
 			   struct lzms_huffman_rebuild_info *rebuild_info)
 {
-	unsigned entry;
 	unsigned key_bits;
+	unsigned entry;
 	unsigned sym;
 
-	/* The Huffman codes used in LZMS are adaptive and must be rebuilt
-	 * whenever a certain number of symbols have been read.  Each such
-	 * rebuild uses the current symbol frequencies, but the format also
-	 * requires that the symbol frequencies be halved after each code
-	 * rebuild.  This diminishes the effect of old symbols on the current
-	 * Huffman codes, thereby causing the Huffman codes to be more locally
-	 * adaptable.  */
 	lzms_rebuild_huffman_code_if_needed(rebuild_info);
 
 	lzms_ensure_bits(is, LZMS_MAX_CODEWORD_LEN);
@@ -692,7 +666,7 @@ lzms_decode_delta_power(struct lzms_decompressor *d)
 }
 
 /* Decode the series of literals and matches from the LZMS-compressed data.
- * Returns 0 on success; nonzero if the compressed data is invalid.  */
+ * Return 0 if successful or -1 if the compressed data is invalid.  */
 static int
 lzms_decode_items(struct lzms_decompressor * const restrict d,
 		  u8 * const restrict out, const size_t out_nbytes)
@@ -715,7 +689,6 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 			u32 length, offset;
 
-			/* Decode the offset  */
 			if (!lzms_decode_lz_match_bit(d)) {
 				/* Explicit offset  */
 				offset = lzms_decode_lz_offset(d);
@@ -736,15 +709,13 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			}
 			d->lru.lz.upcoming_offset = offset;
 
-			/* Decode the length  */
 			length = lzms_decode_length(d);
-
-			/* Validate and copy the match  */
 
 			if (unlikely(length > out_end - out_next))
 				return -1;
 			if (unlikely(offset > out_next - out))
 				return -1;
+
 			lz_copy(out_next, length, offset, out_end, LZMS_MIN_MATCH_LEN);
 			out_next += length;
 		} else {
@@ -752,7 +723,6 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 			/* Delta match  */
 
-			/* Decode the offset  */
 			if (!lzms_decode_delta_match_bit(d)) {
 				/* Explicit offset  */
 				power = lzms_decode_delta_power(d);
@@ -778,16 +748,17 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			d->lru.delta.upcoming_power = power;
 			d->lru.delta.upcoming_offset = raw_offset;
 
-			/* Decode the length  */
 			length = lzms_decode_length(d);
 
-			/* Validate and copy the match  */
 			u32 offset1 = (u32)1 << power;
 			u32 offset2 = raw_offset << power;
 			u32 offset = offset1 + offset2;
 			u8 *matchptr1;
 			u8 *matchptr2;
 			u8 *matchptr;
+
+			if (unlikely((offset2 >> power) != raw_offset))
+				return -1;
 
 			if (unlikely(length > out_end - out_next))
 				return -1;
@@ -912,7 +883,7 @@ lzms_create_decompressor(size_t max_bufsize, void **d_ret)
 
 /* Decompress @in_nbytes bytes of LZMS-compressed data at @in and write the
  * uncompressed data, which had original size @out_nbytes, to @out.  Return 0 if
- * successful, or nonzero if the compressed data is invalid.  */
+ * successful or -1 if the compressed data is invalid.  */
 static int
 lzms_decompress(const void *in, size_t in_nbytes, void *out, size_t out_nbytes,
 		void *_d)
@@ -924,7 +895,7 @@ lzms_decompress(const void *in, size_t in_nbytes, void *out, size_t out_nbytes,
 	 *
 	 * 1. LZMS-compressed data is a series of 16-bit integers, so the
 	 *    compressed data buffer cannot take up an odd number of bytes.
-	 * 2. To prevent poor performance on some architectures we require that
+	 * 2. To prevent poor performance on some architectures, we require that
 	 *    the compressed data buffer is 2-byte aligned.
 	 * 3. There must be at least 4 bytes of compressed data, since otherwise
 	 *    we cannot even initialize the range decoder.
