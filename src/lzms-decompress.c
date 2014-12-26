@@ -758,7 +758,12 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			offset2 = raw_offset << power;
 			offset = offset1 + offset2;
 
+			/* raw_offset<<power overflowed?  */
 			if (unlikely((offset2 >> power) != raw_offset))
+				return -1;
+
+			/* offset1+offset2 overflowed?  */
+			if (unlikely(offset < offset2))
 				return -1;
 
 			if (unlikely(length > out_end - out_next))
