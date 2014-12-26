@@ -209,10 +209,10 @@
 #include "wimlib/util.h"
 
 /* The TABLEBITS values can be changed; they only affect decoding speed.  */
-#define LZMS_LITERAL_TABLEBITS		14
-#define LZMS_LENGTH_TABLEBITS		14
-#define LZMS_LZ_OFFSET_TABLEBITS	14
-#define LZMS_DELTA_OFFSET_TABLEBITS	14
+#define LZMS_LITERAL_TABLEBITS		10
+#define LZMS_LENGTH_TABLEBITS		10
+#define LZMS_LZ_OFFSET_TABLEBITS	10
+#define LZMS_DELTA_OFFSET_TABLEBITS	10
 #define LZMS_DELTA_POWER_TABLEBITS	8
 
 struct lzms_range_decoder {
@@ -766,7 +766,6 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 
 	decode_table_pos = (u16*)decode_table_ptr - decode_table;
 	if (decode_table_pos != table_num_entries) {
-		assert(0);
 		unsigned j;
 		unsigned next_free_tree_slot;
 		unsigned cur_codeword;
@@ -795,7 +794,7 @@ lzms_fill_decode_table(u16 * const restrict decode_table,
 		     codeword_len++, cur_codeword <<= 1)
 		{
 			unsigned end_sym_idx = sym_idx + len_counts[codeword_len];
-			for (; sym_idx < end_sym_idx; sym_idx++) {
+			for (; sym_idx < end_sym_idx; sym_idx++, cur_codeword++) {
 				/* 'sym' is the symbol represented by the
 				 * codeword.  */
 				unsigned sym = sorted_syms[sym_idx];
