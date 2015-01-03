@@ -106,9 +106,9 @@ struct lzx_lens {
 
 /* Estimated cost, in bits, to output each symbol in the LZX Huffman codes.  */
 struct lzx_costs {
-	u8 main[LZX_MAINCODE_MAX_NUM_SYMBOLS];
-	u8 len[LZX_LENCODE_NUM_SYMBOLS];
-	u8 aligned[LZX_ALIGNEDCODE_NUM_SYMBOLS];
+	u32 main[LZX_MAINCODE_MAX_NUM_SYMBOLS];
+	u32 len[LZX_LENCODE_NUM_SYMBOLS];
+	u32 aligned[LZX_ALIGNEDCODE_NUM_SYMBOLS];
 };
 
 /* Codewords and lengths for the LZX Huffman codes.  */
@@ -182,9 +182,9 @@ struct lzx_optimum_node {
 	 * different adaptive state which results in lower costs later.  We do
 	 * not solve this problem; we only consider the lowest cost to reach
 	 * each position, which seems to be an acceptable approximation.  */
-	struct lzx_lru_queue queue _aligned_attribute(16);
+	struct lzx_lru_queue queue;
 
-} _aligned_attribute(16);
+};
 
 struct lzx_output_bitstream;
 
