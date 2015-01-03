@@ -247,7 +247,6 @@ struct lzx_compressor {
 
 		/* Data for near-optimal parsing  */
 		struct {
-			unsigned num_optim_passes;
 			struct bt_matchfinder bt_mf;
 			pos_t digram_tab[65536];
 			struct lz_match match_cache[LZX_CACHE_LEN + 1 + LZX_MAX_MATCHES_PER_POS];
@@ -255,6 +254,7 @@ struct lzx_compressor {
 			struct lzx_optimum_node optimum_nodes[LZX_DIV_BLOCK_SIZE +
 							      LZX_MAX_MATCH_LEN + 1];
 			struct lzx_costs costs;
+			unsigned num_optim_passes;
 			u8 optimal_end[0];
 		};
 	};
@@ -1237,7 +1237,7 @@ lzx_repsearch(const u8 * const strptr, const u32 bytes_remaining,
 			     queue->R, rep_max_idx_ret);
 }
 
-static void
+static noinline void
 lzx_find_min_cost_path(struct lzx_compressor *c,
 		       const u8 *block_begin, u32 block_size)
 {
@@ -1360,7 +1360,7 @@ lzx_update_costs(struct lzx_compressor *c)
 		c->costs.aligned[i] = lens->aligned[i] ? lens->aligned[i] : 7;
 }
 
-static void
+static noinline void
 lzx_optimize_and_write_block(struct lzx_compressor *c,
 			     struct lzx_output_bitstream *os,
 			     const u8 *block_begin, const u32 block_size)
