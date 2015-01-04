@@ -86,7 +86,7 @@
 #define LZX_CACHE_PER_POS	8
 #define LZX_MAX_MATCHES_PER_POS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
 #define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
-#define LZX_COST_SHIFT		0
+#define LZX_COST_SHIFT		4
 
 struct lzx_compressor;
 
@@ -1295,8 +1295,9 @@ lzx_repsearch(const u8 * const strptr, const u32 bytes_remaining,
 }
 
 static noinline void
-lzx_find_min_cost_path(struct lzx_compressor *c,
-		       const u8 *block_begin, u32 block_size)
+lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
+		       const u8 * const restrict block_begin,
+		       const u32 block_size)
 {
 	struct lzx_optimum_node *cur_optimum_ptr;
 	struct lzx_optimum_node *end_optimum_ptr;
