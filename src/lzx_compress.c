@@ -947,18 +947,6 @@ lzx_tally_item_list(struct lzx_compressor *c, struct lzx_optimum_node *cur_optim
 	} while (cur_optimum_ptr != c->optimum_nodes);
 }
 
-/* Tally, and optionally (if next_chosen_item != NULL) record, in order, all
- * items in the current list of items found by the match-chooser.  */
-static void
-lzx_declare_item_list(struct lzx_compressor *c, struct lzx_optimum_node *cur_optimum_ptr,
-		      struct lzx_item **next_chosen_item)
-{
-	if (next_chosen_item)
-		lzx_record_item_list(c, cur_optimum_ptr, next_chosen_item);
-	else
-		lzx_tally_item_list(c, cur_optimum_ptr);
-}
-
 /* Return the cost, in bits, to output a literal byte using the specified cost
  * model.  */
 static inline u32
