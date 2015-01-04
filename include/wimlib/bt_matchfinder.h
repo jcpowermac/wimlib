@@ -124,9 +124,9 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 
 	hash = *prev_hash;
 	*prev_hash = lz_hash(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
-	prefetch(&mf->hash_tab[*prev_hash]);
 	cur_match = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_base;
+	prefetch(&mf->hash_tab[*prev_hash]);
 
 	pending_lt_ptr = bt_left_child(mf, in_next - in_base);
 	pending_gt_ptr = bt_right_child(mf, in_next - in_base);
@@ -208,9 +208,9 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 
 	hash = *prev_hash;
 	*prev_hash = lz_hash(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
-	prefetch(&mf->hash_tab[*prev_hash]);
 	cur_match = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_base;
+	prefetch(&mf->hash_tab[*prev_hash]);
 
 	depth_remaining = max_search_depth;
 	pending_lt_ptr = bt_left_child(mf, in_next - in_base);
