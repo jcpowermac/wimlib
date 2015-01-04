@@ -145,16 +145,12 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 		matchptr = &in_base[cur_match];
 
 		if (matchptr[len] == in_next[len]) {
-
 			len = lz_extend(in_next, matchptr, len + 1, max_len);
-
 			if (len > best_len) {
 				best_len = len;
-
 				lz_matchptr->length = len;
 				lz_matchptr->offset = in_next - matchptr;
 				lz_matchptr++;
-
 				if (len >= nice_len) {
 					*pending_lt_ptr = *bt_left_child(mf, cur_match);
 					*pending_gt_ptr = *bt_right_child(mf, cur_match);
