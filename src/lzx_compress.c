@@ -297,7 +297,7 @@ struct lzx_compressor {
 	 * matches at each position.  */
 	unsigned max_search_depth;
 
-	struct lzx_item chosen_items[LZX_DIV_BLOCK_SIZE];
+	struct lzx_item chosen_items[LZX_DIV_BLOCK_SIZE + LZX_MAX_MATCH_LEN + 1];
 
 	/* Table mapping match offset => offset slot for small offsets  */
 #define LZX_NUM_FAST_OFFSETS 32768
@@ -1273,7 +1273,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 				(cur_optimum_ptr + len)->mc_item_data =
 					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
 			}
-		} while (++len <= matches[i].len);
+		} while (++len <= matches[i].length);
 	} while (++i != num_matches);
 #endif
 }
