@@ -182,9 +182,74 @@ struct lzx_optimum_node {
 	 * different adaptive state which results in lower costs later.  We do
 	 * not solve this problem; we only consider the lowest cost to reach
 	 * each position, which seems to be an acceptable approximation.  */
-	struct lzx_lru_queue queue;
-
+	u64 queue64;
 };
+
+#define LZX_QUEUE64_OFFSET_SHIFT 21
+#define LZX_QUEUE64_OFFSET_MASK	(((u64)1 << LZX_QUEUE64_OFFSET_SHIFT) - 1)
+
+#define LZX_QUEUE64_R0_SHIFT (0 * LZX_QUEUE64_OFFSET_SHIFT)
+#define LZX_QUEUE64_R1_SHIFT (1 * LZX_QUEUE64_OFFSET_SHIFT)
+#define LZX_QUEUE64_R2_SHIFT (2 * LZX_QUEUE64_OFFSET_SHIFT)
+
+#define LZX_QUEUE64_R0_MASK (LZX_QUEUE64_OFFSET_MASK << LZX_QUEUE64_R0_SHIFT)
+#define LZX_QUEUE64_R1_MASK (LZX_QUEUE64_OFFSET_MASK << LZX_QUEUE64_R1_SHIFT)
+#define LZX_QUEUE64_R2_MASK (LZX_QUEUE64_OFFSET_MASK << LZX_QUEUE64_R2_SHIFT)
+
+static inline u64
+lzx_queue64_R0(u64 queue64)
+{
+	return (queue64 >> LZX_QUEUE64_R0_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+}
+
+static inline u64
+lzx_queue64_R1(u64 queue64)
+{
+	return (queue64 >> LZX_QUEUE64_R1_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+}
+
+static inline u64
+lzx_queue64_R2(u64 queue64)
+{
+	return (queue64 >> LZX_QUEUE64_R2_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+}
+
+static inline u64
+lzx_queue64_pack(const struct lzx_lru_queue *queue)
+{
+	return ((u64)queue->R[0] << LZX_QUEUE64_R0_SHIFT) |
+	       ((u64)queue->R[1] << LZX_QUEUE64_R1_SHIFT) |
+	       ((u64)queue->R[2] << LZX_QUEUE64_R2_SHIFT);
+}
+
+static inline void
+lzx_queue64_unpack(u64 queue64, struct lzx_lru_queue *queue)
+{
+	queue->R[0] = lzx_queue64_R0(queue64);
+	queue->R[1] = lzx_queue64_R1(queue64);
+	queue->R[2] = lzx_queue64_R2(queue64);
+}
+
+static inline u64
+lzx_queue64_insert(u64 queue64, u32 offset)
+{
+	return (queue64 << LZX_QUEUE64_OFFSET_SHIFT) | offset;
+}
+
+static inline u64
+lzx_queue64_swap(u64 queue64, unsigned idx)
+{
+	if (idx == 0)
+		return queue64;
+	else if (idx == 1)
+		return (lzx_queue64_R1(queue64) << LZX_QUEUE64_R0_SHIFT) |
+		       (lzx_queue64_R0(queue64) << LZX_QUEUE64_R1_SHIFT) |
+		       (queue64 & LZX_QUEUE64_R2_MASK);
+	else
+		return (lzx_queue64_R2(queue64) << LZX_QUEUE64_R0_SHIFT) |
+		       (queue64 & LZX_QUEUE64_R1_MASK) |
+		       (lzx_queue64_R0(queue64) << LZX_QUEUE64_R2_SHIFT);
+}
 
 struct lzx_output_bitstream;
 
@@ -1213,16 +1278,48 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 #endif
 }
 
-/*
- * Search for repeat offset matches with the current position.
- */
 static inline unsigned
 lzx_repsearch(const u8 * const strptr, const u32 bytes_remaining,
-	      const struct lzx_lru_queue *queue, unsigned *rep_max_idx_ret)
+	      u64 queue64, unsigned *rep_max_idx_ret)
 {
 	BUILD_BUG_ON(LZX_NUM_RECENT_OFFSETS != 3);
-	return lz_repsearch3(strptr, min(bytes_remaining, LZX_MAX_MATCH_LEN),
-			     queue->R, rep_max_idx_ret);
+
+	const u32 max_len = min(bytes_remaining, LZX_MAX_MATCH_LEN);
+	unsigned rep_max_idx;
+	u32 rep_len;
+	u32 rep_max_len;
+	const u16 str = load_u16_unaligned(strptr);
+	const u8 *matchptr;
+
+	matchptr = strptr - (queue64 & LZX_QUEUE64_OFFSET_MASK);
+	queue64 >>= LZX_QUEUE64_OFFSET_SHIFT;
+	if (load_u16_unaligned(matchptr) == str)
+		rep_max_len = lz_extend_repmatch(strptr, matchptr, max_len);
+	else
+		rep_max_len = 0;
+	rep_max_idx = 0;
+
+	matchptr = strptr - (queue64 & LZX_QUEUE64_OFFSET_MASK);
+	queue64 >>= LZX_QUEUE64_OFFSET_SHIFT;
+	if (load_u16_unaligned(matchptr) == str) {
+		rep_len = lz_extend_repmatch(strptr, matchptr, max_len);
+		if (rep_len > rep_max_len) {
+			rep_max_len = rep_len;
+			rep_max_idx = 1;
+		}
+	}
+
+	matchptr = strptr - (queue64 & LZX_QUEUE64_OFFSET_MASK);
+	if (load_u16_unaligned(matchptr) == str) {
+		rep_len = lz_extend_repmatch(strptr, matchptr, max_len);
+		if (rep_len > rep_max_len) {
+			rep_max_len = rep_len;
+			rep_max_idx = 2;
+		}
+	}
+
+	*rep_max_idx_ret = rep_max_idx;
+	return rep_max_len;
 }
 
 static noinline void
@@ -1238,7 +1335,7 @@ lzx_find_min_cost_path(struct lzx_compressor *c,
 	for (u32 i = 0; i <= block_size; i++)
 		c->optimum_nodes[i].cost = INFINITE_COST;
 	cur_optimum_ptr = c->optimum_nodes;
-	cur_optimum_ptr->queue = c->queue;
+	cur_optimum_ptr->queue64 = lzx_queue64_pack(&c->queue);
 	end_optimum_ptr = &c->optimum_nodes[block_size];
 	cache_ptr = c->match_cache;
 	in_next = block_begin;
@@ -1259,7 +1356,7 @@ lzx_find_min_cost_path(struct lzx_compressor *c,
 
 			rep_max_len = lzx_repsearch(in_next,
 						    block_end - in_next,
-						    &cur_optimum_ptr->queue,
+						    cur_optimum_ptr->queue64,
 						    &rep_max_idx);
 
 			if (rep_max_len) {
@@ -1294,21 +1391,21 @@ lzx_find_min_cost_path(struct lzx_compressor *c,
 			/* Literal: queue remains unchanged.  */
 			cur_optimum_ptr->cost = cost;
 			cur_optimum_ptr->mc_item_data = (literal << OPTIMUM_OFFSET_SHIFT) | 1;
-			cur_optimum_ptr->queue = (cur_optimum_ptr - 1)->queue;
+			cur_optimum_ptr->queue64 = (cur_optimum_ptr - 1)->queue64;
 		} else {
 			/* Match: queue update is needed.  */
 			len = cur_optimum_ptr->mc_item_data & OPTIMUM_LEN_MASK;
 			offset_data = cur_optimum_ptr->mc_item_data >> OPTIMUM_OFFSET_SHIFT;
 			if (offset_data >= LZX_NUM_RECENT_OFFSETS) {
 				/* Explicit offset match: offset is inserted at front  */
-				cur_optimum_ptr->queue.R[0] = offset_data - LZX_OFFSET_OFFSET;
-				cur_optimum_ptr->queue.R[1] = (cur_optimum_ptr - len)->queue.R[0];
-				cur_optimum_ptr->queue.R[2] = (cur_optimum_ptr - len)->queue.R[1];
+				cur_optimum_ptr->queue64 =
+					lzx_queue64_insert((cur_optimum_ptr - len)->queue64,
+							   offset_data - LZX_OFFSET_OFFSET);
 			} else {
 				/* Repeat offset match: offset is swapped to front  */
-				cur_optimum_ptr->queue = (cur_optimum_ptr - len)->queue;
-				swap(cur_optimum_ptr->queue.R[0],
-				     cur_optimum_ptr->queue.R[offset_data]);
+				cur_optimum_ptr->queue64 =
+					lzx_queue64_swap((cur_optimum_ptr - len)->queue64,
+							 offset_data);
 			}
 		}
 	} while (cur_optimum_ptr != end_optimum_ptr);
@@ -1354,7 +1451,6 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 			     const u8 *block_begin, const u32 block_size)
 {
 	unsigned num_passes_remaining = c->num_optim_passes;
-	struct lzx_lru_queue orig_queue = c->queue;
 	struct lzx_item *next_chosen_item;
 
 	lzx_set_default_costs(c);
@@ -1365,10 +1461,10 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 			lzx_make_huffman_codes(c);
 			lzx_update_costs(c);
 			lzx_reset_symbol_frequencies(c);
-			c->queue = orig_queue;
 		}
 	} while (--num_passes_remaining);
 
+	lzx_queue64_unpack(c->optimum_nodes[block_size].queue64, &c->queue);
 	next_chosen_item = c->chosen_items;
 	lzx_record_item_list(c, c->optimum_nodes + block_size, &next_chosen_item);
 	lzx_write_block(c, os, block_size, next_chosen_item - c->chosen_items);
