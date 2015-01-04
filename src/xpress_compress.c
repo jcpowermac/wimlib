@@ -922,6 +922,8 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 			return cache_ptr;
 		}
 
+		unsigned best_len = XPRESS_MIN_MATCH_LEN - 1;
+
 		/* Find matches with the current position using the binary tree
 		 * matchfinder and save them in the next available slots in
 		 * the match cache.  */
@@ -934,6 +936,7 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 						   min(in_end - in_next, c->nice_match_length),
 						   c->max_search_depth,
 						   &prev_hash,
+						   &best_len,
 						   cache_ptr);
 		cache_ptr += num_matches;
 		cache_ptr->length = num_matches;
@@ -941,37 +944,32 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 		in_next++;
 		cache_ptr++;
 
-		if (num_matches) {
-			/*
-			 * If there was a very long match found, then don't
-			 * cache any matches for the bytes covered by that
-			 * match.  This avoids degenerate behavior when
-			 * compressing highly redundant data, where the number
-			 * of matches can be very large.
-			 *
-			 * This heuristic doesn't actually hurt the compression
-			 * ratio very much.  If there's a long match, then the
-			 * data must be highly compressible, so it doesn't
-			 * matter as much what we do.
-			 */
-			unsigned best_len = cache_ptr[-2].length;
-			if (best_len >= c->nice_match_length) {
-				--best_len;
-				do {
-					bt_matchfinder_skip_position(&c->bt_mf,
-								     in_base,
-								     in_next,
-								     in_end,
-								     min(in_end - in_next,
-									 c->nice_match_length),
-								     c->max_search_depth,
-								     &prev_hash);
+		/*
+		 * If there was a very long match found, then don't cache any
+		 * matches for the bytes covered by that match.  This avoids
+		 * degenerate behavior when compressing highly redundant data,
+		 * where the number of matches can be very large.
+		 *
+		 * This heuristic doesn't actually hurt the compression ratio
+		 * very much.  If there's a long match, then the data must be
+		 * highly compressible, so it doesn't matter as much what we do.
+		 */
+		if (best_len >= c->nice_match_length) {
+			--best_len;
+			do {
+				bt_matchfinder_skip_position(&c->bt_mf,
+							     in_base,
+							     in_next,
+							     in_end,
+							     min(in_end - in_next,
+								 c->nice_match_length),
+							     c->max_search_depth,
+							     &prev_hash);
 
-					cache_ptr->length = 0;
-					cache_ptr->offset = *in_next++;
-					cache_ptr++;
-				} while (--best_len);
-			}
+				cache_ptr->length = 0;
+				cache_ptr->offset = *in_next++;
+				cache_ptr++;
+			} while (--best_len);
 		}
 	} while (in_next != in_end);
 

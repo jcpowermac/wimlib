@@ -106,7 +106,8 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 			   const unsigned max_len,
 			   const unsigned nice_len,
 			   const unsigned max_search_depth,
-			   u32 *prev_hash,
+			   u32 * restrict prev_hash,
+			   unsigned * restrict best_len_ret,
 			   struct lz_match * const restrict matches)
 {
 	struct lz_match *lz_matchptr = matches;
@@ -114,13 +115,15 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	u32 hash;
 	pos_t cur_match;
 	const u8 *matchptr;
-	unsigned best_len;
 	pos_t *pending_lt_ptr, *pending_gt_ptr;
 	unsigned best_lt_len, best_gt_len;
 	unsigned len;
+	unsigned best_len = min_len - 1;
 
-	if (unlikely(max_len < LZ_HASH_REQUIRED_NBYTES + 1))
+	if (unlikely(max_len < LZ_HASH_REQUIRED_NBYTES + 1)) {
+		*best_len_ret = best_len;
 		return 0;
+	}
 
 	hash = *prev_hash;
 	*prev_hash = lz_hash(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
@@ -133,11 +136,11 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	best_lt_len = 0;
 	best_gt_len = 0;
 	len = 0;
-	best_len = min_len - 1;
 
 	if (!matchfinder_match_in_window(cur_match, in_base, in_next)) {
 		*pending_lt_ptr = MATCHFINDER_INITVAL;
 		*pending_gt_ptr = MATCHFINDER_INITVAL;
+		*best_len_ret = best_len;
 		return 0;
 	}
 
@@ -154,6 +157,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 				if (len >= nice_len) {
 					*pending_lt_ptr = *bt_left_child(mf, cur_match);
 					*pending_gt_ptr = *bt_right_child(mf, cur_match);
+					*best_len_ret = best_len;
 					return lz_matchptr - matches;
 				}
 			}
@@ -181,6 +185,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 		{
 			*pending_lt_ptr = MATCHFINDER_INITVAL;
 			*pending_gt_ptr = MATCHFINDER_INITVAL;
+			*best_len_ret = best_len;
 			return lz_matchptr - matches;
 		}
 	}

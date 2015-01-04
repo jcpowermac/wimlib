@@ -1507,6 +1507,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 			struct lz_match *matches;
 			u16 digram;
 			pos_t cur_match;
+			unsigned best_len;
 
 			if (unlikely(max_len > in_end - in_next)) {
 				max_len = in_end - in_next;
@@ -1542,32 +1543,30 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 								  nice_len,
 								  c->max_search_depth,
 								  &prev_hash,
+								  &best_len,
 								  &matches[num_matches]);
 			in_next++;
 			cache_ptr->length = num_matches;
 			cache_ptr += 1 + num_matches;
 
-			if (num_matches) {
-				unsigned best_len = cache_ptr[-1].length;
-				if (best_len >= min(nice_len, in_block_end - in_next)) {
-					--best_len;
-					do {
-						if (unlikely(max_len > in_end - in_next)) {
-							max_len = in_end - in_next;
-							nice_len = min(max_len, nice_len);
-						}
-						bt_matchfinder_skip_position(&c->bt_mf,
-									     in_base,
-									     in_next,
-									     in_end,
-									     nice_len,
-									     c->max_search_depth,
-									     &prev_hash);
-						in_next++;
-						cache_ptr->length = 0;
-						cache_ptr++;
-					} while (--best_len);
-				}
+			if (best_len >= min(nice_len, in_block_end - in_next)) {
+				--best_len;
+				do {
+					if (unlikely(max_len > in_end - in_next)) {
+						max_len = in_end - in_next;
+						nice_len = min(max_len, nice_len);
+					}
+					bt_matchfinder_skip_position(&c->bt_mf,
+								     in_base,
+								     in_next,
+								     in_end,
+								     nice_len,
+								     c->max_search_depth,
+								     &prev_hash);
+					in_next++;
+					cache_ptr->length = 0;
+					cache_ptr++;
+				} while (--best_len);
 			}
 		} while (in_next < in_block_end &&
 			 likely(cache_ptr < c->cache_overflow_mark));
