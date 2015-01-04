@@ -253,6 +253,9 @@ lzx_queue64_swap(u64 queue64, unsigned idx)
 
 struct lzx_output_bitstream;
 
+#define HASH2_ORDER 10
+#define HASH2_LENGTH (1UL << HASH2_ORDER)
+
 /* State of the LZX compressor  */
 struct lzx_compressor {
 
@@ -313,7 +316,8 @@ struct lzx_compressor {
 		/* Data for near-optimal parsing  */
 		struct {
 			struct bt_matchfinder bt_mf;
-			pos_t digram_tab[65536] _aligned_attribute(MATCHFINDER_ALIGNMENT);
+			pos_t hash2_tab[HASH2_LENGTH]
+				_aligned_attribute(MATCHFINDER_ALIGNMENT);
 			struct lz_match match_cache[LZX_CACHE_LEN + 1 + LZX_MAX_MATCHES_PER_POS];
 			struct lz_match *cache_overflow_mark;
 			struct lzx_optimum_node optimum_nodes[LZX_DIV_BLOCK_SIZE +
@@ -323,9 +327,22 @@ struct lzx_compressor {
 			u8 optimal_end[0];
 		};
 	};
-
-
 };
+
+static inline u32
+lz_hash_u16(u16 next_2_bytes)
+{
+	if (HASH2_ORDER == 16)
+		return next_2_bytes;
+	else
+		return lz_hash_u24(next_2_bytes, HASH2_ORDER);
+}
+
+static inline u32
+lz_hash_2_bytes(const u8 *p)
+{
+	return lz_hash_u16(load_u16_unaligned(p));
+}
 
 /*
  * Structure to keep track of the current state of sending bits to the
@@ -1489,7 +1506,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 	u32 prev_hash;
 
 	bt_matchfinder_init(&c->bt_mf);
-	matchfinder_init(c->digram_tab, 65536);
+	matchfinder_init(c->hash2_tab, HASH2_LENGTH);
 	max_len = LZX_MAX_MATCH_LEN;
 	nice_len = min(c->nice_match_length, max_len);
 	prev_hash = 0;
@@ -1504,7 +1521,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 
 		do {
 			struct lz_match *lz_matchptr;
-			u16 digram;
+			u32 hash2;
 			pos_t cur_match;
 			unsigned best_len;
 
@@ -1519,16 +1536,15 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 				}
 			}
 
-
-			prefetch(&c->digram_tab[load_u16_unaligned(in_next + 1)]);
-
-			digram = load_u16_unaligned(in_next);
-			cur_match = c->digram_tab[digram];
-			c->digram_tab[digram] = in_next - in_base;
+			hash2 = lz_hash_2_bytes(in_next);
+			cur_match = c->hash2_tab[hash2];
+			c->hash2_tab[hash2] = in_next - in_base;
 
 			lz_matchptr = cache_ptr + 1;
 
 			if (matchfinder_match_in_window(cur_match, in_base, in_next) &&
+			    (load_u16_unaligned(&in_base[cur_match]) ==
+			     load_u16_unaligned(in_next)) &&
 			    in_base[cur_match + 2] != in_next[2])
 			{
 				lz_matchptr->length = 2;
@@ -1564,6 +1580,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 								     nice_len,
 								     c->max_search_depth,
 								     &prev_hash);
+					c->hash2_tab[lz_hash_2_bytes(in_next)] = in_next - in_base;
 					in_next++;
 					cache_ptr->length = 0;
 					cache_ptr++;
