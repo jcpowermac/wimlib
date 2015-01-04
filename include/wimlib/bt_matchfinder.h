@@ -80,12 +80,12 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 			   const unsigned max_len,
 			   const unsigned nice_len,
 			   const unsigned max_search_depth,
-			   unsigned long *prev_hash,
+			   u32 *prev_hash,
 			   struct lz_match * const restrict matches)
 {
 	struct lz_match *lz_matchptr = matches;
 	unsigned depth_remaining = max_search_depth;
-	unsigned hash;
+	u32 hash;
 	pos_t cur_match;
 	const u8 *matchptr;
 	unsigned best_len;
@@ -175,10 +175,10 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 			     const u8 * const in_end,
 			     const unsigned nice_len,
 			     const unsigned max_search_depth,
-			     unsigned long *prev_hash)
+			     u32 *prev_hash)
 {
 	unsigned depth_remaining = max_search_depth;
-	unsigned hash;
+	u32 hash;
 	pos_t cur_match;
 	const u8 *matchptr;
 	pos_t *pending_lt_ptr, *pending_gt_ptr;

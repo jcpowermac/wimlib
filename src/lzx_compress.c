@@ -1486,7 +1486,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 	const u8 * const in_end  = in_base + c->in_nbytes;
 	unsigned max_len;
 	unsigned nice_len;
-	unsigned long prev_hash;
+	u32 prev_hash;
 
 	bt_matchfinder_init(&c->bt_mf);
 	for (u32 i = 0; i < 65536; i++)
