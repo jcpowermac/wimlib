@@ -1545,7 +1545,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 			cache_ptr->length = lz_matchptr - (cache_ptr + 1);
 			cache_ptr = lz_matchptr;
 
-			if (best_len >= min(nice_len, in_block_end - in_next)) {
+			if (best_len >= nice_len) {
 				--best_len;
 				do {
 					if (unlikely(max_len > in_end - in_next)) {
