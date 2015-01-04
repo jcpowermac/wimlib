@@ -33,7 +33,6 @@
 #include "wimlib/lz_extend.h"
 #include "wimlib/lz_hash3.h"
 #include "wimlib/matchfinder_common.h"
-#include "wimlib/unaligned.h"
 
 #ifndef BT_MATCHFINDER_HASH_ORDER
 #  if MATCHFINDER_WINDOW_ORDER < 13
