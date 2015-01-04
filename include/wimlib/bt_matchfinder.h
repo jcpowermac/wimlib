@@ -36,10 +36,12 @@
 #include "wimlib/unaligned.h"
 
 #ifndef BT_MATCHFINDER_HASH_ORDER
-#  if MATCHFINDER_WINDOW_ORDER < 14
+#  if MATCHFINDER_WINDOW_ORDER < 13
 #    define BT_MATCHFINDER_HASH_ORDER 14
-#  else
+#  elif MATCHFINDER_WINDOW_ORDER < 15
 #    define BT_MATCHFINDER_HASH_ORDER 15
+#  else
+#    define BT_MATCHFINDER_HASH_ORDER 16
 #  endif
 #endif
 
