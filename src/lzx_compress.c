@@ -1159,15 +1159,14 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 /*
  * Consider coding each match in @matches as an explicit offset match.
  *
- * @matches must be sorted by strictly increasing length and strictly
- * increasing offset.  This is guaranteed by the match-finder.
+ * @matches must be sorted by strictly increasing length and strictly increasing
+ * offset.  This is guaranteed by the match-finder.
  *
  * We consider each length from the minimum (2) to the longest
- * (matches[num_matches - 1].len).  For each length, we consider only
- * the smallest offset for which that length is available.  Although
- * this is not guaranteed to be optimal due to the possibility of a
- * larger offset costing less than a smaller offset to code, this is a
- * very useful heuristic.
+ * (matches[num_matches - 1].len).  For each length, we consider only the
+ * smallest offset for which that length is available.  Although this is not
+ * guaranteed to be optimal due to the possibility of a larger offset costing
+ * less than a smaller offset to code, this is a very useful heuristic.
  */
 static inline void
 lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
@@ -1184,115 +1183,41 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 	u32 cost;
 	u32 offset_data;
 
+	/*
+	 * Offset is small; the offset slot can be looked up directly in
+	 * c->offset_slot_fast.
+	 *
+	 * Additional optimizations:
+	 *
+	 * - Since the offset is small, it falls in the exponential part of the
+	 *   offset slot bases and the number of extra offset bits can be
+	 *   calculated directly as (offset_slot >> 1) - 1.
+	 *
+	 * - Just consider the number of extra offset bits; don't account for
+	 *   the aligned offset code.  Usually this has almost no effect on the
+	 *   compression ratio.
+	 *
+	 * - Start out in a loop optimized for small lengths.  When the length
+	 *   becomes high enough that a length symbol will be needed, jump into
+	 *   a loop optimized for big lengths.
+	 */
 
-#if 1	/* Optimized version */
-
-	if (matches[num_matches - 1].offset < LZX_NUM_FAST_OFFSETS) {
-
-		/*
-		 * Offset is small; the offset slot can be looked up directly in
-		 * c->offset_slot_fast.
-		 *
-		 * Additional optimizations:
-		 *
-		 * - Since the offset is small, it falls in the exponential part
-		 *   of the offset slot bases and the number of extra offset
-		 *   bits can be calculated directly as (offset_slot >> 1) - 1.
-		 *
-		 * - Just consider the number of extra offset bits; don't
-		 *   account for the aligned offset code.  Usually this has
-		 *   almost no effect on the compression ratio.
-		 *
-		 * - Start out in a loop optimized for small lengths.  When the
-		 *   length becomes high enough that a length symbol will be
-		 *   needed, jump into a loop optimized for big lengths.
-		 */
-
-		LZX_ASSERT(offset_slot <= 37); /* for extra bits formula  */
-
-		len = 2;
-		i = 0;
-		do {
-			offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
-			position_cost = cur_optimum_ptr->cost +
-					(((offset_slot >> 1) - 1) << LZX_COST_SHIFT);
-			offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
-			do {
-				if (len >= LZX_MIN_MATCH_LEN + LZX_NUM_PRIMARY_LENS)
-					goto biglen;
-				cost = position_cost +
-				       lzx_match_cost_raw_smalllen(len, offset_slot,
-								   &c->costs);
-				if (cost < (cur_optimum_ptr + len)->cost) {
-					(cur_optimum_ptr + len)->cost = cost;
-					(cur_optimum_ptr + len)->mc_item_data =
-						(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-				}
-			} while (++len <= matches[i].length);
-		} while (++i != num_matches);
-
-		return;
-
-		do {
-			offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
-	biglen:
-			position_cost = cur_optimum_ptr->cost +
-					(((offset_slot >> 1) - 1) << LZX_COST_SHIFT) +
-					c->costs.main[LZX_NUM_CHARS +
-						      ((offset_slot << 3) |
-						       LZX_NUM_PRIMARY_LENS)];
-			offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
-			do {
-				cost = position_cost +
-				       c->costs.len[len - LZX_MIN_MATCH_LEN -
-						    LZX_NUM_PRIMARY_LENS];
-				if (cost < (cur_optimum_ptr + len)->cost) {
-					(cur_optimum_ptr + len)->cost = cost;
-					(cur_optimum_ptr + len)->mc_item_data =
-						(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-				}
-			} while (++len <= matches[i].length);
-		} while (++i != num_matches);
-	} else {
-		len = 2;
-		i = 0;
-		do {
-			offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
-			offset_slot = lzx_get_offset_slot_raw(offset_data);
-			position_cost = cur_optimum_ptr->cost +
-					(lzx_extra_offset_bits[offset_slot] << LZX_COST_SHIFT);
-			do {
-				cost = position_cost +
-				       lzx_match_cost_raw(len, offset_slot, &c->costs);
-				if (cost < (cur_optimum_ptr + len)->cost) {
-					(cur_optimum_ptr + len)->cost = cost;
-					(cur_optimum_ptr + len)->mc_item_data =
-						(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-				}
-			} while (++len <= matches[i].length);
-		} while (++i != num_matches);
-	}
-
-#else	/* Unoptimized version */
-
-	unsigned num_extra_bits;
+	LZX_ASSERT(matches[num_matches - 1].offset < LZX_NUM_FAST_OFFSETS);
+	LZX_ASSERT(offset_slot <= 37); /* for extra bits formula  */
 
 	len = 2;
 	i = 0;
 	do {
+		offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
+		position_cost = cur_optimum_ptr->cost +
+				(((offset_slot >> 1) - 1) << LZX_COST_SHIFT);
 		offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
-		position_cost = cur_optimum_ptr->cost;
-		offset_slot = lzx_get_offset_slot_raw(offset_data);
-		num_extra_bits = lzx_extra_offset_bits[offset_slot];
-		if (num_extra_bits >= 3) {
-			position_cost += (num_extra_bits - 3) << LZX_COST_SHIFT;
-			position_cost += c->costs.aligned[offset_data & 7];
-		} else {
-			position_cost += (num_extra_bits << LZX_COST_SHIFT);
-		}
 		do {
+			if (len >= LZX_MIN_MATCH_LEN + LZX_NUM_PRIMARY_LENS)
+				goto biglen;
 			cost = position_cost +
-			       lzx_match_cost_raw(len, offset_slot, &c->costs);
+			       lzx_match_cost_raw_smalllen(len, offset_slot,
+							   &c->costs);
 			if (cost < (cur_optimum_ptr + len)->cost) {
 				(cur_optimum_ptr + len)->cost = cost;
 				(cur_optimum_ptr + len)->mc_item_data =
@@ -1300,7 +1225,29 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 			}
 		} while (++len <= matches[i].length);
 	} while (++i != num_matches);
-#endif
+
+	return;
+
+	do {
+		offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
+biglen:
+		position_cost = cur_optimum_ptr->cost +
+				(((offset_slot >> 1) - 1) << LZX_COST_SHIFT) +
+				c->costs.main[LZX_NUM_CHARS +
+					      ((offset_slot << 3) |
+					       LZX_NUM_PRIMARY_LENS)];
+		offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
+		do {
+			cost = position_cost +
+			       c->costs.len[len - LZX_MIN_MATCH_LEN -
+					    LZX_NUM_PRIMARY_LENS];
+			if (cost < (cur_optimum_ptr + len)->cost) {
+				(cur_optimum_ptr + len)->cost = cost;
+				(cur_optimum_ptr + len)->mc_item_data =
+					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
+			}
+		} while (++len <= matches[i].length);
+	} while (++i != num_matches);
 }
 
 static inline unsigned
