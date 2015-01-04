@@ -92,6 +92,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	pos_t *pending_lt_ptr, *pending_gt_ptr;
 	unsigned best_lt_len, best_gt_len;
 	unsigned len;
+	unsigned next_len;
 	pos_t *children;
 
 	if (unlikely(max_len < LZ_HASH_REQUIRED_NBYTES + 1))
@@ -103,26 +104,27 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	cur_match = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_base;
 
+
 	best_len = min_len - 1;
 	pending_lt_ptr = &mf->child_tab[(in_next - in_base) << 1];
 	pending_gt_ptr = &mf->child_tab[((in_next - in_base) << 1) + 1];
 	best_lt_len = 0;
 	best_gt_len = 0;
-	for (;;) {
-		if (!matchfinder_match_in_window(cur_match,
-						 in_base, in_next) ||
-		    !depth_remaining--)
-		{
-			*pending_lt_ptr = MATCHFINDER_INITVAL;
-			*pending_gt_ptr = MATCHFINDER_INITVAL;
-			return lz_matchptr - matches;
-		}
+	next_len = 0;
 
+	if (!matchfinder_match_in_window(cur_match, in_base, in_next)) {
+		*pending_lt_ptr = MATCHFINDER_INITVAL;
+		*pending_gt_ptr = MATCHFINDER_INITVAL;
+		return 0;
+	}
+
+	for (;;) {
 		matchptr = &in_base[cur_match];
-		len = min(best_lt_len, best_gt_len);
 
 		children = &mf->child_tab[(unsigned long)
 				matchfinder_slot_for_match(cur_match) << 1];
+
+		len = next_len;
 
 		if (matchptr[len] == in_next[len]) {
 
@@ -153,6 +155,17 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 			pending_gt_ptr = &children[0];
 			cur_match = *pending_gt_ptr;
 			best_gt_len = len;
+		}
+
+		next_len = min(best_lt_len, best_gt_len);
+
+		if (!matchfinder_match_in_window(cur_match,
+						 in_base, in_next) ||
+		    !--depth_remaining)
+		{
+			*pending_lt_ptr = MATCHFINDER_INITVAL;
+			*pending_gt_ptr = MATCHFINDER_INITVAL;
+			return lz_matchptr - matches;
 		}
 	}
 }
