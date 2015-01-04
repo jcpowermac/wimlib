@@ -98,7 +98,7 @@ bt_right_child(struct bt_matchfinder *mf, pos_t node)
 	return bt_child(mf, node, 1);
 }
 
-static inline unsigned
+static inline struct lz_match *
 bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 			   const u8 * const in_base,
 			   const u8 * const in_next,
@@ -108,9 +108,8 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 			   const unsigned max_search_depth,
 			   u32 * restrict prev_hash,
 			   unsigned * restrict best_len_ret,
-			   struct lz_match * const restrict matches)
+			   struct lz_match * restrict lz_matchptr)
 {
-	struct lz_match *lz_matchptr = matches;
 	unsigned depth_remaining = max_search_depth;
 	u32 hash;
 	pos_t cur_match;
@@ -122,7 +121,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 
 	if (unlikely(max_len < LZ_HASH_REQUIRED_NBYTES + 1)) {
 		*best_len_ret = best_len;
-		return 0;
+		return lz_matchptr;
 	}
 
 	hash = *prev_hash;
@@ -141,7 +140,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 		*pending_lt_ptr = MATCHFINDER_INITVAL;
 		*pending_gt_ptr = MATCHFINDER_INITVAL;
 		*best_len_ret = best_len;
-		return 0;
+		return lz_matchptr;
 	}
 
 	for (;;) {
@@ -158,7 +157,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 					*pending_lt_ptr = *bt_left_child(mf, cur_match);
 					*pending_gt_ptr = *bt_right_child(mf, cur_match);
 					*best_len_ret = best_len;
-					return lz_matchptr - matches;
+					return lz_matchptr;
 				}
 			}
 		}
@@ -186,7 +185,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 			*pending_lt_ptr = MATCHFINDER_INITVAL;
 			*pending_gt_ptr = MATCHFINDER_INITVAL;
 			*best_len_ret = best_len;
-			return lz_matchptr - matches;
+			return lz_matchptr;
 		}
 	}
 }

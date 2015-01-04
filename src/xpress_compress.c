@@ -908,7 +908,8 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 	bt_matchfinder_init(&c->bt_mf);
 
 	do {
-		unsigned num_matches;
+		struct lz_match *matches;
+		unsigned best_len;
 
 		/* If we've found so many matches that the cache might overflow
 		 * if we keep finding more, then stop finding matches.  This
@@ -922,12 +923,12 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 			return cache_ptr;
 		}
 
-		unsigned best_len = XPRESS_MIN_MATCH_LEN - 1;
+		matches = cache_ptr;
 
 		/* Find matches with the current position using the binary tree
 		 * matchfinder and save them in the next available slots in
 		 * the match cache.  */
-		num_matches =
+		cache_ptr =
 			bt_matchfinder_get_matches(&c->bt_mf,
 						   in_base,
 						   in_next,
@@ -938,8 +939,7 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 						   &prev_hash,
 						   &best_len,
 						   cache_ptr);
-		cache_ptr += num_matches;
-		cache_ptr->length = num_matches;
+		cache_ptr->length = cache_ptr - matches;
 		cache_ptr->offset = *in_next;
 		in_next++;
 		cache_ptr++;

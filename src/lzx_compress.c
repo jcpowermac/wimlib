@@ -1503,8 +1503,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 		lzx_reset_symbol_frequencies(c);
 
 		do {
-			unsigned num_matches = 0;
-			struct lz_match *matches;
+			struct lz_match *lz_matchptr;
 			u16 digram;
 			pos_t cur_match;
 			unsigned best_len;
@@ -1520,34 +1519,36 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 				}
 			}
 
-			matches = cache_ptr + 1;
 
 			prefetch(&c->digram_tab[load_u16_unaligned(in_next + 1)]);
 
 			digram = load_u16_unaligned(in_next);
 			cur_match = c->digram_tab[digram];
 			c->digram_tab[digram] = in_next - in_base;
+
+			lz_matchptr = cache_ptr + 1;
+
 			if (matchfinder_match_in_window(cur_match, in_base, in_next) &&
 			    in_base[cur_match + 2] != in_next[2])
 			{
-				matches[0].length = 2;
-				matches[0].offset = in_next - &in_base[cur_match];
-				num_matches++;
+				lz_matchptr->length = 2;
+				lz_matchptr->offset = in_next - &in_base[cur_match];
+				lz_matchptr++;
 			}
 
-			num_matches += bt_matchfinder_get_matches(&c->bt_mf,
-								  in_base,
-								  in_next,
-								  3,
-								  max_len,
-								  nice_len,
-								  c->max_search_depth,
-								  &prev_hash,
-								  &best_len,
-								  &matches[num_matches]);
+			lz_matchptr = bt_matchfinder_get_matches(&c->bt_mf,
+								 in_base,
+								 in_next,
+								 3,
+								 max_len,
+								 nice_len,
+								 c->max_search_depth,
+								 &prev_hash,
+								 &best_len,
+								 lz_matchptr);
 			in_next++;
-			cache_ptr->length = num_matches;
-			cache_ptr += 1 + num_matches;
+			cache_ptr->length = lz_matchptr - (cache_ptr + 1);
+			cache_ptr = lz_matchptr;
 
 			if (best_len >= min(nice_len, in_block_end - in_next)) {
 				--best_len;
