@@ -170,20 +170,6 @@ struct lzx_optimum_node {
 	u32 mc_item_data;
 #define OPTIMUM_OFFSET_SHIFT 9
 #define OPTIMUM_LEN_MASK ((1 << OPTIMUM_OFFSET_SHIFT) - 1)
-
-	/* The state of the LZX recent match offsets queue at this position.
-	 * This is filled in lazily, only after the minimum-cost path to this
-	 * position is found.
-	 *
-	 * Note: the way we handle this adaptive state in the "minimum-cost"
-	 * parse is actually only an approximation.  It's possible for the
-	 * globally optimal, minimum cost path to contain a prefix, ending at a
-	 * position, where that path prefix is *not* the minimum cost path to
-	 * that position.  This can happen if such a path prefix results in a
-	 * different adaptive state which results in lower costs later.  We do
-	 * not solve this problem; we only consider the lowest cost to reach
-	 * each position, which seems to be an acceptable approximation.  */
-	u64 queue64;
 };
 
 #define LZX_QUEUE64_OFFSET_SHIFT 21
@@ -1294,7 +1280,7 @@ lzx_repsearch(const u8 * const strptr, const u32 bytes_remaining,
 	return rep_max_len;
 }
 
-static noinline void
+static noinline u64
 lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 		       const u8 * const restrict block_begin,
 		       const u32 block_size)
@@ -1304,11 +1290,17 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 	struct lz_match *cache_ptr;
 	const u8 *in_next;
 	const u8 *block_end;
+	u64 queues[512];
+
+#define QUEUE(in) \
+		queues[(uintptr_t)(in) % ARRAY_LEN(queues)]
+
+	BUILD_BUG_ON(LZX_MAX_MATCH_LEN + 1 > ARRAY_LEN(queues));
 
 	for (u32 i = 0; i <= block_size; i++)
 		c->optimum_nodes[i].cost = INFINITE_COST;
 	cur_optimum_ptr = c->optimum_nodes;
-	cur_optimum_ptr->queue64 = lzx_queue64_pack(&c->queue);
+	QUEUE(block_begin) = lzx_queue64_pack(&c->queue);
 	end_optimum_ptr = &c->optimum_nodes[block_size];
 	cache_ptr = c->match_cache;
 	in_next = block_begin;
@@ -1329,7 +1321,7 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 
 			rep_max_len = lzx_repsearch(in_next,
 						    block_end - in_next,
-						    cur_optimum_ptr->queue64,
+						    QUEUE(in_next),
 						    &rep_max_idx);
 
 			if (rep_max_len) {
@@ -1364,24 +1356,26 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 			/* Literal: queue remains unchanged.  */
 			cur_optimum_ptr->cost = cost;
 			cur_optimum_ptr->mc_item_data = (literal << OPTIMUM_OFFSET_SHIFT) | 1;
-			cur_optimum_ptr->queue64 = (cur_optimum_ptr - 1)->queue64;
+			QUEUE(in_next) = QUEUE(in_next - 1);
 		} else {
 			/* Match: queue update is needed.  */
 			len = cur_optimum_ptr->mc_item_data & OPTIMUM_LEN_MASK;
 			offset_data = cur_optimum_ptr->mc_item_data >> OPTIMUM_OFFSET_SHIFT;
 			if (offset_data >= LZX_NUM_RECENT_OFFSETS) {
 				/* Explicit offset match: offset is inserted at front  */
-				cur_optimum_ptr->queue64 =
-					lzx_queue64_insert((cur_optimum_ptr - len)->queue64,
+				QUEUE(in_next) =
+					lzx_queue64_insert(QUEUE(in_next - len),
 							   offset_data - LZX_OFFSET_OFFSET);
 			} else {
 				/* Repeat offset match: offset is swapped to front  */
-				cur_optimum_ptr->queue64 =
-					lzx_queue64_swap((cur_optimum_ptr - len)->queue64,
+				QUEUE(in_next) =
+					lzx_queue64_swap(QUEUE(in_next - len),
 							 offset_data);
 			}
 		}
 	} while (cur_optimum_ptr != end_optimum_ptr);
+
+	return QUEUE(block_end);
 }
 
 static void
@@ -1456,10 +1450,11 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 {
 	unsigned num_passes_remaining = c->num_optim_passes;
 	struct lzx_item *next_chosen_item;
+	u64 queue;
 
 	lzx_set_default_costs(c, block_begin, block_size);
 	do {
-		lzx_find_min_cost_path(c, block_begin, block_size);
+		queue = lzx_find_min_cost_path(c, block_begin, block_size);
 		if (num_passes_remaining > 1) {
 			lzx_tally_item_list(c, c->optimum_nodes + block_size);
 			lzx_make_huffman_codes(c);
@@ -1468,7 +1463,7 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 		}
 	} while (--num_passes_remaining);
 
-	lzx_queue64_unpack(c->optimum_nodes[block_size].queue64, &c->queue);
+	lzx_queue64_unpack(queue, &c->queue);
 	next_chosen_item = c->chosen_items;
 	lzx_record_item_list(c, c->optimum_nodes + block_size, &next_chosen_item);
 	lzx_write_block(c, os, block_size, next_chosen_item - c->chosen_items);
