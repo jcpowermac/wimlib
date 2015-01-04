@@ -86,6 +86,7 @@
 #define LZX_CACHE_PER_POS	8
 #define LZX_MAX_MATCHES_PER_POS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
 #define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
+#define LZX_COST_SHIFT		0
 
 struct lzx_compressor;
 
@@ -1214,7 +1215,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 		do {
 			offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
 			position_cost = cur_optimum_ptr->cost +
-					((offset_slot >> 1) - 1);
+					(((offset_slot >> 1) - 1) << LZX_COST_SHIFT);
 			offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
 			do {
 				if (len >= LZX_MIN_MATCH_LEN + LZX_NUM_PRIMARY_LENS)
@@ -1236,7 +1237,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 			offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
 	biglen:
 			position_cost = cur_optimum_ptr->cost +
-					((offset_slot >> 1) - 1) +
+					(((offset_slot >> 1) - 1) << LZX_COST_SHIFT) +
 					c->costs.main[LZX_NUM_CHARS +
 						      ((offset_slot << 3) |
 						       LZX_NUM_PRIMARY_LENS)];
@@ -1259,7 +1260,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 			offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
 			offset_slot = lzx_get_offset_slot_raw(offset_data);
 			position_cost = cur_optimum_ptr->cost +
-					lzx_extra_offset_bits[offset_slot];
+					(lzx_extra_offset_bits[offset_slot] << LZX_COST_SHIFT);
 			do {
 				cost = position_cost +
 				       lzx_match_cost_raw(len, offset_slot, &c->costs);
@@ -1284,10 +1285,10 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 		offset_slot = lzx_get_offset_slot_raw(offset_data);
 		num_extra_bits = lzx_extra_offset_bits[offset_slot];
 		if (num_extra_bits >= 3) {
-			position_cost += num_extra_bits - 3;
+			position_cost += (num_extra_bits - 3) << LZX_COST_SHIFT;
 			position_cost += c->costs.aligned[offset_data & 7];
 		} else {
-			position_cost += num_extra_bits;
+			position_cost += (num_extra_bits << LZX_COST_SHIFT);
 		}
 		do {
 			cost = position_cost +
@@ -1436,21 +1437,49 @@ lzx_find_min_cost_path(struct lzx_compressor *c,
 }
 
 static void
-lzx_set_default_costs(struct lzx_compressor *c)
+lzx_set_default_costs(struct lzx_compressor *c, const u8 *block, u32 block_size)
 {
-	unsigned i;
+	u32 i;
+#if LZX_COST_SHIFT == 4
+	bool have_byte[256];
+	u32 num_used;
 
-	for (i = 0; i < LZX_NUM_CHARS; i++)
-		c->costs.main[i] = 8;
+	BUILD_BUG_ON(LZX_COST_SHIFT != 4);
+
+	for (i = 0; i < 256; i++)
+		have_byte[i] = false;
+
+	for (i = 0; i < block_size; i++)
+		have_byte[block[i]] = true;
+
+	num_used = 0;
+	for (i = 0; i < 256; i++)
+		num_used += have_byte[i];
+
+	for (i = 0; i < 256; i++)
+		c->costs.main[i] = 140 - (256 - num_used) / 4;
 
 	for (; i < c->num_main_syms; i++)
-		c->costs.main[i] = 10;
+		c->costs.main[i] = 170;
 
 	for (i = 0; i < LZX_LENCODE_NUM_SYMBOLS; i++)
-		c->costs.len[i] = 8;
+		c->costs.len[i] = 127;
 
 	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
-		c->costs.aligned[i] = 3;
+		c->costs.aligned[i] = 48;
+#else
+	for (i = 0; i < 256; i++)
+		c->costs.main[i] = 8 << LZX_COST_SHIFT;
+
+	for (; i < c->num_main_syms; i++)
+		c->costs.main[i] = 10 << LZX_COST_SHIFT;
+
+	for (i = 0; i < LZX_LENCODE_NUM_SYMBOLS; i++)
+		c->costs.len[i] = 8 << LZX_COST_SHIFT;
+
+	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
+		c->costs.aligned[i] = 3 << LZX_COST_SHIFT;
+#endif
 }
 
 static void
@@ -1460,13 +1489,16 @@ lzx_update_costs(struct lzx_compressor *c)
 	const struct lzx_lens *lens = &c->codes[c->codes_index].lens;
 
 	for (i = 0; i < c->num_main_syms; i++)
-		c->costs.main[i] = lens->main[i] ? lens->main[i] : 15;
+		c->costs.main[i] = (lens->main[i] ? lens->main[i] : 15)
+				<< LZX_COST_SHIFT;
 
 	for (i = 0; i < LZX_LENCODE_NUM_SYMBOLS; i++)
-		c->costs.len[i] = lens->len[i] ? lens->len[i] : 15;
+		c->costs.len[i] = (lens->len[i] ? lens->len[i] : 15)
+				<< LZX_COST_SHIFT;
 
 	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
-		c->costs.aligned[i] = lens->aligned[i] ? lens->aligned[i] : 7;
+		c->costs.aligned[i] = (lens->aligned[i] ? lens->aligned[i] : 7)
+				<< LZX_COST_SHIFT;
 }
 
 static noinline void
@@ -1477,7 +1509,7 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 	unsigned num_passes_remaining = c->num_optim_passes;
 	struct lzx_item *next_chosen_item;
 
-	lzx_set_default_costs(c);
+	lzx_set_default_costs(c, block_begin, block_size);
 	do {
 		lzx_find_min_cost_path(c, block_begin, block_size);
 		if (num_passes_remaining > 1) {
@@ -1649,8 +1681,8 @@ lzx_create_compressor(size_t max_bufsize, unsigned int compression_level,
 
 	if (1) {
 		c->impl = lzx_compress_near_optimal;
-		c->max_search_depth = 50;
-		c->nice_match_length = 32;
+		c->max_search_depth = 12;
+		c->nice_match_length = 24;
 		c->num_optim_passes = 2;
 		c->cache_overflow_mark = &c->match_cache[LZX_CACHE_LEN];
 	}
