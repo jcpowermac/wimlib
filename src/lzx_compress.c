@@ -1294,7 +1294,7 @@ lzx_repsearch(const u8 * const strptr, const u32 bytes_remaining,
 	matchptr = strptr - (queue64 & LZX_QUEUE64_OFFSET_MASK);
 	queue64 >>= LZX_QUEUE64_OFFSET_SHIFT;
 	if (load_u16_unaligned(matchptr) == str)
-		rep_max_len = lz_extend_repmatch(strptr, matchptr, max_len);
+		rep_max_len = lz_extend(strptr, matchptr, 2, max_len);
 	else
 		rep_max_len = 0;
 	rep_max_idx = 0;
@@ -1302,7 +1302,7 @@ lzx_repsearch(const u8 * const strptr, const u32 bytes_remaining,
 	matchptr = strptr - (queue64 & LZX_QUEUE64_OFFSET_MASK);
 	queue64 >>= LZX_QUEUE64_OFFSET_SHIFT;
 	if (load_u16_unaligned(matchptr) == str) {
-		rep_len = lz_extend_repmatch(strptr, matchptr, max_len);
+		rep_len = lz_extend(strptr, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
 			rep_max_len = rep_len;
 			rep_max_idx = 1;
@@ -1311,7 +1311,7 @@ lzx_repsearch(const u8 * const strptr, const u32 bytes_remaining,
 
 	matchptr = strptr - (queue64 & LZX_QUEUE64_OFFSET_MASK);
 	if (load_u16_unaligned(matchptr) == str) {
-		rep_len = lz_extend_repmatch(strptr, matchptr, max_len);
+		rep_len = lz_extend(strptr, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
 			rep_max_len = rep_len;
 			rep_max_idx = 2;
