@@ -336,7 +336,7 @@ lz_hash_u16(u16 next_2_bytes)
 	if (HASH2_ORDER == 16)
 		return next_2_bytes;
 	else
-		return lz_hash_u24(next_2_bytes, HASH2_ORDER);
+		return lz_hash(next_2_bytes, HASH2_ORDER);
 }
 
 static inline u32

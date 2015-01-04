@@ -31,7 +31,7 @@
 #define _BT_MATCHFINDER_H
 
 #include "wimlib/lz_extend.h"
-#include "wimlib/lz_hash3.h"
+#include "wimlib/lz_hash.h"
 #include "wimlib/matchfinder_common.h"
 
 #ifndef BT_MATCHFINDER_HASH_ORDER
@@ -125,7 +125,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	}
 
 	hash = *prev_hash;
-	*prev_hash = lz_hash(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
+	*prev_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
 	cur_match = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_base;
 	prefetch(&mf->hash_tab[*prev_hash]);
@@ -211,7 +211,7 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 		return;
 
 	hash = *prev_hash;
-	*prev_hash = lz_hash(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
+	*prev_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
 	cur_match = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_base;
 	prefetch(&mf->hash_tab[*prev_hash]);

@@ -34,7 +34,7 @@
 #endif
 
 #include "wimlib/lz_extend.h"
-#include "wimlib/lz_hash3.h"
+#include "wimlib/lz_hash.h"
 #include "wimlib/lz_mf.h"
 #include "wimlib/util.h"
 
@@ -54,7 +54,7 @@ struct lz_hc {
 static inline u32
 lz_hc_hash(const u8 *p)
 {
-	return lz_hash(p, LZ_HC_HASH_ORDER);
+	return lz_hash_3_bytes(p, LZ_HC_HASH_ORDER);
 }
 
 static void

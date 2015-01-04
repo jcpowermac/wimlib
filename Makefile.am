@@ -127,7 +127,7 @@ libwim_la_SOURCES =		\
 	include/wimlib/list.h		\
 	include/wimlib/lookup_table.h	\
 	include/wimlib/lz_extend.h	\
-	include/wimlib/lz_hash3.h	\
+	include/wimlib/lz_hash.h	\
 	include/wimlib/lz_mf.h		\
 	include/wimlib/lz_mf_ops.h	\
 	include/wimlib/lz_repsearch.h	\

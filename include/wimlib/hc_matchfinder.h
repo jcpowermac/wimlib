@@ -31,7 +31,7 @@
 #define _HC_MATCHFINDER_H
 
 #include "wimlib/lz_extend.h"
-#include "wimlib/lz_hash3.h"
+#include "wimlib/lz_hash.h"
 #include "wimlib/matchfinder_common.h"
 #include "wimlib/unaligned.h"
 
@@ -122,7 +122,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 	if (unlikely(max_len < LZ_HASH_REQUIRED_NBYTES))
 		goto out;
 	first_3_bytes = load_u24_unaligned(in_next);
-	hash = lz_hash_u24(first_3_bytes, HC_MATCHFINDER_HASH_ORDER);
+	hash = lz_hash(first_3_bytes, HC_MATCHFINDER_HASH_ORDER);
 	cur_match = mf->hash_tab[hash];
 	mf->next_tab[in_next - in_base] = cur_match;
 	mf->hash_tab[hash] = in_next - in_base;
@@ -239,7 +239,7 @@ hc_matchfinder_skip_positions(struct hc_matchfinder * restrict mf,
 		return;
 
 	do {
-		hash = lz_hash(in_next, HC_MATCHFINDER_HASH_ORDER);
+		hash = lz_hash_3_bytes(in_next, HC_MATCHFINDER_HASH_ORDER);
 		mf->next_tab[in_next - in_base] = mf->hash_tab[hash];
 		mf->hash_tab[hash] = in_next - in_base;
 		in_next++;
