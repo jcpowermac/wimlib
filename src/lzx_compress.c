@@ -313,7 +313,7 @@ struct lzx_compressor {
 		/* Data for near-optimal parsing  */
 		struct {
 			struct bt_matchfinder bt_mf;
-			pos_t digram_tab[65536];
+			pos_t digram_tab[65536] _aligned_attribute(MATCHFINDER_ALIGNMENT);
 			struct lz_match match_cache[LZX_CACHE_LEN + 1 + LZX_MAX_MATCHES_PER_POS];
 			struct lz_match *cache_overflow_mark;
 			struct lzx_optimum_node optimum_nodes[LZX_DIV_BLOCK_SIZE +
@@ -1489,8 +1489,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 	u32 prev_hash;
 
 	bt_matchfinder_init(&c->bt_mf);
-	for (u32 i = 0; i < 65536; i++)
-		c->digram_tab[i] = MATCHFINDER_INITVAL;
+	matchfinder_init(c->digram_tab, 65536);
 	max_len = LZX_MAX_MATCH_LEN;
 	nice_len = min(c->nice_match_length, max_len);
 	prev_hash = 0;
