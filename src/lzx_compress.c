@@ -861,6 +861,13 @@ lzx_write_block(struct lzx_compressor *c, struct lzx_output_bitstream *os,
 	c->codes_index ^= 1;
 }
 
+static inline unsigned
+lzx_get_offset_slot_fast(struct lzx_compressor *c, u32 offset)
+{
+	LZX_ASSERT(offset < LZX_NUM_FAST_OFFSETS);
+	return c->offset_slot_fast[offset];
+}
+
 /* Tally, and optionally record, the specified literal byte.  */
 static inline void
 lzx_declare_literal(struct lzx_compressor *c, unsigned literal,
@@ -1188,7 +1195,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 		len = 2;
 		i = 0;
 		do {
-			offset_slot = c->offset_slot_fast[matches[i].offset];
+			offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
 			position_cost = cur_optimum_ptr->cost +
 					((offset_slot >> 1) - 1);
 			offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
@@ -1209,7 +1216,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 		return;
 
 		do {
-			offset_slot = c->offset_slot_fast[matches[i].offset];
+			offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
 	biglen:
 			position_cost = cur_optimum_ptr->cost +
 					((offset_slot >> 1) - 1) +
