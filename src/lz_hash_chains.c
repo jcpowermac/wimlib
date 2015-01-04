@@ -60,8 +60,8 @@ lz_hc_hash(const u8 *p)
 static void
 lz_hc_set_default_params(struct lz_mf_params *params)
 {
-	if (params->min_match_len < LZ_HASH_NBYTES)
-		params->min_match_len = LZ_HASH_NBYTES;
+	if (params->min_match_len < 3)
+		params->min_match_len = 3;
 
 	if (params->max_match_len == 0)
 		params->max_match_len = UINT32_MAX;

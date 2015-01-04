@@ -51,9 +51,6 @@ lz_hash_3_bytes(const u8 *p, unsigned num_bits)
 	return lz_hash(load_u24_unaligned(p), num_bits);
 }
 
-/* The number of bytes being hashed.  */
-#define LZ_HASH_NBYTES 3
-
 /* Number of bytes the hash function actually requires be available, due to the
  * possibility of an unaligned load.  */
 #define LZ_HASH_REQUIRED_NBYTES (UNALIGNED_ACCESS_IS_FAST ? 4 : 3)
