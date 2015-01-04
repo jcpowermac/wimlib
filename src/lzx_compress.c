@@ -1552,6 +1552,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 						max_len = in_end - in_next;
 						nice_len = min(max_len, nice_len);
 					}
+					c->hash2_tab[lz_hash_2_bytes(in_next)] = in_next - in_base;
 					bt_matchfinder_skip_position(&c->bt_mf,
 								     in_base,
 								     in_next,
@@ -1559,7 +1560,6 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 								     nice_len,
 								     c->max_search_depth,
 								     &prev_hash);
-					c->hash2_tab[lz_hash_2_bytes(in_next)] = in_next - in_base;
 					in_next++;
 					cache_ptr->length = 0;
 					cache_ptr++;
