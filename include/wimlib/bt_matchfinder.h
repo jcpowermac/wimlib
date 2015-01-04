@@ -127,12 +127,12 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	cur_match = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_base;
 
-	best_len = min_len - 1;
 	pending_lt_ptr = bt_left_child(mf, in_next - in_base);
 	pending_gt_ptr = bt_right_child(mf, in_next - in_base);
 	best_lt_len = 0;
 	best_gt_len = 0;
 	len = 0;
+	best_len = min_len - 1;
 
 	if (!matchfinder_match_in_window(cur_match, in_base, in_next)) {
 		*pending_lt_ptr = MATCHFINDER_INITVAL;
