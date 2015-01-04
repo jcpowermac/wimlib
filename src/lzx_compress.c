@@ -1489,8 +1489,8 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 	unsigned long prev_hash;
 
 	bt_matchfinder_init(&c->bt_mf);
-	BUILD_BUG_ON(MATCHFINDER_INITVAL != 0xFFFF);
-	memset(c->digram_tab, 0xFF, sizeof(c->digram_tab));
+	for (u32 i = 0; i < 65536; i++)
+		c->digram_tab[i] = MATCHFINDER_INITVAL;
 	max_len = LZX_MAX_MATCH_LEN;
 	nice_len = min(c->nice_match_length, max_len);
 	prev_hash = 0;
