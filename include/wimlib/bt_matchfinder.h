@@ -77,7 +77,8 @@ bt_child(struct bt_matchfinder *mf, pos_t node, int offset)
 {
 	if (MATCHFINDER_WINDOW_ORDER < sizeof(pos_t) * 8) {
 		/* no cast needed */
-		return &mf->child_tab[(matchfinder_slot_for_match(node) << 1) + offset];
+		return &mf->child_tab[
+			(matchfinder_slot_for_match(node) << 1) + offset];
 	} else {
 		return &mf->child_tab[(unsigned long)
 			(matchfinder_slot_for_match(node) << 1) + offset];
@@ -127,8 +128,8 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	mf->hash_tab[hash] = in_next - in_base;
 
 	best_len = min_len - 1;
-	pending_lt_ptr = &mf->child_tab[(in_next - in_base) << 1];
-	pending_gt_ptr = &mf->child_tab[((in_next - in_base) << 1) + 1];
+	pending_lt_ptr = bt_left_child(mf, in_next - in_base);
+	pending_gt_ptr = bt_right_child(mf, in_next - in_base);
 	best_lt_len = 0;
 	best_gt_len = 0;
 	len = 0;
@@ -215,8 +216,8 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 	mf->hash_tab[hash] = in_next - in_base;
 
 	depth_remaining = max_search_depth;
-	pending_lt_ptr = &mf->child_tab[(in_next - in_base) << 1];
-	pending_gt_ptr = &mf->child_tab[((in_next - in_base) << 1) + 1];
+	pending_lt_ptr = bt_left_child(mf, in_next - in_base);
+	pending_gt_ptr = bt_right_child(mf, in_next - in_base);
 	best_lt_len = 0;
 	best_gt_len = 0;
 	len = 0;
