@@ -33,31 +33,29 @@
 #include "wimlib/lz_extend.h"
 #include "wimlib/lz_hash.h"
 #include "wimlib/matchfinder_common.h"
+#include "wimlib/util.h"
 
-#ifndef BT_MATCHFINDER_HASH_ORDER
-#  if MATCHFINDER_WINDOW_ORDER < 13
-#    define BT_MATCHFINDER_HASH_ORDER 14
-#  elif MATCHFINDER_WINDOW_ORDER < 15
-#    define BT_MATCHFINDER_HASH_ORDER 15
-#  else
-#    define BT_MATCHFINDER_HASH_ORDER 16
-#  endif
-#endif
-
+#define BT_MATCHFINDER_HASH_ORDER 16
 #define BT_MATCHFINDER_HASH_LENGTH	(1UL << BT_MATCHFINDER_HASH_ORDER)
 
-#define BT_MATCHFINDER_TOTAL_LENGTH	\
-	(BT_MATCHFINDER_HASH_LENGTH + (2UL * MATCHFINDER_WINDOW_SIZE))
-
 struct bt_matchfinder {
-	union {
-		pos_t mf_data[BT_MATCHFINDER_TOTAL_LENGTH];
-		struct {
-			pos_t hash_tab[BT_MATCHFINDER_HASH_LENGTH];
-			pos_t child_tab[2UL * MATCHFINDER_WINDOW_SIZE];
-		};
-	};
+	pos_t hash_tab[BT_MATCHFINDER_HASH_LENGTH];
+	pos_t child_tab[];
 } _aligned_attribute(MATCHFINDER_ALIGNMENT);
+
+static inline struct bt_matchfinder *
+bt_matchfinder_alloc(unsigned actual_window_order)
+{
+	return ALIGNED_MALLOC((BT_MATCHFINDER_HASH_LENGTH +
+				(2UL << actual_window_order)) * sizeof(pos_t),
+			      MATCHFINDER_ALIGNMENT);
+}
+
+static inline void
+bt_matchfinder_free(struct bt_matchfinder *mf)
+{
+	ALIGNED_FREE(mf);
+}
 
 static inline void
 bt_matchfinder_init(struct bt_matchfinder *mf)
