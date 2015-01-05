@@ -1516,7 +1516,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 
 			lz_matchptr = cache_ptr + 1;
 
-			if (matchfinder_match_in_window(cur_match, in_base, in_next) &&
+			if (matchfinder_match_in_window(cur_match) &&
 			    (load_u16_unaligned(&in_base[cur_match]) ==
 			     load_u16_unaligned(in_next)) &&
 			    in_base[cur_match + 2] != in_next[2])

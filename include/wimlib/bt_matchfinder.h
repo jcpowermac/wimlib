@@ -68,11 +68,9 @@ bt_child(struct bt_matchfinder *mf, pos_t node, int offset)
 {
 	if (MATCHFINDER_WINDOW_ORDER < sizeof(pos_t) * 8) {
 		/* no cast needed */
-		return &mf->child_tab[
-			(matchfinder_slot_for_match(node) << 1) + offset];
+		return &mf->child_tab[(node << 1) + offset];
 	} else {
-		return &mf->child_tab[(unsigned long)
-			(matchfinder_slot_for_match(node) << 1) + offset];
+		return &mf->child_tab[((unsigned long)node << 1) + offset];
 	}
 }
 
@@ -126,7 +124,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	best_gt_len = 0;
 	len = 0;
 
-	if (!matchfinder_match_in_window(cur_match, in_base, in_next)) {
+	if (!matchfinder_match_in_window(cur_match)) {
 		*pending_lt_ptr = MATCHFINDER_INITVAL;
 		*pending_gt_ptr = MATCHFINDER_INITVAL;
 		*best_len_ret = best_len;
@@ -168,8 +166,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 				len = best_lt_len;
 		}
 
-		if (!matchfinder_match_in_window(cur_match,
-						 in_base, in_next) ||
+		if (!matchfinder_match_in_window(cur_match) ||
 		    !--depth_remaining)
 		{
 			*pending_lt_ptr = MATCHFINDER_INITVAL;
@@ -213,7 +210,7 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 	best_gt_len = 0;
 	len = 0;
 
-	if (!matchfinder_match_in_window(cur_match, in_base, in_next)) {
+	if (!matchfinder_match_in_window(cur_match)) {
 		*pending_lt_ptr = MATCHFINDER_INITVAL;
 		*pending_gt_ptr = MATCHFINDER_INITVAL;
 		return;
@@ -248,8 +245,7 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 				len = best_lt_len;
 		}
 
-		if (!matchfinder_match_in_window(cur_match,
-						 in_base, in_next) ||
+		if (!matchfinder_match_in_window(cur_match) ||
 		    !--depth_remaining)
 		{
 			*pending_lt_ptr = MATCHFINDER_INITVAL;

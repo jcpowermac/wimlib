@@ -124,7 +124,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 
 	/* Search the appropriate hash chain for matches.  */
 
-	if (!(matchfinder_match_in_window(cur_match, in_base, in_next)))
+	if (!(matchfinder_match_in_window(cur_match)))
 		goto out;
 
 	if (best_len < 3) {
@@ -137,10 +137,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 				break;
 
 			/* Not a match; keep trying.  */
-			cur_match = mf->next_tab[
-					matchfinder_slot_for_match(cur_match)];
-			if (!matchfinder_match_in_window(cur_match,
-							 in_base, in_next))
+			cur_match = mf->next_tab[cur_match];
+			if (!matchfinder_match_in_window(cur_match))
 				goto out;
 			if (!--depth_remaining)
 				goto out;
@@ -151,8 +149,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 		best_len = lz_extend(in_next, best_matchptr, 3, max_len);
 		if (best_len >= nice_len)
 			goto out;
-		cur_match = mf->next_tab[matchfinder_slot_for_match(cur_match)];
-		if (!matchfinder_match_in_window(cur_match, in_base, in_next))
+		cur_match = mf->next_tab[cur_match];
+		if (!matchfinder_match_in_window(cur_match))
 			goto out;
 		if (!--depth_remaining)
 			goto out;
@@ -174,8 +172,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 		#endif
 				break;
 
-			cur_match = mf->next_tab[matchfinder_slot_for_match(cur_match)];
-			if (!matchfinder_match_in_window(cur_match, in_base, in_next))
+			cur_match = mf->next_tab[cur_match];
+			if (!matchfinder_match_in_window(cur_match))
 				goto out;
 			if (!--depth_remaining)
 				goto out;
@@ -192,8 +190,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 			if (best_len >= nice_len)
 				goto out;
 		}
-		cur_match = mf->next_tab[matchfinder_slot_for_match(cur_match)];
-		if (!matchfinder_match_in_window(cur_match, in_base, in_next))
+		cur_match = mf->next_tab[cur_match];
+		if (!matchfinder_match_in_window(cur_match))
 			goto out;
 		if (!--depth_remaining)
 			goto out;
