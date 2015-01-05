@@ -1140,16 +1140,14 @@ xpress_free_compressor(void *_c)
 {
 	struct xpress_compressor *c = _c;
 
-	if (c) {
-	#if SUPPORT_NEAR_OPTIMAL_PARSING
-		if (c->impl == xpress_compress_near_optimal) {
-			FREE(c->optimum_nodes);
-			FREE(c->match_cache);
-		} else
-	#endif
-			FREE(c->chosen_items);
-		ALIGNED_FREE(c);
-	}
+#if SUPPORT_NEAR_OPTIMAL_PARSING
+	if (c->impl == xpress_compress_near_optimal) {
+		FREE(c->optimum_nodes);
+		FREE(c->match_cache);
+	} else
+#endif
+		FREE(c->chosen_items);
+	ALIGNED_FREE(c);
 }
 
 const struct compressor_ops xpress_compressor_ops = {

@@ -79,7 +79,6 @@
 #include "wimlib/lzx_common.h"
 #include "wimlib/util.h"
 
-
 #define LZX_DIV_BLOCK_SIZE	32768
 #define LZX_CACHE_PER_POS	8
 #define LZX_MAX_MATCHES_PER_POS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
@@ -887,7 +886,7 @@ lzx_finalize_block(struct lzx_compressor *c, struct lzx_output_bitstream *os,
 	c->codes_index ^= 1;
 }
 
-/* Return the offset slot for the specified offset, which must be 
+/* Return the offset slot for the specified offset, which must be
  * less than LZX_NUM_FAST_OFFSETS.  */
 static inline unsigned
 lzx_get_offset_slot_fast(struct lzx_compressor *c, u32 offset)
