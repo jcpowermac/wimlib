@@ -46,10 +46,10 @@
 #define MIN_LEVEL_FOR_NEAR_OPTIMAL	60
 
 /*
- * The window order for the matchfinder.  This must be the base 2 logarithm of
- * the maximum buffer size.
+ * The maximum window order for the matchfinder.  This must be the base 2
+ * logarithm of the maximum buffer size.
  */
-#define MATCHFINDER_WINDOW_ORDER	16
+#define MATCHFINDER_MAX_WINDOW_ORDER	16
 
 /*
  * Note: although XPRESS can potentially use a sliding window, it isn't well
@@ -121,21 +121,21 @@ struct xpress_compressor {
 	union {
 		/* Data for greedy or lazy parsing  */
 		struct {
-			struct hc_matchfinder hc_mf;
 			struct xpress_item *chosen_items;
-			u8 nonoptimal_end[0];
+			struct hc_matchfinder hc_mf;
+			/* hc_mf must be last!  */
 		};
 
 	#if SUPPORT_NEAR_OPTIMAL_PARSING
 		/* Data for near-optimal parsing  */
 		struct {
-			struct bt_matchfinder bt_mf;
 			struct xpress_optimum_node *optimum_nodes;
 			struct lz_match *match_cache;
 			struct lz_match *cache_overflow_mark;
 			unsigned num_optim_passes;
 			u32 costs[XPRESS_NUM_SYMBOLS];
-			u8 optimal_end[0];
+			struct bt_matchfinder bt_mf;
+			/* bt_mf must be last!  */
 		};
 	#endif
 	};
@@ -1016,23 +1016,39 @@ xpress_compress_near_optimal(struct xpress_compressor * restrict c,
 
 #endif /* SUPPORT_NEAR_OPTIMAL_PARSING */
 
+static size_t
+xpress_get_compressor_size(size_t max_bufsize, unsigned compression_level)
+{
+#if SUPPORT_NEAR_OPTIMAL_PARSING
+	if (compression_level >= MIN_LEVEL_FOR_NEAR_OPTIMAL)
+		return offsetof(struct xpress_compressor, bt_mf) +
+			bt_matchfinder_size(max_bufsize);
+#endif
+
+	return offsetof(struct xpress_compressor, hc_mf) +
+		hc_matchfinder_size(max_bufsize);
+}
+
 static u64
 xpress_get_needed_memory(size_t max_bufsize, unsigned compression_level)
 {
-	size_t size = 0;
+	u64 size = 0;
 
 	if (max_bufsize > XPRESS_MAX_BUFSIZE)
 		return 0;
 
+	size += xpress_get_compressor_size(max_bufsize, compression_level);
+
 	if (compression_level < MIN_LEVEL_FOR_NEAR_OPTIMAL ||
 	    !SUPPORT_NEAR_OPTIMAL_PARSING) {
-		size += offsetof(struct xpress_compressor, nonoptimal_end);
+		/* chosen_items  */
 		size += max_bufsize * sizeof(struct xpress_item);
 	}
 #if SUPPORT_NEAR_OPTIMAL_PARSING
 	else {
-		size += offsetof(struct xpress_compressor, optimal_end);
+		/* optimum_nodes  */
 		size += (max_bufsize + 1) * sizeof(struct xpress_optimum_node);
+		/* match_cache */
 		size += ((max_bufsize * CACHE_RESERVE_PER_POS) +
 			 XPRESS_MAX_MATCH_LEN + max_bufsize) *
 				sizeof(struct lz_match);
@@ -1050,49 +1066,31 @@ xpress_create_compressor(size_t max_bufsize, unsigned compression_level,
 	if (max_bufsize > XPRESS_MAX_BUFSIZE)
 		return WIMLIB_ERR_INVALID_PARAM;
 
-	if (compression_level < 30) {
-		c = ALIGNED_MALLOC(offsetof(struct xpress_compressor,
-					    nonoptimal_end),
-				   MATCHFINDER_ALIGNMENT);
-		if (!c)
-			return WIMLIB_ERR_NOMEM;
-		c->impl = xpress_compress_greedy;
-		c->max_search_depth = (compression_level * 24) / 16;
-		c->nice_match_length = (compression_level * 48) / 16;
-		c->chosen_items = MALLOC(max_bufsize * sizeof(struct xpress_item));
-		if (!c->chosen_items) {
-			ALIGNED_FREE(c);
-			return WIMLIB_ERR_NOMEM;
-		}
-	} else if (compression_level < MIN_LEVEL_FOR_NEAR_OPTIMAL ||
-		   !SUPPORT_NEAR_OPTIMAL_PARSING)
-	{
-		c = ALIGNED_MALLOC(offsetof(struct xpress_compressor,
-					    nonoptimal_end),
-				   MATCHFINDER_ALIGNMENT);
-		if (!c)
-			return WIMLIB_ERR_NOMEM;
+	c = ALIGNED_MALLOC(xpress_get_compressor_size(max_bufsize, compression_level),
+			   MATCHFINDER_ALIGNMENT);
+	if (!c)
+		goto oom0;
 
-		c->impl = xpress_compress_lazy;
-		c->max_search_depth = (compression_level * 24) / 32;
-		c->nice_match_length = (compression_level * 48) / 32;
+	if (compression_level < MIN_LEVEL_FOR_NEAR_OPTIMAL ||
+	    !SUPPORT_NEAR_OPTIMAL_PARSING)
+	{
+
 		c->chosen_items = MALLOC(max_bufsize * sizeof(struct xpress_item));
-		if (!c->chosen_items) {
-			ALIGNED_FREE(c);
-			return WIMLIB_ERR_NOMEM;
+		if (!c->chosen_items)
+			goto oom1;
+
+		if (compression_level < 30) {
+			c->impl = xpress_compress_greedy;
+			c->max_search_depth = (compression_level * 24) / 16;
+			c->nice_match_length = (compression_level * 48) / 16;
+		} else {
+			c->impl = xpress_compress_lazy;
+			c->max_search_depth = (compression_level * 24) / 32;
+			c->nice_match_length = (compression_level * 48) / 32;
 		}
 	}
 #if SUPPORT_NEAR_OPTIMAL_PARSING
 	else {
-		c = ALIGNED_MALLOC(offsetof(struct xpress_compressor,
-					    optimal_end),
-				   MATCHFINDER_ALIGNMENT);
-		if (!c)
-			return WIMLIB_ERR_NOMEM;
-		c->impl = xpress_compress_near_optimal;
-		c->max_search_depth = (compression_level * 32) / 100;
-		c->nice_match_length = (compression_level * 50) / 100;
-		c->num_optim_passes = compression_level / 40;
 
 		c->optimum_nodes = MALLOC((max_bufsize + 1) *
 					  sizeof(struct xpress_optimum_node));
@@ -1102,16 +1100,25 @@ xpress_create_compressor(size_t max_bufsize, unsigned compression_level,
 		if (!c->optimum_nodes || !c->match_cache) {
 			FREE(c->optimum_nodes);
 			FREE(c->match_cache);
-			ALIGNED_FREE(c);
-			return WIMLIB_ERR_NOMEM;
+			goto oom1;
 		}
 		c->cache_overflow_mark =
 			&c->match_cache[max_bufsize * CACHE_RESERVE_PER_POS];
+
+		c->impl = xpress_compress_near_optimal;
+		c->max_search_depth = (compression_level * 32) / 100;
+		c->nice_match_length = (compression_level * 50) / 100;
+		c->num_optim_passes = compression_level / 40;
 	}
 #endif /* SUPPORT_NEAR_OPTIMAL_PARSING */
 
 	*c_ret = c;
 	return 0;
+
+oom1:
+	ALIGNED_FREE(c);
+oom0:
+	return WIMLIB_ERR_NOMEM;
 }
 
 static size_t

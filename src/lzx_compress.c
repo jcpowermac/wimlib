@@ -68,7 +68,7 @@
 #include <string.h>
 #include <limits.h>
 
-#define MATCHFINDER_WINDOW_ORDER	21
+#define MATCHFINDER_MAX_WINDOW_ORDER	21
 
 #include "wimlib/bt_matchfinder.h"
 #include "wimlib/compress_common.h"
@@ -85,6 +85,7 @@
 #define LZX_MAX_MATCHES_PER_POS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
 #define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
 #define LZX_COST_SHIFT		4
+#define LZX_MAX_FAST_LEVEL	29
 
 struct lzx_compressor;
 
@@ -306,13 +307,12 @@ struct lzx_compressor {
 	union {
 		/* Data for greedy or lazy parsing  */
 		struct {
-			struct hc_matchfinder *hc_mf;
-			u8 nonoptimal_end[0];
+			struct hc_matchfinder hc_mf;
+			/* hc_mf must be last!  */
 		};
 
 		/* Data for near-optimal parsing  */
 		struct {
-			struct bt_matchfinder *bt_mf;
 			pos_t hash2_tab[HASH2_LENGTH]
 				_aligned_attribute(MATCHFINDER_ALIGNMENT);
 			struct lz_match match_cache[LZX_CACHE_LEN + 1 + LZX_MAX_MATCHES_PER_POS];
@@ -321,7 +321,8 @@ struct lzx_compressor {
 							      LZX_MAX_MATCH_LEN + 1];
 			struct lzx_costs costs;
 			unsigned num_optim_passes;
-			u8 optimal_end[0];
+			struct bt_matchfinder bt_mf;
+			/* bt_mf must be last!  */
 		};
 	};
 };
@@ -1588,7 +1589,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 	u32 prev_hash;
 	struct lzx_lru_queue queue;
 
-	bt_matchfinder_init(c->bt_mf);
+	bt_matchfinder_init(&c->bt_mf);
 	matchfinder_init(c->hash2_tab, HASH2_LENGTH);
 	prev_hash = 0;
 	max_len = LZX_MAX_MATCH_LEN;
@@ -1644,7 +1645,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 			}
 
 			/* Check for matches of length >= 3.  */
-			lz_matchptr = bt_matchfinder_get_matches(c->bt_mf,
+			lz_matchptr = bt_matchfinder_get_matches(&c->bt_mf,
 								 in_base,
 								 in_next,
 								 3,
@@ -1679,7 +1680,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 					}
 					c->hash2_tab[lz_hash_2_bytes(in_next)] =
 						in_next - in_base;
-					bt_matchfinder_skip_position(c->bt_mf,
+					bt_matchfinder_skip_position(&c->bt_mf,
 								     in_base,
 								     in_next,
 								     in_end,
@@ -1717,25 +1718,33 @@ lzx_init_offset_slot_fast(struct lzx_compressor *c)
 	}
 }
 
+static size_t
+lzx_get_compressor_size(size_t max_bufsize, unsigned compression_level)
+{
+	if (compression_level <= LZX_MAX_FAST_LEVEL) {
+		return offsetof(struct lzx_compressor, hc_mf) +
+			hc_matchfinder_size(max_bufsize);
+	} else {
+		return offsetof(struct lzx_compressor, bt_mf) +
+			bt_matchfinder_size(max_bufsize);
+	}
+}
+
 static u64
-lzx_get_needed_memory(size_t max_bufsize, unsigned int compression_level)
+lzx_get_needed_memory(size_t max_bufsize, unsigned compression_level)
 {
 	u64 size = 0;
 
-	if (lzx_get_window_order(max_bufsize) == 0)
+	if (max_bufsize > LZX_MAX_WINDOW_SIZE)
 		return 0;
 
-	if (1) {
-		size += offsetof(struct lzx_compressor, optimal_end);
-	}
-
-	size += max_bufsize;
-
+	size += lzx_get_compressor_size(max_bufsize, compression_level);
+	size += max_bufsize; /* in_buffer */
 	return size;
 }
 
 static int
-lzx_create_compressor(size_t max_bufsize, unsigned int compression_level,
+lzx_create_compressor(size_t max_bufsize, unsigned compression_level,
 		      void **c_ret)
 {
 	unsigned window_order;
@@ -1745,7 +1754,8 @@ lzx_create_compressor(size_t max_bufsize, unsigned int compression_level,
 	if (window_order == 0)
 		return WIMLIB_ERR_INVALID_PARAM;
 
-	c = ALIGNED_MALLOC(sizeof(struct lzx_compressor),
+	c = ALIGNED_MALLOC(lzx_get_compressor_size(max_bufsize,
+						   compression_level),
 			   MATCHFINDER_ALIGNMENT);
 	if (!c)
 		goto oom0;
@@ -1757,11 +1767,9 @@ lzx_create_compressor(size_t max_bufsize, unsigned int compression_level,
 	if (!c->in_buffer)
 		goto oom1;
 
-
-	if (1) {
-		c->bt_mf = bt_matchfinder_alloc(window_order);
-		if (!c->bt_mf)
-			goto oom2;
+	if (compression_level <= LZX_MAX_FAST_LEVEL) {
+		/* TODO */
+	} else {
 		c->impl = lzx_compress_near_optimal;
 		c->max_search_depth = 12;
 		c->nice_match_length = 24;
@@ -1773,8 +1781,6 @@ lzx_create_compressor(size_t max_bufsize, unsigned int compression_level,
 	*c_ret = c;
 	return 0;
 
-oom2:
-	FREE(c->in_buffer);
 oom1:
 	ALIGNED_FREE(c);
 oom0:
@@ -1811,9 +1817,6 @@ lzx_free_compressor(void *_c)
 	struct lzx_compressor *c = _c;
 
 	FREE(c->in_buffer);
-	if (1) {
-		bt_matchfinder_free(c->bt_mf);
-	}
 	ALIGNED_FREE(c);
 }
 

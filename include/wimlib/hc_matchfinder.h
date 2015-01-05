@@ -1,30 +1,30 @@
 /*
  * hc_matchfinder.h
  *
- * Copyright (c) 2014 Eric Biggers.  All rights reserved.
+ * Author:	Eric Biggers
+ * Year:	2014, 2015
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * The author dedicates this file to the public domain.
+ * You can do whatever you want with this file.
+ */
+
+/*
+ * This is a Hash Chain (hc) based matchfinder.
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * The data structure is a hash table where each hash bucket contains a linked
+ * list of sequences, referenced by position.
  *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * For each sequence (position) in the input, the first 3 bytes are hashed and
+ * that sequence (position) is prepended to the appropriate linked list in the
+ * hash table.  Since the sequences are inserted in order, each list is always
+ * sorted by increasing match offset.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * At the same time as inserting a sequence, we may search the linked list for
+ * matches with that sequence.  At each step, the length of the match is
+ * computed.  The search ends when the sequences get too far away (outside of
+ * the sliding window), or when the list ends (in the code this is the same
+ * check as "too far away"), or when 'max_search_depth' positions have been
+ * searched, or when a match of at least 'nice_len' bytes has been found.
  */
 
 #ifndef _HC_MATCHFINDER_H
@@ -35,28 +35,24 @@
 #include "wimlib/matchfinder_common.h"
 #include "wimlib/unaligned.h"
 
-#ifndef HC_MATCHFINDER_HASH_ORDER
-#  if MATCHFINDER_WINDOW_ORDER < 14
-#    define HC_MATCHFINDER_HASH_ORDER 14
-#  else
-#    define HC_MATCHFINDER_HASH_ORDER 15
-#  endif
+#if MATCHFINDER_MAX_WINDOW_ORDER < 14
+#  define HC_MATCHFINDER_HASH_ORDER 14
+#else
+#  define HC_MATCHFINDER_HASH_ORDER 15
 #endif
 
 #define HC_MATCHFINDER_HASH_LENGTH	(1UL << HC_MATCHFINDER_HASH_ORDER)
 
-#define HC_MATCHFINDER_TOTAL_LENGTH	\
-	(HC_MATCHFINDER_HASH_LENGTH + MATCHFINDER_WINDOW_SIZE)
-
 struct hc_matchfinder {
-	union {
-		pos_t mf_data[HC_MATCHFINDER_TOTAL_LENGTH];
-		struct {
-			pos_t hash_tab[HC_MATCHFINDER_HASH_LENGTH];
-			pos_t next_tab[MATCHFINDER_WINDOW_SIZE];
-		};
-	};
+	pos_t hash_tab[HC_MATCHFINDER_HASH_LENGTH];
+	pos_t next_tab[];
 } _aligned_attribute(MATCHFINDER_ALIGNMENT);
+
+static inline size_t
+hc_matchfinder_size(unsigned long window_size)
+{
+	return sizeof(pos_t) * (HC_MATCHFINDER_HASH_LENGTH + window_size);
+}
 
 /*
  * Call before running the first byte through the matchfinder.

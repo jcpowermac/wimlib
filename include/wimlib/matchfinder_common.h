@@ -36,19 +36,17 @@
 
 #include <string.h>
 
-#ifndef MATCHFINDER_WINDOW_ORDER
-#  error "MATCHFINDER_WINDOW_ORDER must be defined!"
+#ifndef MATCHFINDER_MAX_WINDOW_ORDER
+#  error "MATCHFINDER_MAX_WINDOW_ORDER must be defined!"
 #endif
 
-#define MATCHFINDER_WINDOW_SIZE ((size_t)1 << MATCHFINDER_WINDOW_ORDER)
-
-#if MATCHFINDER_WINDOW_ORDER <= 16
+#if MATCHFINDER_MAX_WINDOW_ORDER <= 16
 typedef u16 pos_t;
 #else
 typedef u32 pos_t;
 #endif
 
-#if MATCHFINDER_WINDOW_ORDER != 16 && MATCHFINDER_WINDOW_ORDER != 32
+#if MATCHFINDER_MAX_WINDOW_ORDER != 16 && MATCHFINDER_MAX_WINDOW_ORDER != 32
 
 /* Not all the bits of the position type are needed, so the sign bit can be
  * reserved to mean "out of bounds".  */

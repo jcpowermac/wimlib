@@ -1,30 +1,45 @@
 /*
  * bt_matchfinder.h
  *
- * Copyright (c) 2014 Eric Biggers.  All rights reserved.
+ * Author:	Eric Biggers
+ * Year:	2014, 2015
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * The author dedicates this file to the public domain.
+ * You can do whatever you want with this file.
+ */
+
+/*
+ * This is a Binary Tree (bt) based matchfinder.
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * The data structure is a hash table where each hash bucket contains a binary
+ * tree of sequences, referenced by position.  The sequences in the binary tree
+ * are ordered such that a left child is lexicographically lesser than its
+ * parent, and a right child is lexicographically greater than its parent.
  *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * For each sequence (position) in the input, the first 3 bytes are hashed and
+ * the the appropriate binary tree is re-rooted at that sequence (position).
+ * Since the sequences are inserted in order, each binary tree maintains the
+ * invariant that each child node has greater match offset than its parent.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * While inserting a sequence, we may search the binary tree for matches with
+ * that sequence.  At each step, the length of the match is computed.  The
+ * search ends when the sequences get too far away (outside of the sliding
+ * window), or when the binary tree ends (in the code this is the same check as
+ * "too far away"), or when 'max_search_depth' positions have been searched, or
+ * when a match of at least 'nice_len' bytes has been found.
+ *
+ * Notes:
+ *
+ *	- Typically, we need to search more nodes to find a given match in a
+ *	  binary tree versus in a linked list.  However, a binary tree has more
+ *	  overhead than a linked list: it needs to be kept sorted, and the inner
+ *	  search loop is more complicated.  As a result, binary trees are best
+ *	  suited for compression modes where the potential matches are searched
+ *	  more thoroughly.
+ *
+ *	- Since no attempt is made to keep the binary trees balanced, it's
+ *	  essential to have the 'max_search_depth' cutoff.  Otherwise it could
+ *	  take quadratic time to run data through the matchfinder.
  */
 
 #ifndef _BT_MATCHFINDER_H
@@ -35,7 +50,14 @@
 #include "wimlib/matchfinder_common.h"
 #include "wimlib/util.h"
 
-#define BT_MATCHFINDER_HASH_ORDER 16
+#if MATCHFINDER_MAX_WINDOW_ORDER < 13
+#  define BT_MATCHFINDER_HASH_ORDER 14
+#elif MATCHFINDER_MAX_WINDOW_ORDER < 15
+#  define BT_MATCHFINDER_HASH_ORDER 15
+#else
+#  define BT_MATCHFINDER_HASH_ORDER 16
+#endif
+
 #define BT_MATCHFINDER_HASH_LENGTH	(1UL << BT_MATCHFINDER_HASH_ORDER)
 
 struct bt_matchfinder {
@@ -43,18 +65,10 @@ struct bt_matchfinder {
 	pos_t child_tab[];
 } _aligned_attribute(MATCHFINDER_ALIGNMENT);
 
-static inline struct bt_matchfinder *
-bt_matchfinder_alloc(unsigned actual_window_order)
+static inline size_t
+bt_matchfinder_size(unsigned long window_size)
 {
-	return ALIGNED_MALLOC((BT_MATCHFINDER_HASH_LENGTH +
-				(2UL << actual_window_order)) * sizeof(pos_t),
-			      MATCHFINDER_ALIGNMENT);
-}
-
-static inline void
-bt_matchfinder_free(struct bt_matchfinder *mf)
-{
-	ALIGNED_FREE(mf);
+	return sizeof(pos_t) * (BT_MATCHFINDER_HASH_LENGTH + (2 * window_size));
 }
 
 static inline void
@@ -66,7 +80,7 @@ bt_matchfinder_init(struct bt_matchfinder *mf)
 static inline pos_t *
 bt_child(struct bt_matchfinder *mf, pos_t node, int offset)
 {
-	if (MATCHFINDER_WINDOW_ORDER < sizeof(pos_t) * 8) {
+	if (MATCHFINDER_MAX_WINDOW_ORDER < sizeof(pos_t) * 8) {
 		/* no cast needed */
 		return &mf->child_tab[(node << 1) + offset];
 	} else {
