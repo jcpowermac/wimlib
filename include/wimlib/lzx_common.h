@@ -53,20 +53,6 @@ lzx_get_window_order(size_t max_bufsize);
 extern unsigned
 lzx_get_num_main_syms(unsigned window_order);
 
-/* Least-recently used queue for match offsets.  */
-struct lzx_lru_queue {
-	u32 R[LZX_NUM_RECENT_OFFSETS];
-} _aligned_attribute(sizeof(unsigned long));
-
-/* Initialize the LZX least-recently-used match offset queue at the beginning of
- * a new window for either decompression or compression.  */
-static inline void
-lzx_lru_queue_init(struct lzx_lru_queue *queue)
-{
-	for (unsigned i = 0; i < LZX_NUM_RECENT_OFFSETS; i++)
-		queue->R[i] = 1;
-}
-
 extern void
 lzx_do_e8_preprocessing(u8 *data, u32 size);
 

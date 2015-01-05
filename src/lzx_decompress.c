@@ -91,6 +91,21 @@ struct lzx_tables {
 	u8 alignedcode_lens[LZX_ALIGNEDCODE_NUM_SYMBOLS];
 } _aligned_attribute(DECODE_TABLE_ALIGNMENT);
 
+/* Least-recently used queue for match offsets.  */
+struct lzx_lru_queue {
+	u32 R[LZX_NUM_RECENT_OFFSETS];
+};
+
+/* Initialize the LZX least-recently-used match offset queue at the beginning of
+ * a new window for either decompression or compression.  */
+static inline void
+lzx_lru_queue_init(struct lzx_lru_queue *queue)
+{
+	for (unsigned i = 0; i < LZX_NUM_RECENT_OFFSETS; i++)
+		queue->R[i] = 1;
+}
+
+
 /* The main LZX decompressor structure.
  *
  * Note: we keep track of most of the decompression state outside this
