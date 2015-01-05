@@ -198,7 +198,7 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 			     const u8 * const in_end,
 			     const unsigned nice_len,
 			     const unsigned max_search_depth,
-			     u32 *prev_hash)
+			     u32 * restrict prev_hash)
 {
 	unsigned depth_remaining = max_search_depth;
 	u32 hash;

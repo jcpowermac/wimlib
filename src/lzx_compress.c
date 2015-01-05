@@ -65,10 +65,61 @@
 #  include "config.h"
 #endif
 
-#include <string.h>
-#include <limits.h>
+/*
+ * Start a new LZX block (with new Huffman codes) after this many bytes.
+ *
+ * Note: actual block sizes may slightly exceed this value.
+ *
+ * TODO: recursive splitting and cost evaluation might be good for an extremely
+ * high compression mode, but otherwise it is almost always far too slow for how
+ * much it helps.  Perhaps some sort of heuristic would be helpful?
+ */
+#define LZX_DIV_BLOCK_SIZE	32768
 
-#define MATCHFINDER_MAX_WINDOW_ORDER	21
+/*
+ * LZX_CACHE_PER_POS is the number of lz_match structures to reserve in the
+ * match cache for each byte position.  This value should be high enough so that
+ * virtually the time, all matches found in a given block can fit in the match
+ * cache.  However, fallback behavior on cache overflow is still required.
+ */
+#define LZX_CACHE_PER_POS	8
+#define LZX_MAX_MATCHES_PER_POS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
+#define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
+
+/*
+ * LZX_COST_SHIFT is a scaling factor that makes it possible to consider
+ * fractional bit costs.  A token requiring 'n' bits to represent has cost
+ * 'n << LZX_COST_SHIFT'.
+ *
+ * Note: this is only useful as a statistical trick for when the true costs are
+ * unknown.  In reality, each token in LZX requires a whole number of bits to
+ * output.
+ */
+#define LZX_COST_SHIFT		4
+
+/*
+ * The maximum compression level at which we use the faster algorithm.
+ */
+#define LZX_MAX_FAST_LEVEL	29
+
+/*
+ * LZX_HASH2_ORDER is the log(2) of the number of entries in the hash table for
+ * finding length-2 matches.  This can be as high as 16 (in which case the hash
+ * function is trivial), but using a smaller hash table speeds up compression
+ * due to reduced cache pressure.
+ */
+#define LZX_HASH2_ORDER		10
+#define LZX_HASH2_LENGTH	(1UL << LZX_HASH2_ORDER)
+
+#include "wimlib/lzx_common.h"
+
+/*
+ * The maximum allowed window order for the matchfinder.
+ */
+#define MATCHFINDER_MAX_WINDOW_ORDER	LZX_MAX_WINDOW_ORDER
+
+#include <limits.h>
+#include <string.h>
 
 #include "wimlib/bt_matchfinder.h"
 #include "wimlib/compress_common.h"
@@ -76,17 +127,7 @@
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
 #include "wimlib/hc_matchfinder.h"
-#include "wimlib/lzx_common.h"
 #include "wimlib/util.h"
-
-#define LZX_DIV_BLOCK_SIZE	32768
-#define LZX_CACHE_PER_POS	8
-#define LZX_MAX_MATCHES_PER_POS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
-#define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
-#define LZX_COST_SHIFT		4
-#define LZX_MAX_FAST_LEVEL	29
-#define HASH2_ORDER		10
-#define HASH2_LENGTH		(1UL << HASH2_ORDER)
 
 struct lzx_output_bitstream;
 
@@ -229,6 +270,15 @@ lzx_lru_queue_push(struct lzx_lru_queue queue, u32 offset)
 	};
 }
 
+/* Pop a match offset off the front (most recently used) end of the queue.  */
+static inline u32
+lzx_lru_queue_pop(struct lzx_lru_queue *queue_p)
+{
+	u32 offset = queue_p->R & LZX_QUEUE64_OFFSET_MASK;
+	queue_p->R >>= LZX_QUEUE64_OFFSET_SHIFT;
+	return offset;
+}
+
 /* Swap a match offset to the front of the queue.  */
 static inline struct lzx_lru_queue
 lzx_lru_queue_swap(struct lzx_lru_queue queue, unsigned idx)
@@ -309,7 +359,7 @@ struct lzx_compressor {
 		/* Data for near-optimal parsing  */
 		struct {
 			/* Hash table for finding length-2 matches  */
-			pos_t hash2_tab[HASH2_LENGTH]
+			pos_t hash2_tab[LZX_HASH2_LENGTH]
 				_aligned_attribute(MATCHFINDER_ALIGNMENT);
 
 			/* Cached matches for the current block  */
@@ -337,10 +387,10 @@ static inline u32
 lz_hash_2_bytes(const u8 *in_next)
 {
 	u16 next_2_bytes = load_u16_unaligned(in_next);
-	if (HASH2_ORDER == 16)
+	if (LZX_HASH2_ORDER == 16)
 		return next_2_bytes;
 	else
-		return lz_hash(next_2_bytes, HASH2_ORDER);
+		return lz_hash(next_2_bytes, LZX_HASH2_ORDER);
 }
 
 /*
@@ -865,8 +915,8 @@ lzx_choose_verbatim_or_aligned(const struct lzx_freqs * freqs,
  * - swap the indices of the current and previous Huffman codes
  */
 static void
-lzx_finalize_block(struct lzx_compressor *c, struct lzx_output_bitstream *os,
-		   u32 block_size, u32 num_chosen_items)
+lzx_finish_block(struct lzx_compressor *c, struct lzx_output_bitstream *os,
+		 u32 block_size, u32 num_chosen_items)
 {
 	int block_type;
 
@@ -1009,41 +1059,41 @@ lzx_declare_item(struct lzx_compressor *c, u32 mc_item_data,
 
 static inline void
 lzx_record_item_list(struct lzx_compressor *c,
-		     struct lzx_optimum_node *cur_optimum_ptr,
+		     struct lzx_optimum_node *cur_node,
 		     struct lzx_item **next_chosen_item)
 {
-	struct lzx_optimum_node *end_optimum_ptr;
+	struct lzx_optimum_node *end_node;
 	u32 saved_item;
 	u32 item;
 
 	/* The list is currently in reverse order (last item to first item).
 	 * Reverse it.  */
-	end_optimum_ptr = cur_optimum_ptr;
-	saved_item = cur_optimum_ptr->mc_item_data;
+	end_node = cur_node;
+	saved_item = cur_node->mc_item_data;
 	do {
 		item = saved_item;
-		cur_optimum_ptr -= item & OPTIMUM_LEN_MASK;
-		saved_item = cur_optimum_ptr->mc_item_data;
-		cur_optimum_ptr->mc_item_data = item;
-	} while (cur_optimum_ptr != c->optimum_nodes);
+		cur_node -= item & OPTIMUM_LEN_MASK;
+		saved_item = cur_node->mc_item_data;
+		cur_node->mc_item_data = item;
+	} while (cur_node != c->optimum_nodes);
 
 	/* Walk the list of items from beginning to end, tallying and recording
 	 * each item.  */
 	do {
-		lzx_declare_item(c, cur_optimum_ptr->mc_item_data, next_chosen_item);
-		cur_optimum_ptr += (cur_optimum_ptr->mc_item_data) & OPTIMUM_LEN_MASK;
-	} while (cur_optimum_ptr != end_optimum_ptr);
+		lzx_declare_item(c, cur_node->mc_item_data, next_chosen_item);
+		cur_node += (cur_node->mc_item_data) & OPTIMUM_LEN_MASK;
+	} while (cur_node != end_node);
 }
 
 static inline void
-lzx_tally_item_list(struct lzx_compressor *c, struct lzx_optimum_node *cur_optimum_ptr)
+lzx_tally_item_list(struct lzx_compressor *c, struct lzx_optimum_node *cur_node)
 {
 	/* Since we're just tallying the items, we don't need to reverse the
 	 * list.  Processing the items in reverse order is fine.  */
 	do {
-		lzx_declare_item(c, cur_optimum_ptr->mc_item_data, NULL);
-		cur_optimum_ptr -= (cur_optimum_ptr->mc_item_data & OPTIMUM_LEN_MASK);
-	} while (cur_optimum_ptr != c->optimum_nodes);
+		lzx_declare_item(c, cur_node->mc_item_data, NULL);
+		cur_node -= (cur_node->mc_item_data & OPTIMUM_LEN_MASK);
+	} while (cur_node != c->optimum_nodes);
 }
 
 /* Return the cost, in bits, to output a literal byte using the specified cost
@@ -1099,10 +1149,10 @@ lzx_match_cost_raw_smalllen(unsigned len, unsigned offset_slot,
  */
 static inline void
 lzx_consider_repeat_offset_match(struct lzx_compressor *c,
-				 struct lzx_optimum_node *cur_optimum_ptr,
+				 struct lzx_optimum_node *cur_node,
 				 unsigned rep_len, unsigned rep_idx)
 {
-	u32 base_cost = cur_optimum_ptr->cost;
+	u32 base_cost = cur_node->cost;
 	u32 cost;
 	unsigned len;
 
@@ -1114,10 +1164,10 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 		do {
 			cost = base_cost +
 			       lzx_match_cost_raw_smalllen(len, rep_idx, &c->costs);
-			if (cost < (cur_optimum_ptr + len)->cost) {
-				(cur_optimum_ptr + len)->mc_item_data =
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->mc_item_data =
 					(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-				(cur_optimum_ptr + len)->cost = cost;
+				(cur_node + len)->cost = cost;
 			}
 		} while (++len <= rep_len);
 	} else {
@@ -1128,10 +1178,10 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 		do {
 			cost = base_cost +
 			       lzx_match_cost_raw_smalllen(len, rep_idx, &c->costs);
-			if (cost < (cur_optimum_ptr + len)->cost) {
-				(cur_optimum_ptr + len)->mc_item_data =
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->mc_item_data =
 					(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-				(cur_optimum_ptr + len)->cost = cost;
+				(cur_node + len)->cost = cost;
 			}
 		} while (++len < LZX_MIN_MATCH_LEN + LZX_NUM_PRIMARY_LENS);
 
@@ -1142,10 +1192,10 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 			cost = base_cost +
 			       c->costs.len[len - LZX_MIN_MATCH_LEN -
 					    LZX_NUM_PRIMARY_LENS];
-			if (cost < (cur_optimum_ptr + len)->cost) {
-				(cur_optimum_ptr + len)->mc_item_data =
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->mc_item_data =
 					(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-				(cur_optimum_ptr + len)->cost = cost;
+				(cur_node + len)->cost = cost;
 			}
 		} while (++len <= rep_len);
 	}
@@ -1156,10 +1206,10 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 	do {
 		cost = base_cost +
 		       lzx_match_cost_raw(len, rep_idx, &c->costs);
-		if (cost < (cur_optimum_ptr + len)->cost) {
-			(cur_optimum_ptr + len)->mc_item_data =
+		if (cost < (cur_node + len)->cost) {
+			(cur_node + len)->mc_item_data =
 				(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-			(cur_optimum_ptr + len)->cost = cost;
+			(cur_node + len)->cost = cost;
 		}
 	} while (++len <= rep_len);
 #endif
@@ -1167,7 +1217,7 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 
 static inline void
 lzx_consider_explicit_offset_matches_fast(struct lzx_compressor *c,
-					  struct lzx_optimum_node *cur_optimum_ptr,
+					  struct lzx_optimum_node *cur_node,
 					  const struct lz_match matches[],
 					  unsigned num_matches)
 {
@@ -1204,7 +1254,7 @@ lzx_consider_explicit_offset_matches_fast(struct lzx_compressor *c,
 	i = 0;
 	do {
 		offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
-		position_cost = cur_optimum_ptr->cost +
+		position_cost = cur_node->cost +
 				(((offset_slot >> 1) - 1) << LZX_COST_SHIFT);
 		offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
 		do {
@@ -1213,9 +1263,9 @@ lzx_consider_explicit_offset_matches_fast(struct lzx_compressor *c,
 			cost = position_cost +
 			       lzx_match_cost_raw_smalllen(len, offset_slot,
 							   &c->costs);
-			if (cost < (cur_optimum_ptr + len)->cost) {
-				(cur_optimum_ptr + len)->cost = cost;
-				(cur_optimum_ptr + len)->mc_item_data =
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->cost = cost;
+				(cur_node + len)->mc_item_data =
 					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
 			}
 		} while (++len <= matches[i].length);
@@ -1226,7 +1276,7 @@ lzx_consider_explicit_offset_matches_fast(struct lzx_compressor *c,
 	do {
 		offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
 biglen:
-		position_cost = cur_optimum_ptr->cost +
+		position_cost = cur_node->cost +
 				(((offset_slot >> 1) - 1) << LZX_COST_SHIFT) +
 				c->costs.main[LZX_NUM_CHARS +
 					      ((offset_slot << 3) |
@@ -1236,9 +1286,9 @@ biglen:
 			cost = position_cost +
 			       c->costs.len[len - LZX_MIN_MATCH_LEN -
 					    LZX_NUM_PRIMARY_LENS];
-			if (cost < (cur_optimum_ptr + len)->cost) {
-				(cur_optimum_ptr + len)->cost = cost;
-				(cur_optimum_ptr + len)->mc_item_data =
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->cost = cost;
+				(cur_node + len)->mc_item_data =
 					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
 			}
 		} while (++len <= matches[i].length);
@@ -1247,7 +1297,7 @@ biglen:
 
 static inline void
 lzx_consider_explicit_offset_matches_slow(struct lzx_compressor *c,
-					  struct lzx_optimum_node *cur_optimum_ptr,
+					  struct lzx_optimum_node *cur_node,
 					  const struct lz_match matches[],
 					  unsigned num_matches)
 {
@@ -1264,14 +1314,14 @@ lzx_consider_explicit_offset_matches_slow(struct lzx_compressor *c,
 
 		offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
 		offset_slot = lzx_get_offset_slot_raw(offset_data);
-		position_cost = cur_optimum_ptr->cost +
+		position_cost = cur_node->cost +
 				(lzx_extra_offset_bits[offset_slot] << LZX_COST_SHIFT);
 		do {
 			cost = position_cost +
 			       lzx_match_cost_raw(len, offset_slot, &c->costs);
-			if (cost < (cur_optimum_ptr + len)->cost) {
-				(cur_optimum_ptr + len)->cost = cost;
-				(cur_optimum_ptr + len)->mc_item_data =
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->cost = cost;
+				(cur_node + len)->mc_item_data =
 					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
 			}
 		} while (++len <= matches[i].length);
@@ -1282,7 +1332,7 @@ lzx_consider_explicit_offset_matches_slow(struct lzx_compressor *c,
  * Consider coding each match in @matches as an explicit offset match.
  *
  * @matches must be sorted by strictly increasing length and strictly increasing
- * offset.  This is guaranteed by the match-finder.
+ * offset.  This is guaranteed by the matchfinder.
  *
  * We consider each length from the minimum (2) to the longest
  * (matches[num_matches - 1].len).  For each length, we consider only the
@@ -1292,17 +1342,17 @@ lzx_consider_explicit_offset_matches_slow(struct lzx_compressor *c,
  */
 static inline void
 lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
-				     struct lzx_optimum_node *cur_optimum_ptr,
+				     struct lzx_optimum_node *cur_node,
 				     const struct lz_match matches[],
 				     unsigned num_matches)
 {
 	LZX_ASSERT(num_matches > 0);
 
 	if (matches[num_matches - 1].offset < LZX_NUM_FAST_OFFSETS)
-		lzx_consider_explicit_offset_matches_fast(c, cur_optimum_ptr,
+		lzx_consider_explicit_offset_matches_fast(c, cur_node,
 							  matches, num_matches);
 	else
-		lzx_consider_explicit_offset_matches_slow(c, cur_optimum_ptr,
+		lzx_consider_explicit_offset_matches_slow(c, cur_node,
 							  matches, num_matches);
 }
 
@@ -1316,26 +1366,28 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
  * *rep_max_idx_ret to the index of its offset in @queue.
 */
 static inline unsigned
-lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
-	      const struct lzx_lru_queue queue, unsigned *rep_max_idx_ret)
+lzx_find_longest_repeat_offset_match(const u8 * const in_next,
+				     const u32 bytes_remaining,
+				     struct lzx_lru_queue queue,
+				     unsigned *rep_max_idx_ret)
 {
 	BUILD_BUG_ON(LZX_NUM_RECENT_OFFSETS != 3);
 
 	const unsigned max_len = min(bytes_remaining, LZX_MAX_MATCH_LEN);
-	unsigned rep_max_idx;
-	unsigned rep_len;
-	unsigned rep_max_len;
 	const u16 next_2_bytes = load_u16_unaligned(in_next);
 	const u8 *matchptr;
+	unsigned rep_max_len;
+	unsigned rep_max_idx;
+	unsigned rep_len;
 
-	matchptr = in_next - lzx_lru_queue_R0(queue);
+	matchptr = in_next - lzx_lru_queue_pop(&queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes)
 		rep_max_len = lz_extend(in_next, matchptr, 2, max_len);
 	else
 		rep_max_len = 0;
 	rep_max_idx = 0;
 
-	matchptr = in_next - lzx_lru_queue_R1(queue);
+	matchptr = in_next - lzx_lru_queue_pop(&queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1344,7 +1396,7 @@ lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
 		}
 	}
 
-	matchptr = in_next - lzx_lru_queue_R2(queue);
+	matchptr = in_next - lzx_lru_queue_pop(&queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1358,10 +1410,10 @@ lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
 }
 
 /*
- * Find a "cheap" path through the graph of possible match/literal choices for
- * the current block.  The algorithm is based on minimum cost path search, but
- * due to various simplifying assumptions the result is not guaranteed to be the
- * true minimum cost path over all valid LZX representations of this block.
+ * Find an inexpensive path through the graph of possible match/literal choices
+ * for the current block.  The algorithm is based on minimum cost path search,
+ * but due to various simplifying assumptions the result is not guaranteed to be
+ * the true minimum cost path over all valid LZX representations of this block.
  *
  * The nodes of the graph are c->optimum_nodes[0...block_size].  They correspond
  * directly to the bytes in the current block, plus one extra node for
@@ -1398,29 +1450,33 @@ lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
  * cost to reach each position, which seems to be an acceptable approximation.
  */
 static struct lzx_lru_queue
-lzx_find_cheap_path(struct lzx_compressor * const restrict c,
-		    const u8 * const restrict block_begin,
-		    const u32 block_size,
-		    const struct lzx_lru_queue initial_queue)
+lzx_optim_pass(struct lzx_compressor * const restrict c,
+	       const u8 * const restrict block_begin,
+	       const u32 block_size,
+	       const struct lzx_lru_queue initial_queue)
 {
-	struct lzx_optimum_node *cur_optimum_ptr;
-	struct lzx_optimum_node *end_optimum_ptr;
-	struct lz_match *cache_ptr;
-	const u8 *in_next;
-	const u8 *block_end;
+	struct lzx_optimum_node *cur_node = c->optimum_nodes;
+	struct lzx_optimum_node * const end_node = &c->optimum_nodes[block_size];
+	struct lz_match *cache_ptr = c->match_cache;
+	const u8 *in_next = block_begin;
+	const u8 * const block_end = block_begin + block_size;
+
+	/* Instead of storing the match offset LRU queues in the
+	 * 'lzx_optimum_node' structures, we save memory (and cache lines) by
+	 * storing them in a smaller array.  This works because the algorithm
+	 * only requires a limited history of the adaptive state.  Once a given
+	 * state is more than LZX_MAX_MATCH_LEN bytes behind the current node,
+	 * it is no longer needed.  */
 	struct lzx_lru_queue queues[512];
 
-#define QUEUE(in) (queues[(uintptr_t)(in) % ARRAY_LEN(queues)])
 	BUILD_BUG_ON(ARRAY_LEN(queues) < LZX_MAX_MATCH_LEN + 1);
+#define QUEUE(in) (queues[(uintptr_t)(in) % ARRAY_LEN(queues)])
 
+	/* Initially, the cost to reach each node is "infinity".  */
 	for (u32 i = 0; i <= block_size; i++)
 		c->optimum_nodes[i].cost = INFINITE_COST;
-	cur_optimum_ptr = c->optimum_nodes;
+
 	QUEUE(block_begin) = initial_queue;
-	end_optimum_ptr = &c->optimum_nodes[block_size];
-	cache_ptr = c->match_cache;
-	in_next = block_begin;
-	block_end = block_begin + block_size;
 	do {
 		unsigned num_matches;
 		unsigned literal;
@@ -1435,19 +1491,37 @@ lzx_find_cheap_path(struct lzx_compressor * const restrict c,
 			unsigned rep_max_len;
 			unsigned rep_max_idx;
 
-			rep_max_len = lzx_repsearch(in_next,
-						    block_end - in_next,
-						    QUEUE(in_next),
-						    &rep_max_idx);
+			/*
+			 * Find the longest repeat offset match with the current
+			 * position.
+			 *
+			 * Heuristics:
+			 *
+			 * - Only search for repeat offset matches if the
+			 *   matchfinder already found at least one match.
+			 *
+			 * - Only consider the longest repeat offset match.  It
+			 *   seems to be rare for the minimum cost path to
+			 *   include a repeat offset match that doesn't have the
+			 *   longest length (allowing for the possibility that
+			 *   not all of that length is actually used).
+			 */
+			rep_max_len =
+				lzx_find_longest_repeat_offset_match(in_next,
+								     block_end - in_next,
+								     QUEUE(in_next),
+								     &rep_max_idx);
 
+			/* If we found a repeat offset match, consider coding it.  */
 			if (rep_max_len) {
 				lzx_consider_repeat_offset_match(c,
-								 cur_optimum_ptr,
+								 cur_node,
 								 rep_max_len,
 								 rep_max_idx);
 			}
 
-			lzx_consider_explicit_offset_matches(c, cur_optimum_ptr,
+			/* Consider coding an explicit offset match.  */
+			lzx_consider_explicit_offset_matches(c, cur_node,
 							     cache_ptr, num_matches);
 
 			cache_ptr += num_matches;
@@ -1455,28 +1529,28 @@ lzx_find_cheap_path(struct lzx_compressor * const restrict c,
 
 		/* Consider coding a literal.
 
-		 * To avoid an extra unpredictable brench, actually checking the
-		 * preferability of coding a literal is integrated into the
-		 * queue update code below.  */
+		 * To avoid an extra brench, actually checking the preferability
+		 * of coding the literal is integrated into the queue update
+		 * code below.  */
 		literal = *in_next++;
-		cost = cur_optimum_ptr->cost + lzx_literal_cost(literal, &c->costs);
+		cost = cur_node->cost + lzx_literal_cost(literal, &c->costs);
 
 		/* Advance to the next position.  */
-		cur_optimum_ptr++;
+		cur_node++;
 
 		/* The lowest-cost path to the current position is now known.
 		 * Finalize the recent offsets queue that results from taking
 		 * this lowest-cost path.  */
 
-		if (cost < cur_optimum_ptr->cost) {
+		if (cost < cur_node->cost) {
 			/* Literal: queue remains unchanged.  */
-			cur_optimum_ptr->cost = cost;
-			cur_optimum_ptr->mc_item_data = (literal << OPTIMUM_OFFSET_SHIFT) | 1;
+			cur_node->cost = cost;
+			cur_node->mc_item_data = (literal << OPTIMUM_OFFSET_SHIFT) | 1;
 			QUEUE(in_next) = QUEUE(in_next - 1);
 		} else {
 			/* Match: queue update is needed.  */
-			len = cur_optimum_ptr->mc_item_data & OPTIMUM_LEN_MASK;
-			offset_data = cur_optimum_ptr->mc_item_data >> OPTIMUM_OFFSET_SHIFT;
+			len = cur_node->mc_item_data & OPTIMUM_LEN_MASK;
+			offset_data = cur_node->mc_item_data >> OPTIMUM_OFFSET_SHIFT;
 			if (offset_data >= LZX_NUM_RECENT_OFFSETS) {
 				/* Explicit offset match: offset is inserted at front  */
 				QUEUE(in_next) =
@@ -1489,17 +1563,31 @@ lzx_find_cheap_path(struct lzx_compressor * const restrict c,
 							   offset_data);
 			}
 		}
-	} while (cur_optimum_ptr != end_optimum_ptr);
+	} while (cur_node != end_node);
 
 	return QUEUE(block_end);
 }
 
+/* Set default LZX Huffman symbol costs to bootstrap the iterative optimization
+ * algorithm.  */
 static void
 lzx_set_default_costs(struct lzx_compressor *c, const u8 *block, u32 block_size)
 {
 	u32 i;
 	bool have_byte[256];
 	u32 num_used;
+
+	/* The costs below are hard coded to use a scaling factor of 16.  */
+	BUILD_BUG_ON(LZX_COST_SHIFT != 4);
+
+	/*
+	 * Heuristics:
+	 *
+	 * - Use smaller initial costs for literal symbols when the input buffer
+	 *   contains fewer distinct bytes.
+	 *
+	 * - Assume that match symbols are more costly than literal symbols.
+	 */
 
 	for (i = 0; i < 256; i++)
 		have_byte[i] = false;
@@ -1524,6 +1612,7 @@ lzx_set_default_costs(struct lzx_compressor *c, const u8 *block, u32 block_size)
 		c->costs.aligned[i] = 48;
 }
 
+/* Update the current cost model to reflect the computed Huffman codes.  */
 static void
 lzx_update_costs(struct lzx_compressor *c)
 {
@@ -1551,7 +1640,7 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 {
 	unsigned num_passes_remaining = c->num_optim_passes;
 	struct lzx_item *next_chosen_item;
-	struct lzx_lru_queue queue;
+	struct lzx_lru_queue new_queue;
 
 	/* The first optimization pass uses a default cost model.  Each
 	 * additional optimization pass uses a cost model derived from the
@@ -1560,8 +1649,8 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 	lzx_set_default_costs(c, block_begin, block_size);
 	lzx_reset_symbol_frequencies(c);
 	do {
-		queue = lzx_find_cheap_path(c, block_begin, block_size,
-					    initial_queue);
+		new_queue = lzx_optim_pass(c, block_begin, block_size,
+					   initial_queue);
 		if (num_passes_remaining > 1) {
 			lzx_tally_item_list(c, c->optimum_nodes + block_size);
 			lzx_make_huffman_codes(c);
@@ -1572,25 +1661,25 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 
 	next_chosen_item = c->chosen_items;
 	lzx_record_item_list(c, c->optimum_nodes + block_size, &next_chosen_item);
-	lzx_finalize_block(c, os, block_size, next_chosen_item - c->chosen_items);
-	return queue;
+	lzx_finish_block(c, os, block_size, next_chosen_item - c->chosen_items);
+	return new_queue;
 }
 
 /*
  * This is the "near-optimal" LZX compressor.
  *
- * For each block, it performs a relatively thorough graph search to find a
- * cheap way to output that block.
+ * For each block, it performs a relatively thorough graph search to find an
+ * inexpensive (in terms of compressed size) way to output that block.
  *
- * Note: there are many things this algorithm leaves on the table in terms of
- * compression ratio, so although it may be "near-optimal", it is certainly not
- * "optimal".  The goal is not to produce the optimal compression ratio (which
- * for LZX is probably impossible within any practical amount of time), but
- * rather to produce a compression ratio significantly better than a simple
- * "greedy" or "lazy" parse, while still being relatively fast.
+ * Note: there are actually many things this algorithm leaves on the table in
+ * terms of compression ratio.  So although it may be "near-optimal", it is
+ * certainly not "optimal".  The goal is not to produce the optimal compression
+ * ratio (which for LZX is probably impossible within any practical amount of
+ * time), but rather to produce a compression ratio significantly better than a
+ * simpler "greedy" or "lazy" parse while still being relatively fast.
  */
 static void
-lzx_compress_near_optimal(struct lzx_compressor * restrict c,
+lzx_compress_near_optimal(struct lzx_compressor *c,
 			  struct lzx_output_bitstream *os)
 {
 	const u8 * const in_base = c->in_buffer;
@@ -1602,16 +1691,12 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 	struct lzx_lru_queue queue;
 
 	bt_matchfinder_init(&c->bt_mf);
-	matchfinder_init(c->hash2_tab, HASH2_LENGTH);
+	matchfinder_init(c->hash2_tab, LZX_HASH2_LENGTH);
 	prev_hash = 0;
 	max_len = LZX_MAX_MATCH_LEN;
 	nice_len = min(c->nice_match_length, max_len);
 	lzx_lru_queue_init(&queue);
 
-	/* TODO: Currently, we just use fixed-size blocks and don't attempt to
-	 * choose the optimal block splits.  Recursive splitting and cost
-	 * evaluation might be good for an extremely high compression mode, but
-	 * otherwise it is almost always far too slow for how much it helps.  */
 	do {
 		/* Starting a new block  */
 		const u8 * const in_block_begin = in_next;
@@ -1647,7 +1732,8 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 			cur_match = c->hash2_tab[hash2];
 			c->hash2_tab[hash2] = in_next - in_base;
 			if (matchfinder_match_in_window(cur_match) &&
-			    (load_u16_unaligned(&in_base[cur_match]) ==
+			    (LZX_HASH2_ORDER == 16 ||
+			     load_u16_unaligned(&in_base[cur_match]) ==
 			     load_u16_unaligned(in_next)) &&
 			    in_base[cur_match + 2] != in_next[2])
 			{
@@ -1780,12 +1866,45 @@ lzx_create_compressor(size_t max_bufsize, unsigned compression_level,
 		goto oom1;
 
 	if (compression_level <= LZX_MAX_FAST_LEVEL) {
+
+		/* Fast compression: Use lazy parsing.  */
+
 		/* TODO */
 	} else {
+
+		/* Normal / high compression: Use near-optimal parsing.  */
+
 		c->impl = lzx_compress_near_optimal;
-		c->max_search_depth = 12;
-		c->nice_match_length = 24;
-		c->num_optim_passes = 2;
+
+		/* Scale nice_match_length and max_search_depth with the
+		 * compression level.  */
+		c->max_search_depth = (12 * compression_level) / 50;
+		c->nice_match_length = min((24 * compression_level) / 50,
+					   LZX_MAX_MATCH_LEN);
+
+		/* Set a number of optimization passes appropriate for the
+		 * compression level.  */
+
+		c->num_optim_passes = 1;
+
+		if (compression_level >= 40)
+			c->num_optim_passes++;
+
+		/* Use more optimization passes for higher compression levels.
+		 * But the more passes there are, the less they help --- so
+		 * don't add them linearly.  */
+		if (compression_level >= 70) {
+			c->num_optim_passes++;
+			if (compression_level >= 100)
+				c->num_optim_passes++;
+			if (compression_level >= 150)
+				c->num_optim_passes++;
+			if (compression_level >= 200)
+				c->num_optim_passes++;
+			if (compression_level >= 300)
+				c->num_optim_passes++;
+		}
+
 		c->cache_overflow_mark = &c->match_cache[LZX_CACHE_LEN];
 	}
 
@@ -1806,20 +1925,26 @@ lzx_compress(const void *in, size_t in_nbytes,
 	struct lzx_compressor *c = _c;
 	struct lzx_output_bitstream os;
 
+	/* Don't bother trying to compress very small inputs.  */
 	if (out_nbytes_avail < 100)
 		return 0;
 
+	/* Copy the input data into an internal buffer and preprocess it.  */
 	memcpy(c->in_buffer, in, in_nbytes);
 	c->in_nbytes = in_nbytes;
 	lzx_do_e8_preprocessing(c->in_buffer, in_nbytes);
 
+	/* Initially, the previous Huffman codeword lengths are all 0's.  */
 	c->codes_index = 0;
 	memset(&c->codes[1].lens, 0, sizeof(struct lzx_lens));
 
+	/* Initialize the output bitstream.  */
 	lzx_init_output(&os, out, out_nbytes_avail);
 
+	/* Call the compression level-specific function.  */
 	(*c->impl)(c, &os);
 
+	/* Flush the output bitstream and return the compressed size or 0.  */
 	return lzx_flush_output(&os);
 }
 
