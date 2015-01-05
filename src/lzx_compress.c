@@ -86,8 +86,10 @@
 #define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
 #define LZX_COST_SHIFT		4
 #define LZX_MAX_FAST_LEVEL	29
+#define HASH2_ORDER		10
+#define HASH2_LENGTH		(1UL << HASH2_ORDER)
 
-struct lzx_compressor;
+struct lzx_output_bitstream;
 
 /* Codewords for the LZX Huffman codes.  */
 struct lzx_codewords {
@@ -172,7 +174,15 @@ struct lzx_optimum_node {
 #define OPTIMUM_LEN_MASK ((1 << OPTIMUM_OFFSET_SHIFT) - 1)
 };
 
-
+/*
+ * Least-recently-used queue for match offsets.
+ *
+ * This is represented as a 64-bit integer for efficiency.  There are three
+ * offsets of 21 bits each.  Bit 64 is garbage.
+ */
+struct lzx_lru_queue {
+	u64 R;
+};
 
 #define LZX_QUEUE64_OFFSET_SHIFT 21
 #define LZX_QUEUE64_OFFSET_MASK	(((u64)1 << LZX_QUEUE64_OFFSET_SHIFT) - 1)
@@ -185,52 +195,42 @@ struct lzx_optimum_node {
 #define LZX_QUEUE64_R1_MASK (LZX_QUEUE64_OFFSET_MASK << LZX_QUEUE64_R1_SHIFT)
 #define LZX_QUEUE64_R2_MASK (LZX_QUEUE64_OFFSET_MASK << LZX_QUEUE64_R2_SHIFT)
 
-struct lzx_lru_queue {
-	u64 offsets;
-};
-
 static inline void
 lzx_lru_queue_init(struct lzx_lru_queue *queue)
 {
-	queue->offsets = ((u64)1 << LZX_QUEUE64_R0_SHIFT) |
-			 ((u64)1 << LZX_QUEUE64_R1_SHIFT) |
-			 ((u64)1 << LZX_QUEUE64_R2_SHIFT);
+	queue->R = ((u64)1 << LZX_QUEUE64_R0_SHIFT) |
+		   ((u64)1 << LZX_QUEUE64_R1_SHIFT) |
+		   ((u64)1 << LZX_QUEUE64_R2_SHIFT);
 }
 
 static inline u64
 lzx_lru_queue_R0(struct lzx_lru_queue queue)
 {
-	return (queue.offsets >> LZX_QUEUE64_R0_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+	return (queue.R >> LZX_QUEUE64_R0_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
 }
 
 static inline u64
 lzx_lru_queue_R1(struct lzx_lru_queue queue)
 {
-	return (queue.offsets >> LZX_QUEUE64_R1_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+	return (queue.R >> LZX_QUEUE64_R1_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
 }
 
 static inline u64
 lzx_lru_queue_R2(struct lzx_lru_queue queue)
 {
-	return (queue.offsets >> LZX_QUEUE64_R2_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+	return (queue.R >> LZX_QUEUE64_R2_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
 }
 
+/* Push a match offset onto the most-recently-used end of the queue.  */
 static inline struct lzx_lru_queue
 lzx_lru_queue_push(struct lzx_lru_queue queue, u32 offset)
 {
 	return (struct lzx_lru_queue) {
-		.offsets = (queue.offsets << LZX_QUEUE64_OFFSET_SHIFT) | offset,
+		.R = (queue.R << LZX_QUEUE64_OFFSET_SHIFT) | offset,
 	};
 }
 
-static inline u32
-lzx_lru_queue_pop(struct lzx_lru_queue *queue_p)
-{
-	u32 offset = queue_p->offsets & LZX_QUEUE64_OFFSET_MASK;
-	queue_p->offsets >>= LZX_QUEUE64_OFFSET_SHIFT;
-	return offset;
-}
-
+/* Swap a match offset to the front of the queue.  */
 static inline struct lzx_lru_queue
 lzx_lru_queue_swap(struct lzx_lru_queue queue, unsigned idx)
 {
@@ -239,24 +239,19 @@ lzx_lru_queue_swap(struct lzx_lru_queue queue, unsigned idx)
 
 	if (idx == 1)
 		return (struct lzx_lru_queue) {
-			.offsets = (lzx_lru_queue_R1(queue) << LZX_QUEUE64_R0_SHIFT) |
+			.R = (lzx_lru_queue_R1(queue) << LZX_QUEUE64_R0_SHIFT) |
 				(lzx_lru_queue_R0(queue) << LZX_QUEUE64_R1_SHIFT) |
-				(queue.offsets & LZX_QUEUE64_R2_MASK),
+				(queue.R & LZX_QUEUE64_R2_MASK),
 		};
 
 	return (struct lzx_lru_queue) {
-		.offsets = (lzx_lru_queue_R2(queue) << LZX_QUEUE64_R0_SHIFT) |
-			(queue.offsets & LZX_QUEUE64_R1_MASK) |
+		.R = (lzx_lru_queue_R2(queue) << LZX_QUEUE64_R0_SHIFT) |
+			(queue.R & LZX_QUEUE64_R1_MASK) |
 			(lzx_lru_queue_R0(queue) << LZX_QUEUE64_R2_SHIFT),
 	};
 }
 
-struct lzx_output_bitstream;
-
-#define HASH2_ORDER 10
-#define HASH2_LENGTH (1UL << HASH2_ORDER)
-
-/* State of the LZX compressor  */
+/* The main LZX compressor structure  */
 struct lzx_compressor {
 
 	/* Pointer to the compress() implementation chosen at allocation time */
@@ -298,6 +293,7 @@ struct lzx_compressor {
 	 * matches at each position.  */
 	unsigned max_search_depth;
 
+	/* The match/literal sequence for the current block  */
 	struct lzx_item chosen_items[LZX_DIV_BLOCK_SIZE + LZX_MAX_MATCH_LEN + 1];
 
 	/* Table mapping match offset => offset slot for small offsets  */
@@ -307,39 +303,45 @@ struct lzx_compressor {
 	union {
 		/* Data for greedy or lazy parsing  */
 		struct {
+			/* Hash chains matchfinder (MUST BE LAST!!!)  */
 			struct hc_matchfinder hc_mf;
-			/* hc_mf must be last!  */
 		};
 
 		/* Data for near-optimal parsing  */
 		struct {
+			/* Hash table for finding length-2 matches  */
 			pos_t hash2_tab[HASH2_LENGTH]
 				_aligned_attribute(MATCHFINDER_ALIGNMENT);
+
+			/* Cached matches for the current block  */
 			struct lz_match match_cache[LZX_CACHE_LEN + 1 + LZX_MAX_MATCHES_PER_POS];
 			struct lz_match *cache_overflow_mark;
+
+			/* The graph nodes for the current block  */
 			struct lzx_optimum_node optimum_nodes[LZX_DIV_BLOCK_SIZE +
 							      LZX_MAX_MATCH_LEN + 1];
+
+			/* The cost model for the current block  */
 			struct lzx_costs costs;
+
+			/* Number of optimization passes per block  */
 			unsigned num_optim_passes;
+
+			/* Binary trees matchfinder (MUST BE LAST!!!)  */
 			struct bt_matchfinder bt_mf;
-			/* bt_mf must be last!  */
 		};
 	};
 };
 
+/* Compute a hash value for the next 2 bytes of uncompressed data.  */
 static inline u32
-lz_hash_u16(u16 next_2_bytes)
+lz_hash_2_bytes(const u8 *in_next)
 {
+	u16 next_2_bytes = load_u16_unaligned(in_next);
 	if (HASH2_ORDER == 16)
 		return next_2_bytes;
 	else
 		return lz_hash(next_2_bytes, HASH2_ORDER);
-}
-
-static inline u32
-lz_hash_2_bytes(const u8 *p)
-{
-	return lz_hash_u16(load_u16_unaligned(p));
 }
 
 /*
@@ -493,6 +495,7 @@ lzx_make_huffman_codes(struct lzx_compressor *c)
 				    codes->codewords.aligned);
 }
 
+/* Reset the symbol frequencies for the LZX Huffman codes.  */
 static void
 lzx_reset_symbol_frequencies(struct lzx_compressor *c)
 {
@@ -854,9 +857,17 @@ lzx_choose_verbatim_or_aligned(const struct lzx_freqs * freqs,
 		return LZX_BLOCKTYPE_VERBATIM;
 }
 
+/*
+ * Finish an LZX block:
+ *
+ * - make the Huffman codes
+ * - decide whether to output the block as VERBATIM or ALIGNED
+ * - output the block
+ * - swap the indices of the current and previous Huffman codes
+ */
 static void
-lzx_write_block(struct lzx_compressor *c, struct lzx_output_bitstream *os,
-		u32 block_size, u32 num_chosen_items)
+lzx_finalize_block(struct lzx_compressor *c, struct lzx_output_bitstream *os,
+		   u32 block_size, u32 num_chosen_items)
 {
 	int block_type;
 
@@ -876,6 +887,8 @@ lzx_write_block(struct lzx_compressor *c, struct lzx_output_bitstream *os,
 	c->codes_index ^= 1;
 }
 
+/* Return the offset slot for the specified offset, which must be 
+ * less than LZX_NUM_FAST_OFFSETS.  */
 static inline unsigned
 lzx_get_offset_slot_fast(struct lzx_compressor *c, u32 offset)
 {
@@ -1305,7 +1318,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 */
 static inline unsigned
 lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
-	      struct lzx_lru_queue queue, unsigned *rep_max_idx_ret)
+	      const struct lzx_lru_queue queue, unsigned *rep_max_idx_ret)
 {
 	BUILD_BUG_ON(LZX_NUM_RECENT_OFFSETS != 3);
 
@@ -1316,14 +1329,14 @@ lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
 	const u16 next_2_bytes = load_u16_unaligned(in_next);
 	const u8 *matchptr;
 
-	matchptr = in_next - lzx_lru_queue_pop(&queue);
+	matchptr = in_next - lzx_lru_queue_R0(queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes)
 		rep_max_len = lz_extend(in_next, matchptr, 2, max_len);
 	else
 		rep_max_len = 0;
 	rep_max_idx = 0;
 
-	matchptr = in_next - lzx_lru_queue_pop(&queue);
+	matchptr = in_next - lzx_lru_queue_R1(queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1332,7 +1345,7 @@ lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
 		}
 	}
 
-	matchptr = in_next - lzx_lru_queue_pop(&queue);
+	matchptr = in_next - lzx_lru_queue_R2(queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1560,7 +1573,7 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 
 	next_chosen_item = c->chosen_items;
 	lzx_record_item_list(c, c->optimum_nodes + block_size, &next_chosen_item);
-	lzx_write_block(c, os, block_size, next_chosen_item - c->chosen_items);
+	lzx_finalize_block(c, os, block_size, next_chosen_item - c->chosen_items);
 	return queue;
 }
 
