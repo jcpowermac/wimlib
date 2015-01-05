@@ -1698,9 +1698,9 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 		/* We've finished running the block through the matchfinder.
 		 * Now choose a match/literal sequence and write the block.  */
 
-		lzx_optimize_and_write_block(c, os, in_block_begin,
-					     in_next - in_block_begin,
-					     queue);
+		queue = lzx_optimize_and_write_block(c, os, in_block_begin,
+						     in_next - in_block_begin,
+						     queue);
 	} while (in_next != in_end);
 }
 
