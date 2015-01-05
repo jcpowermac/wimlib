@@ -69,7 +69,6 @@
 #include <limits.h>
 
 #define MATCHFINDER_WINDOW_ORDER	15
-#define MATCHFINDER_IS_SLIDING		0
 
 #include "wimlib/bt_matchfinder.h"
 #include "wimlib/compress_common.h"

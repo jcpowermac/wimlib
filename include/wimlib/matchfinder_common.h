@@ -40,17 +40,47 @@
 #  error "MATCHFINDER_WINDOW_ORDER must be defined!"
 #endif
 
-#ifndef MATCHFINDER_IS_SLIDING
-#  error "MATCHFINDER_IS_SLIDING must be defined!"
-#endif
-
 #define MATCHFINDER_WINDOW_SIZE ((size_t)1 << MATCHFINDER_WINDOW_ORDER)
 
-#if MATCHFINDER_IS_SLIDING
-#  include "matchfinder_sliding.h"
+#if MATCHFINDER_WINDOW_ORDER <= 16
+typedef u16 pos_t;
 #else
-#  include "matchfinder_nonsliding.h"
+typedef u32 pos_t;
 #endif
+
+#if MATCHFINDER_WINDOW_ORDER != 16 && MATCHFINDER_WINDOW_ORDER != 32
+
+/* Not all the bits of the position type are needed, so the sign bit can be
+ * reserved to mean "out of bounds".  */
+#define MATCHFINDER_INITVAL ((pos_t)-1)
+
+static inline bool
+matchfinder_match_in_window(pos_t cur_match, const u8 *in_base, const u8 *in_next)
+{
+	return !(cur_match & ((pos_t)1 << (sizeof(pos_t) * 8 - 1)));
+}
+
+#else
+
+/* All bits of the position type are needed, so use 0 to mean "out of bounds".
+ * This prevents the beginning of the buffer from matching anything; however,
+ * this doesn't matter much.  */
+
+#define MATCHFINDER_INITVAL ((pos_t)0)
+
+static inline bool
+matchfinder_match_in_window(pos_t cur_match, const u8 *in_base, const u8 *in_next)
+{
+	return cur_match != 0;
+}
+
+#endif
+
+static inline pos_t
+matchfinder_slot_for_match(pos_t cur_match)
+{
+	return cur_match;
+}
 
 #define MATCHFINDER_ALIGNMENT 8
 
@@ -126,66 +156,5 @@ matchfinder_init(pos_t *data, size_t num_entries)
 	for (size_t i = 0; i < num_entries; i++)
 		data[i] = MATCHFINDER_INITVAL;
 }
-
-#if MATCHFINDER_IS_SLIDING
-/*
- * Slide the matchfinder by WINDOW_SIZE bytes.
- *
- * This must be called just after each WINDOW_SIZE bytes have been run through
- * the matchfinder.
- *
- * This will subtract WINDOW_SIZE bytes from each entry in the array specified.
- * The effect is that all entries are updated to be relative to the current
- * position, rather than the position WINDOW_SIZE bytes prior.
- *
- * Underflow is detected and replaced with signed saturation.  This ensures that
- * once the sliding window has passed over a position, that position forever
- * remains out of bounds.
- *
- * The array passed in must contain all matchfinder data that is
- * position-relative.  Concretely, this will include the hash table as well as
- * the table of positions that is used to link together the sequences in each
- * hash bucket.  Note that in the latter table, the links are 1-ary in the case
- * of "hash chains", and 2-ary in the case of "binary trees".  In either case,
- * the links need to be rebased in the same way.
- */
-static inline void
-matchfinder_rebase(pos_t *data, size_t num_entries)
-{
-	const size_t size = num_entries * sizeof(data[0]);
-
-#ifdef __AVX2__
-	if (matchfinder_rebase_avx2(data, size))
-		return;
-#endif
-
-#ifdef __SSE2__
-	if (matchfinder_rebase_sse2(data, size))
-		return;
-#endif
-
-	if (MATCHFINDER_WINDOW_SIZE == 32768) {
-		/* Branchless version for 32768 byte windows.  If the value was
-		 * already negative, clear all bits except the sign bit; this
-		 * changes the value to -32768.  Otherwise, set the sign bit;
-		 * this is equivalent to subtracting 32768.  */
-		for (size_t i = 0; i < num_entries; i++) {
-			u16 v = data[i];
-			u16 sign_bit = v & 0x8000;
-			v &= sign_bit - ((sign_bit >> 15) ^ 1);
-			v |= 0x8000;
-			data[i] = v;
-		}
-		return;
-	}
-
-	for (size_t i = 0; i < num_entries; i++) {
-		if (data[i] >= 0)
-			data[i] -= (pos_t)-MATCHFINDER_WINDOW_SIZE;
-		else
-			data[i] = (pos_t)-MATCHFINDER_WINDOW_SIZE;
-	}
-}
-#endif /* MATCHFINDER_IS_SLIDING */
 
 #endif /* _MATCHFINDER_COMMON_H */

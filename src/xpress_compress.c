@@ -52,13 +52,12 @@
 #define MATCHFINDER_WINDOW_ORDER	16
 
 /*
- * Although XPRESS can potentially use a sliding window, it isn't well suited
- * for large buffers of data because there is no way to reset the Huffman code.
- * Therefore, we only allow buffers in which there is no restriction on match
- * offsets (no sliding window).  This simplifies the code and allows some
+ * Note: although XPRESS can potentially use a sliding window, it isn't well
+ * suited for large buffers of data because there is no way to reset the Huffman
+ * code.  Therefore, we only allow buffers in which there is no restriction on
+ * match offsets (no sliding window).  This simplifies the code and allows some
  * optimizations.
  */
-#define MATCHFINDER_IS_SLIDING		0
 
 #include <string.h>
 

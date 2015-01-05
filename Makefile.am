@@ -138,8 +138,6 @@ libwim_la_SOURCES =		\
 	include/wimlib/lzx_constants.h	\
 	include/wimlib/matchfinder_avx2.h	\
 	include/wimlib/matchfinder_common.h	\
-	include/wimlib/matchfinder_nonsliding.h	\
-	include/wimlib/matchfinder_sliding.h	\
 	include/wimlib/matchfinder_sse2.h	\
 	include/wimlib/metadata.h	\
 	include/wimlib/pathlist.h	\

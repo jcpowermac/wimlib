@@ -65,14 +65,6 @@ bt_matchfinder_init(struct bt_matchfinder *mf)
 	matchfinder_init(mf->hash_tab, BT_MATCHFINDER_HASH_LENGTH);
 }
 
-#if MATCHFINDER_IS_SLIDING
-static inline void
-bt_matchfinder_slide_window(struct bt_matchfinder *mf)
-{
-	matchfinder_rebase(mf->mf_data, BT_MATCHFINDER_TOTAL_LENGTH);
-}
-#endif
-
 static inline pos_t *
 bt_child(struct bt_matchfinder *mf, pos_t node, int offset)
 {

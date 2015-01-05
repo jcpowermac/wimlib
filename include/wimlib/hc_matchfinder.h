@@ -67,14 +67,6 @@ hc_matchfinder_init(struct hc_matchfinder *mf)
 	matchfinder_init(mf->hash_tab, HC_MATCHFINDER_HASH_LENGTH);
 }
 
-#if MATCHFINDER_IS_SLIDING
-static inline void
-hc_matchfinder_slide_window(struct hc_matchfinder *mf)
-{
-	matchfinder_rebase(mf->mf_data, HC_MATCHFINDER_TOTAL_LENGTH);
-}
-#endif
-
 /*
  * Find the longest match longer than 'best_len'.
  *
