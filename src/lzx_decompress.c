@@ -96,12 +96,15 @@ struct lzx_lru_queue {
 	u32 R[LZX_NUM_RECENT_OFFSETS];
 };
 
+/* Initialize the LZX least-recently-used match offset queue at the beginning of
+ * a new window for either decompression or compression.  */
 static inline void
 lzx_lru_queue_init(struct lzx_lru_queue *queue)
 {
 	for (unsigned i = 0; i < LZX_NUM_RECENT_OFFSETS; i++)
 		queue->R[i] = 1;
 }
+
 
 /* The main LZX decompressor structure.
  *

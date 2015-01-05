@@ -68,16 +68,17 @@
 #include <string.h>
 #include <limits.h>
 
-#define MATCHFINDER_MAX_WINDOW_ORDER	21
-#define LZX_BT_HASH_ORDER		16
+#define MATCHFINDER_WINDOW_ORDER	21
 
+#include "wimlib/bt_matchfinder.h"
 #include "wimlib/compress_common.h"
 #include "wimlib/compressor_ops.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
+#include "wimlib/hc_matchfinder.h"
 #include "wimlib/lzx_common.h"
-#include "wimlib/matchfinder.h"
 #include "wimlib/util.h"
+
 
 #define LZX_DIV_BLOCK_SIZE	32768
 #define LZX_CACHE_PER_POS	8
@@ -85,10 +86,7 @@
 #define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
 #define LZX_COST_SHIFT		4
 
-#define HASH2_ORDER 10
-#define HASH2_LENGTH (1UL << HASH2_ORDER)
-
-struct lzx_output_bitstream;
+struct lzx_compressor;
 
 /* Codewords for the LZX Huffman codes.  */
 struct lzx_codewords {
@@ -174,16 +172,6 @@ struct lzx_optimum_node {
 };
 
 
-/*
- * Representation of an LZX "recent match offsets" queue.
- *
- * This contains 3 offsets: R0, R1, and R2.  For speed we pack them into a
- * single 64-bit integer.  The low 63 bits are used (21 bits per offset); the
- * 64th bit is garbage.
- */
-struct lzx_lru_queue {
-	u64 R;
-};
 
 #define LZX_QUEUE64_OFFSET_SHIFT 21
 #define LZX_QUEUE64_OFFSET_MASK	(((u64)1 << LZX_QUEUE64_OFFSET_SHIFT) - 1)
@@ -196,42 +184,52 @@ struct lzx_lru_queue {
 #define LZX_QUEUE64_R1_MASK (LZX_QUEUE64_OFFSET_MASK << LZX_QUEUE64_R1_SHIFT)
 #define LZX_QUEUE64_R2_MASK (LZX_QUEUE64_OFFSET_MASK << LZX_QUEUE64_R2_SHIFT)
 
+struct lzx_lru_queue {
+	u64 offsets;
+};
+
 static inline void
 lzx_lru_queue_init(struct lzx_lru_queue *queue)
 {
-	queue->R = ((u64)1 << LZX_QUEUE64_R0_SHIFT) |
-		   ((u64)1 << LZX_QUEUE64_R1_SHIFT) |
-		   ((u64)1 << LZX_QUEUE64_R2_SHIFT);
+	queue->offsets = ((u64)1 << LZX_QUEUE64_R0_SHIFT) |
+			 ((u64)1 << LZX_QUEUE64_R1_SHIFT) |
+			 ((u64)1 << LZX_QUEUE64_R2_SHIFT);
 }
 
 static inline u64
 lzx_lru_queue_R0(struct lzx_lru_queue queue)
 {
-	return (queue.R >> LZX_QUEUE64_R0_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+	return (queue.offsets >> LZX_QUEUE64_R0_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
 }
 
 static inline u64
 lzx_lru_queue_R1(struct lzx_lru_queue queue)
 {
-	return (queue.R >> LZX_QUEUE64_R1_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+	return (queue.offsets >> LZX_QUEUE64_R1_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
 }
 
 static inline u64
 lzx_lru_queue_R2(struct lzx_lru_queue queue)
 {
-	return (queue.R >> LZX_QUEUE64_R2_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+	return (queue.offsets >> LZX_QUEUE64_R2_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
 }
 
-/* Push an offset onto the front of the queue.  */
 static inline struct lzx_lru_queue
 lzx_lru_queue_push(struct lzx_lru_queue queue, u32 offset)
 {
 	return (struct lzx_lru_queue) {
-		.R = (queue.R << LZX_QUEUE64_OFFSET_SHIFT) | offset,
+		.offsets = (queue.offsets << LZX_QUEUE64_OFFSET_SHIFT) | offset,
 	};
 }
 
-/* Swap queue entry 'idx' (0, 1, or 2) with entry 0.  */
+static inline u32
+lzx_lru_queue_pop(struct lzx_lru_queue *queue_p)
+{
+	u32 offset = queue_p->offsets & LZX_QUEUE64_OFFSET_MASK;
+	queue_p->offsets >>= LZX_QUEUE64_OFFSET_SHIFT;
+	return offset;
+}
+
 static inline struct lzx_lru_queue
 lzx_lru_queue_swap(struct lzx_lru_queue queue, unsigned idx)
 {
@@ -240,18 +238,22 @@ lzx_lru_queue_swap(struct lzx_lru_queue queue, unsigned idx)
 
 	if (idx == 1)
 		return (struct lzx_lru_queue) {
-			.R = (lzx_lru_queue_R1(queue) << LZX_QUEUE64_R0_SHIFT) |
-			     (lzx_lru_queue_R0(queue) << LZX_QUEUE64_R1_SHIFT) |
-			     (queue.R & LZX_QUEUE64_R2_MASK),
+			.offsets = (lzx_lru_queue_R1(queue) << LZX_QUEUE64_R0_SHIFT) |
+				(lzx_lru_queue_R0(queue) << LZX_QUEUE64_R1_SHIFT) |
+				(queue.offsets & LZX_QUEUE64_R2_MASK),
 		};
 
 	return (struct lzx_lru_queue) {
-		.R = (lzx_lru_queue_R2(queue) << LZX_QUEUE64_R0_SHIFT) |
-		     (queue.R & LZX_QUEUE64_R1_MASK) |
-		     (lzx_lru_queue_R0(queue) << LZX_QUEUE64_R2_SHIFT),
+		.offsets = (lzx_lru_queue_R2(queue) << LZX_QUEUE64_R0_SHIFT) |
+			(queue.offsets & LZX_QUEUE64_R1_MASK) |
+			(lzx_lru_queue_R0(queue) << LZX_QUEUE64_R2_SHIFT),
 	};
 }
 
+struct lzx_output_bitstream;
+
+#define HASH2_ORDER 10
+#define HASH2_LENGTH (1UL << HASH2_ORDER)
 
 /* State of the LZX compressor  */
 struct lzx_compressor {
@@ -295,39 +297,29 @@ struct lzx_compressor {
 	 * matches at each position.  */
 	unsigned max_search_depth;
 
-	/* The literal/match sequence chosen for the current block  */
 	struct lzx_item chosen_items[LZX_DIV_BLOCK_SIZE + LZX_MAX_MATCH_LEN + 1];
 
 	/* Table mapping match offset => offset slot for small offsets  */
 #define LZX_NUM_FAST_OFFSETS 32768
 	u8 offset_slot_fast[LZX_NUM_FAST_OFFSETS];
 
-	struct matchfinder *mf;
 	union {
 		/* Data for greedy or lazy parsing  */
 		struct {
+			struct hc_matchfinder *hc_mf;
 			u8 nonoptimal_end[0];
 		};
 
 		/* Data for near-optimal parsing  */
 		struct {
-
-			/* Hash table for length 2 matches  */
+			struct bt_matchfinder *bt_mf;
 			pos_t hash2_tab[HASH2_LENGTH]
 				_aligned_attribute(MATCHFINDER_ALIGNMENT);
-
-			/* Cached matches for the current block  */
 			struct lz_match match_cache[LZX_CACHE_LEN + 1 + LZX_MAX_MATCHES_PER_POS];
 			struct lz_match *cache_overflow_mark;
-
-			/* Graph nodes for the current block  */
 			struct lzx_optimum_node optimum_nodes[LZX_DIV_BLOCK_SIZE +
 							      LZX_MAX_MATCH_LEN + 1];
-
-			/* The current cost model  */
 			struct lzx_costs costs;
-
-			/* Number of optimization passes per block  */
 			unsigned num_optim_passes;
 			u8 optimal_end[0];
 		};
@@ -1312,7 +1304,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 */
 static inline unsigned
 lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
-	      const struct lzx_lru_queue queue, unsigned *rep_max_idx_ret)
+	      struct lzx_lru_queue queue, unsigned *rep_max_idx_ret)
 {
 	BUILD_BUG_ON(LZX_NUM_RECENT_OFFSETS != 3);
 
@@ -1323,14 +1315,14 @@ lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
 	const u16 next_2_bytes = load_u16_unaligned(in_next);
 	const u8 *matchptr;
 
-	matchptr = in_next - lzx_lru_queue_R0(queue);
+	matchptr = in_next - lzx_lru_queue_pop(&queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes)
 		rep_max_len = lz_extend(in_next, matchptr, 2, max_len);
 	else
 		rep_max_len = 0;
 	rep_max_idx = 0;
 
-	matchptr = in_next - lzx_lru_queue_R1(queue);
+	matchptr = in_next - lzx_lru_queue_pop(&queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1339,7 +1331,7 @@ lzx_repsearch(const u8 * const in_next, const u32 bytes_remaining,
 		}
 	}
 
-	matchptr = in_next - lzx_lru_queue_R2(queue);
+	matchptr = in_next - lzx_lru_queue_pop(&queue);
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1596,8 +1588,8 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 	u32 prev_hash;
 	struct lzx_lru_queue queue;
 
-	matchfinder_init(c->mf, LZX_BT_HASH_ORDER);
-	matchfinder_init((struct matchfinder *)c->hash2_tab, HASH2_ORDER);
+	bt_matchfinder_init(c->bt_mf);
+	matchfinder_init(c->hash2_tab, HASH2_LENGTH);
 	prev_hash = 0;
 	max_len = LZX_MAX_MATCH_LEN;
 	nice_len = min(c->nice_match_length, max_len);
@@ -1652,8 +1644,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 			}
 
 			/* Check for matches of length >= 3.  */
-			lz_matchptr = bt_matchfinder_get_matches(c->mf,
-								 LZX_BT_HASH_ORDER,
+			lz_matchptr = bt_matchfinder_get_matches(c->bt_mf,
 								 in_base,
 								 in_next,
 								 3,
@@ -1688,8 +1679,7 @@ lzx_compress_near_optimal(struct lzx_compressor * restrict c,
 					}
 					c->hash2_tab[lz_hash_2_bytes(in_next)] =
 						in_next - in_base;
-					bt_matchfinder_skip_position(c->mf,
-								     LZX_BT_HASH_ORDER,
+					bt_matchfinder_skip_position(c->bt_mf,
 								     in_base,
 								     in_next,
 								     in_end,
@@ -1769,8 +1759,8 @@ lzx_create_compressor(size_t max_bufsize, unsigned int compression_level,
 
 
 	if (1) {
-		c->mf = bt_matchfinder_alloc(LZX_BT_HASH_ORDER, window_order);
-		if (!c->mf)
+		c->bt_mf = bt_matchfinder_alloc(window_order);
+		if (!c->bt_mf)
 			goto oom2;
 		c->impl = lzx_compress_near_optimal;
 		c->max_search_depth = 12;
@@ -1821,8 +1811,9 @@ lzx_free_compressor(void *_c)
 	struct lzx_compressor *c = _c;
 
 	FREE(c->in_buffer);
-	if (1)
-		matchfinder_free(c->mf);
+	if (1) {
+		bt_matchfinder_free(c->bt_mf);
+	}
 	ALIGNED_FREE(c);
 }
 
