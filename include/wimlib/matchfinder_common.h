@@ -31,7 +31,7 @@ typedef u32 pos_t;
 
 /* Not all the bits of the position type are needed, so the sign bit can be
  * reserved to mean "out of bounds".  */
-#define MATCHFINDER_INITVAL ((pos_t)-1)
+#define MATCHFINDER_NULL ((pos_t)-1)
 
 static inline bool
 matchfinder_node_valid(pos_t node)
@@ -45,7 +45,7 @@ matchfinder_node_valid(pos_t node)
  * This prevents the beginning of the buffer from matching anything; however,
  * this doesn't matter much.  */
 
-#define MATCHFINDER_INITVAL ((pos_t)0)
+#define MATCHFINDER_NULL ((pos_t)0)
 
 static inline bool
 matchfinder_node_valid(pos_t node)
@@ -89,7 +89,7 @@ static inline bool
 matchfinder_memset_init_okay(void)
 {
 	/* All bytes must match in order to use memset.  */
-	const pos_t v = MATCHFINDER_INITVAL;
+	const pos_t v = MATCHFINDER_NULL;
 	if (sizeof(pos_t) == 2)
 		return (u8)v == (u8)(v >> 8);
 	if (sizeof(pos_t) == 4)
@@ -122,12 +122,12 @@ matchfinder_init(pos_t *data, size_t num_entries)
 #endif
 
 	if (matchfinder_memset_init_okay()) {
-		memset(data, (u8)MATCHFINDER_INITVAL, size);
+		memset(data, (u8)MATCHFINDER_NULL, size);
 		return;
 	}
 
 	for (size_t i = 0; i < num_entries; i++)
-		data[i] = MATCHFINDER_INITVAL;
+		data[i] = MATCHFINDER_NULL;
 }
 
 #endif /* _MATCHFINDER_COMMON_H */

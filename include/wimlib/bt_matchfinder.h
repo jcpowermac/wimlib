@@ -181,8 +181,8 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	len = 0;
 
 	if (!matchfinder_node_valid(cur_node)) {
-		*pending_lt_ptr = MATCHFINDER_INITVAL;
-		*pending_gt_ptr = MATCHFINDER_INITVAL;
+		*pending_lt_ptr = MATCHFINDER_NULL;
+		*pending_gt_ptr = MATCHFINDER_NULL;
 		*best_len_ret = best_len;
 		return lz_matchptr;
 	}
@@ -225,8 +225,8 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 		if (!matchfinder_node_valid(cur_node) ||
 		    !--depth_remaining)
 		{
-			*pending_lt_ptr = MATCHFINDER_INITVAL;
-			*pending_gt_ptr = MATCHFINDER_INITVAL;
+			*pending_lt_ptr = MATCHFINDER_NULL;
+			*pending_gt_ptr = MATCHFINDER_NULL;
 			*best_len_ret = best_len;
 			return lz_matchptr;
 		}
@@ -291,8 +291,8 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 	len = 0;
 
 	if (!matchfinder_node_valid(cur_node)) {
-		*pending_lt_ptr = MATCHFINDER_INITVAL;
-		*pending_gt_ptr = MATCHFINDER_INITVAL;
+		*pending_lt_ptr = MATCHFINDER_NULL;
+		*pending_gt_ptr = MATCHFINDER_NULL;
 		return;
 	}
 
@@ -327,8 +327,8 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 		if (!matchfinder_node_valid(cur_node) ||
 		    !--depth_remaining)
 		{
-			*pending_lt_ptr = MATCHFINDER_INITVAL;
-			*pending_gt_ptr = MATCHFINDER_INITVAL;
+			*pending_lt_ptr = MATCHFINDER_NULL;
+			*pending_gt_ptr = MATCHFINDER_NULL;
 			return;
 		}
 	}
