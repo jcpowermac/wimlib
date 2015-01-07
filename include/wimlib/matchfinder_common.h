@@ -34,9 +34,9 @@ typedef u32 pos_t;
 #define MATCHFINDER_INITVAL ((pos_t)-1)
 
 static inline bool
-matchfinder_match_in_window(pos_t cur_match)
+matchfinder_node_valid(pos_t node)
 {
-	return !(cur_match & ((pos_t)1 << (sizeof(pos_t) * 8 - 1)));
+	return !(node & ((pos_t)1 << (sizeof(pos_t) * 8 - 1)));
 }
 
 #else
@@ -48,9 +48,9 @@ matchfinder_match_in_window(pos_t cur_match)
 #define MATCHFINDER_INITVAL ((pos_t)0)
 
 static inline bool
-matchfinder_match_in_window(pos_t cur_match)
+matchfinder_node_valid(pos_t node)
 {
-	return cur_match != 0;
+	return node != 0;
 }
 
 #endif

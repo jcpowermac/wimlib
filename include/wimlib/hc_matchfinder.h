@@ -168,7 +168,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 	const u8 *matchptr;
 	unsigned len;
 	u32 hash;
-	pos_t cur_match;
+	pos_t cur_node;
 	u32 first_3_bytes;
 
 	/* Insert the current sequence into the appropriate linked list.  */
@@ -176,8 +176,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 		goto out;
 	first_3_bytes = load_u24_unaligned(in_next);
 	hash = lz_hash(first_3_bytes, HC_MATCHFINDER_HASH_ORDER);
-	cur_match = mf->hash_tab[hash];
-	mf->next_tab[in_next - in_begin] = cur_match;
+	cur_node = mf->hash_tab[hash];
+	mf->next_tab[in_next - in_begin] = cur_node;
 	mf->hash_tab[hash] = in_next - in_begin;
 
 	if (unlikely(best_len >= max_len))
@@ -185,21 +185,21 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 
 	/* Search the appropriate linked list for matches.  */
 
-	if (!(matchfinder_match_in_window(cur_match)))
+	if (!(matchfinder_node_valid(cur_node)))
 		goto out;
 
 	if (best_len < 3) {
 		for (;;) {
 			/* No length 3 match found yet.
 			 * Check the first 3 bytes.  */
-			matchptr = &in_begin[cur_match];
+			matchptr = &in_begin[cur_node];
 
 			if (load_u24_unaligned(matchptr) == first_3_bytes)
 				break;
 
 			/* Not a match; keep trying.  */
-			cur_match = mf->next_tab[cur_match];
-			if (!matchfinder_match_in_window(cur_match))
+			cur_node = mf->next_tab[cur_node];
+			if (!matchfinder_node_valid(cur_node))
 				goto out;
 			if (!--depth_remaining)
 				goto out;
@@ -210,8 +210,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 		best_len = lz_extend(in_next, best_matchptr, 3, max_len);
 		if (best_len >= nice_len)
 			goto out;
-		cur_match = mf->next_tab[cur_match];
-		if (!matchfinder_match_in_window(cur_match))
+		cur_node = mf->next_tab[cur_node];
+		if (!matchfinder_node_valid(cur_node))
 			goto out;
 		if (!--depth_remaining)
 			goto out;
@@ -219,7 +219,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 
 	for (;;) {
 		for (;;) {
-			matchptr = &in_begin[cur_match];
+			matchptr = &in_begin[cur_node];
 
 			/* Already found a length 3 match.  Try for a longer match;
 			 * start by checking the last 2 bytes and the first 4 bytes.  */
@@ -233,8 +233,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 		#endif
 				break;
 
-			cur_match = mf->next_tab[cur_match];
-			if (!matchfinder_match_in_window(cur_match))
+			cur_node = mf->next_tab[cur_node];
+			if (!matchfinder_node_valid(cur_node))
 				goto out;
 			if (!--depth_remaining)
 				goto out;
@@ -251,8 +251,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 			if (best_len >= nice_len)
 				goto out;
 		}
-		cur_match = mf->next_tab[cur_match];
-		if (!matchfinder_match_in_window(cur_match))
+		cur_node = mf->next_tab[cur_node];
+		if (!matchfinder_node_valid(cur_node))
 			goto out;
 		if (!--depth_remaining)
 			goto out;

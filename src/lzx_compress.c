@@ -1737,7 +1737,7 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 			hash2 = lz_hash_2_bytes(in_next);
 			cur_match = c->hash2_tab[hash2];
 			c->hash2_tab[hash2] = in_next - in_base;
-			if (matchfinder_match_in_window(cur_match) &&
+			if (matchfinder_node_valid(cur_match) &&
 			    (LZX_HASH2_ORDER == 16 ||
 			     load_u16_unaligned(&in_base[cur_match]) ==
 			     load_u16_unaligned(in_next)) &&
