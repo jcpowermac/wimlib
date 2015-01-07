@@ -6,40 +6,41 @@
  *
  * The author dedicates this file to the public domain.
  * You can do whatever you want with this file.
- */
-
-/*
+ *
+ * ----------------------------------------------------------------------------
+ *
  * This is a Binary Tree (bt) based matchfinder.
  *
  * The data structure is a hash table where each hash bucket contains a binary
- * tree of sequences, referenced by position.  The sequences in the binary tree
- * are ordered such that a left child is lexicographically lesser than its
- * parent, and a right child is lexicographically greater than its parent.
+ * tree of sequences whose first 3 bytes share the same hash code.  Each
+ * sequence is identified by its starting position in the input buffer.  Each
+ * binary tree is always sorted such that each left child represents a sequence
+ * lexicographically lesser than its parent and each right child represents a
+ * sequence lexicographically greater than its parent.
  *
- * For each sequence (position) in the input, the first 3 bytes are hashed and
- * the the appropriate binary tree is re-rooted at that sequence (position).
- * Since the sequences are inserted in order, each binary tree maintains the
- * invariant that each child node has greater match offset than its parent.
+ * The algorithm processes the input buffer sequentially.  At each byte
+ * position, the hash code of the first 3 bytes of the sequence beginning at
+ * that position (the sequence being matched against) is computed.  This
+ * identifies the hash bucket to use for that position.  Then, a new binary tree
+ * node is created to represent the current sequence.  Then, in a single tree
+ * traversal, the hash bucket's binary tree is searched for matches and
+ * re-rooted at the new node.
  *
- * While inserting a sequence, we may search the binary tree for matches with
- * that sequence.  At each step, the length of the match is computed.  The
- * search ends when the sequences get too far away (outside of the sliding
- * window), or when the binary tree ends (in the code this is the same check as
- * "too far away"), or when 'max_search_depth' positions have been searched, or
- * when a match of at least 'nice_len' bytes has been found.
+ * Compared to the simpler algorithm that uses linked lists instead of binary
+ * trees (see hc_matchfinder.h), the binary trees version gains more information
+ * with each byte comparison.  Ideally, the binary tree version will examine
+ * only 'log(n)' nodes to gain the same information that the linked list version
+ * will gain by examining 'n' nodes.
  *
- * Notes:
+ * In addition, the binary tree version can examine fewer bytes at each node by
+ * taking advantage of the common prefixes that result from the sort order.
  *
- *	- Typically, we need to search more nodes to find a given match in a
- *	  binary tree versus in a linked list.  However, a binary tree has more
- *	  overhead than a linked list: it needs to be kept sorted, and the inner
- *	  search loop is more complicated.  As a result, binary trees are best
- *	  suited for compression modes where the potential matches are searched
- *	  more thoroughly.
+ * However, it is not always best to use the binary tree version.  It requires
+ * nearly twice as much memory as the linked list version, and it takes time to
+ * keep the binary trees sorted, even at positions where the compressor does not
+ * need matches.
  *
- *	- Since no attempt is made to keep the binary trees balanced, it's
- *	  essential to have the 'max_search_depth' cutoff.  Otherwise it could
- *	  take quadratic time to run data through the matchfinder.
+ * ----------------------------------------------------------------------------
  */
 
 #ifndef _BT_MATCHFINDER_H
@@ -48,7 +49,6 @@
 #include "wimlib/lz_extend.h"
 #include "wimlib/lz_hash.h"
 #include "wimlib/matchfinder_common.h"
-#include "wimlib/util.h"
 
 #if MATCHFINDER_MAX_WINDOW_ORDER < 13
 #  define BT_MATCHFINDER_HASH_ORDER 14
@@ -65,12 +65,15 @@ struct bt_matchfinder {
 	pos_t child_tab[];
 } _aligned_attribute(MATCHFINDER_ALIGNMENT);
 
+/* Return the number of bytes that must be allocated for a 'bt_matchfinder' that
+ * works with buffers up to the specified size.  */
 static inline size_t
-bt_matchfinder_size(unsigned long window_size)
+bt_matchfinder_size(size_t window_size)
 {
 	return sizeof(pos_t) * (BT_MATCHFINDER_HASH_LENGTH + (2 * window_size));
 }
 
+/* Prepare the matchfinder for a new input buffer.  */
 static inline void
 bt_matchfinder_init(struct bt_matchfinder *mf)
 {
@@ -84,7 +87,7 @@ bt_child(struct bt_matchfinder *mf, pos_t node, int offset)
 		/* no cast needed */
 		return &mf->child_tab[(node << 1) + offset];
 	} else {
-		return &mf->child_tab[((unsigned long)node << 1) + offset];
+		return &mf->child_tab[((size_t)node << 1) + offset];
 	}
 }
 
@@ -100,15 +103,51 @@ bt_right_child(struct bt_matchfinder *mf, pos_t node)
 	return bt_child(mf, node, 1);
 }
 
+/*
+ * Retrieve a list of matches with the current position.
+ *
+ * @mf
+ *	The matchfinder structure.
+ * @in_begin
+ *	Pointer to the beginning of the input buffer.
+ * @in_next
+ *	Pointer to the next byte in the input buffer to process.  This is the
+ *	pointer to the sequence being matched against.
+ * @min_len
+ *	Only record matches that are at least this long.
+ * @max_len
+ *	The maximum permissible match length at this position.
+ * @nice_len
+ *	Stop searching if a match of at least this length is found.
+ * @max_search_depth
+ *	Limit on the number of potential matches to consider.
+ * @next_hash
+ *	Pointer to the hash code for the current sequence, which was computed
+ *	one position in advance so that the binary tree root could be
+ *	prefetched.  This is an in/out parameter.  Initialize to 0.
+ * @best_len_ret
+ *	The length of the longest match found is written here.  (This is
+ *	actually redundant with the 'lz_match' array, but this is easier for the
+ *	compiler to optimize when inlined and the caller immediately does a
+ *	check against the best match length.)
+ * @lz_matchptr
+ *	An array in which to write the resulting matches.  The resulting matches
+ *	will be sorted by strictly increasing length and strictly increasing
+ *	offset.  The maximum number of matches that may be found is
+ *	'min(nice_len, max_len) - 3 + 1'.
+ *
+ * The return value is a pointer to the next available slot in the @lz_matchptr
+ * array.  (If no matches were found, this will be the same as @lz_matchptr.)
+ */
 static inline struct lz_match *
 bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
-			   const u8 * const in_base,
+			   const u8 * const in_begin,
 			   const u8 * const in_next,
 			   const unsigned min_len,
 			   const unsigned max_len,
 			   const unsigned nice_len,
 			   const unsigned max_search_depth,
-			   u32 * restrict prev_hash,
+			   u32 * restrict next_hash,
 			   unsigned * restrict best_len_ret,
 			   struct lz_match * restrict lz_matchptr)
 {
@@ -126,14 +165,14 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 		return lz_matchptr;
 	}
 
-	hash = *prev_hash;
-	*prev_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
+	hash = *next_hash;
+	*next_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
 	cur_match = mf->hash_tab[hash];
-	mf->hash_tab[hash] = in_next - in_base;
-	prefetch(&mf->hash_tab[*prev_hash]);
+	mf->hash_tab[hash] = in_next - in_begin;
+	prefetch(&mf->hash_tab[*next_hash]);
 
-	pending_lt_ptr = bt_left_child(mf, in_next - in_base);
-	pending_gt_ptr = bt_right_child(mf, in_next - in_base);
+	pending_lt_ptr = bt_left_child(mf, in_next - in_begin);
+	pending_gt_ptr = bt_right_child(mf, in_next - in_begin);
 	best_lt_len = 0;
 	best_gt_len = 0;
 	len = 0;
@@ -146,7 +185,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	}
 
 	for (;;) {
-		matchptr = &in_base[cur_match];
+		matchptr = &in_begin[cur_match];
 
 		if (matchptr[len] == in_next[len]) {
 			len = lz_extend(in_next, matchptr, len + 1, max_len);
@@ -191,14 +230,39 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	}
 }
 
+/*
+ * Advance the matchfinder, but don't record any matches.
+ *
+ * @mf
+ *	The matchfinder structure.
+ * @in_begin
+ *	Pointer to the beginning of the input buffer.
+ * @in_next
+ *	Pointer to the next byte in the input buffer to process.
+ * @in_end
+ *	Pointer to the end of the input buffer.
+ * @nice_len
+ *	Stop searching if a match of at least this length is found.
+ * @max_search_depth
+ *	Limit on the number of potential matches to consider.
+ * @next_hash
+ *	Pointer to the hash code for the current sequence, which was computed
+ *	one position in advance so that the binary tree root could be
+ *	prefetched.  This is an in/out parameter.  Initialize to 0.
+ *
+ * Note: bt_matchfinder_skip_position() is very similar to
+ * bt_matchfinder_get_matches() since both need to do hashing and rebalance the
+ * binary search tree.  The former is only slightly more stripped down because
+ * it does not need to actually record any matches.
+ */
 static inline void
 bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
-			     const u8 * const in_base,
+			     const u8 * const in_begin,
 			     const u8 * const in_next,
 			     const u8 * const in_end,
 			     const unsigned nice_len,
 			     const unsigned max_search_depth,
-			     u32 * restrict prev_hash)
+			     u32 * restrict next_hash)
 {
 	unsigned depth_remaining = max_search_depth;
 	u32 hash;
@@ -211,15 +275,15 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 	if (unlikely(in_end - in_next < LZ_HASH_REQUIRED_NBYTES + 1))
 		return;
 
-	hash = *prev_hash;
-	*prev_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
+	hash = *next_hash;
+	*next_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
 	cur_match = mf->hash_tab[hash];
-	mf->hash_tab[hash] = in_next - in_base;
-	prefetch(&mf->hash_tab[*prev_hash]);
+	mf->hash_tab[hash] = in_next - in_begin;
+	prefetch(&mf->hash_tab[*next_hash]);
 
 	depth_remaining = max_search_depth;
-	pending_lt_ptr = bt_left_child(mf, in_next - in_base);
-	pending_gt_ptr = bt_right_child(mf, in_next - in_base);
+	pending_lt_ptr = bt_left_child(mf, in_next - in_begin);
+	pending_gt_ptr = bt_right_child(mf, in_next - in_begin);
 	best_lt_len = 0;
 	best_gt_len = 0;
 	len = 0;
@@ -231,8 +295,7 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 	}
 
 	for (;;) {
-
-		matchptr = &in_base[cur_match];
+		matchptr = &in_begin[cur_match];
 
 		if (matchptr[len] == in_next[len]) {
 			len = lz_extend(in_next, matchptr, len + 1, nice_len);

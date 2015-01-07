@@ -6,25 +6,92 @@
  *
  * The author dedicates this file to the public domain.
  * You can do whatever you want with this file.
- */
-
-/*
+ *
+ * ---------------------------------------------------------------------------
+ *
+ *				   Algorithm
+ *
  * This is a Hash Chain (hc) based matchfinder.
  *
  * The data structure is a hash table where each hash bucket contains a linked
- * list of sequences, referenced by position.
+ * list (or "chain") of sequences whose first 3 bytes share the same hash code.
+ * Each sequence is identified by its starting position in the input buffer.
  *
- * For each sequence (position) in the input, the first 3 bytes are hashed and
- * that sequence (position) is prepended to the appropriate linked list in the
- * hash table.  Since the sequences are inserted in order, each list is always
- * sorted by increasing match offset.
+ * The algorithm processes the input buffer sequentially.  At each byte
+ * position, the hash code of the first 3 bytes of the sequence beginning at
+ * that position (the sequence being matched against) is computed.  This
+ * identifies the hash bucket to use for that position.  Then, this hash
+ * bucket's linked list is searched for matches.  Then, a new linked list node
+ * is created to represent the current sequence and prepended to the list.
  *
- * At the same time as inserting a sequence, we may search the linked list for
- * matches with that sequence.  At each step, the length of the match is
- * computed.  The search ends when the sequences get too far away (outside of
- * the sliding window), or when the list ends (in the code this is the same
- * check as "too far away"), or when 'max_search_depth' positions have been
- * searched, or when a match of at least 'nice_len' bytes has been found.
+ * This algorithm has several useful properties:
+ *
+ * - It only finds true Lempel-Ziv matches; i.e., those where the matching
+ *   sequence occurs prior to the sequence being matched.
+ *
+ * - The sequences in each linked list are always sorted by decreasing starting
+ *   position.  Therefore, the closest (smallest offset) matches are found
+ *   first, which in many compression formats tend to be the cheapest to encode.
+ *
+ * - Although fast running time is not guaranteed due to the possibility of the
+ *   lists getting very long, the worst degenerate behavior can easily be
+ *   prevented by capping the number of nodes searched at each position.
+ *
+ * - If the compressor decides not to search for matches at a certain position,
+ *   then that position can quickly be inserted without searching the list.
+ *
+ * - The algorithm is adaptable to sliding windows: just store the positions
+ *   relative to a "base" value that is updated from time to time, and stop
+ *   searching each list when the sequences get too far away.
+ *
+ * ---------------------------------------------------------------------------
+ *
+ *				Notes on usage
+ *
+ * You must define MATCHFINDER_MAX_WINDOW_ORDER before including this header
+ * because that determines which integer type to use for positions.  Since
+ * 16-bit integers are faster than 32-bit integers due to reduced memory usage
+ * (and therefore reduced cache pressure), the code only uses 32-bit integers if
+ * they are needed to represent all possible positions.
+ *
+ * You must allocate the 'struct hc_matchfinder' on a
+ * MATCHFINDER_ALIGNMENT-aligned boundary, and its necessary allocation size
+ * must be gotten by by calling hc_matchfinder_size().
+ *
+ * ----------------------------------------------------------------------------
+ *
+ *				Optimizations
+ *
+ * The longest_match() and skip_positions() routines are inlined into the
+ * compressors that use them.  This isn't just about saving the overhead of a
+ * function call.  These routines are called from the inner loops of
+ * compressors, where giving the compiler more control over register allocation
+ * is very helpful.  There is also significant benefit to be gained from having
+ * branches predicted independently at each call site.  For example, "lazy"
+ * parsers can be written with two calls to longest_match(), each of which
+ * starts with a different 'best_len' and therefore has different performance
+ * characteristics.
+ *
+ * There are various other optimizations in the code that are useful in
+ * practice:
+ *
+ *  - Although any hash function can be used, a multiplicative hash is fast and
+ *    works well.
+ *
+ *  - On some processors, comparing whole words at a time is faster than
+ *    comparing individual bytes.  For this to be true, the processor must
+ *    support fast unaligned memory accesses and must have either a fast "find
+ *    first set bit" or "find last set bit" instruction, depending on
+ *    endianness.
+ *
+ *  - Use one loop for finding the find match, and one loop for finding a longer
+ *    match.
+ *
+ *  - Use a tight inner loop that only compares the last and first bytes of a
+ *    potential match.  Only when these bytes match do we break the loop and do
+ *    a full-blown match extension.
+ *
+ * ----------------------------------------------------------------------------
  */
 
 #ifndef _HC_MATCHFINDER_H
@@ -48,15 +115,15 @@ struct hc_matchfinder {
 	pos_t next_tab[];
 } _aligned_attribute(MATCHFINDER_ALIGNMENT);
 
+/* Return the number of bytes that must be allocated for a 'hc_matchfinder' that
+ * works with buffers up to the specified size.  */
 static inline size_t
-hc_matchfinder_size(unsigned long window_size)
+hc_matchfinder_size(size_t window_size)
 {
 	return sizeof(pos_t) * (HC_MATCHFINDER_HASH_LENGTH + window_size);
 }
 
-/*
- * Call before running the first byte through the matchfinder.
- */
+/* Prepare the matchfinder for a new input buffer.  */
 static inline void
 hc_matchfinder_init(struct hc_matchfinder *mf)
 {
@@ -64,20 +131,19 @@ hc_matchfinder_init(struct hc_matchfinder *mf)
 }
 
 /*
- * Find the longest match longer than 'best_len'.
+ * Find the longest match longer than 'best_len' bytes.
  *
  * @mf
  *	The matchfinder structure.
- * @in_base
- *	Pointer to the next byte in the input buffer to process _at the last
- *	time hc_matchfinder_init() or hc_matchfinder_slide_window() was called_.
+ * @in_begin
+ *	Pointer to the beginning of the input buffer.
  * @in_next
  *	Pointer to the next byte in the input buffer to process.  This is the
- *	pointer to the bytes being matched against.
+ *	pointer to the sequence being matched against.
  * @best_len
- *	Require a match at least this long.
+ *	Require a match longer than this length.
  * @max_len
- *	Maximum match length to return.
+ *	The maximum permissible match length at this position.
  * @nice_len
  *	Stop searching if a match of at least this length is found.
  * @max_search_depth
@@ -90,7 +156,7 @@ hc_matchfinder_init(struct hc_matchfinder *mf)
  */
 static inline unsigned
 hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
-			     const u8 * const in_base,
+			     const u8 * const in_begin,
 			     const u8 * const in_next,
 			     unsigned best_len,
 			     const unsigned max_len,
@@ -102,7 +168,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 	const u8 *best_matchptr = best_matchptr; /* uninitialized */
 	const u8 *matchptr;
 	unsigned len;
-	unsigned hash;
+	u32 hash;
 	pos_t cur_match;
 	u32 first_3_bytes;
 
@@ -112,8 +178,8 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 	first_3_bytes = load_u24_unaligned(in_next);
 	hash = lz_hash(first_3_bytes, HC_MATCHFINDER_HASH_ORDER);
 	cur_match = mf->hash_tab[hash];
-	mf->next_tab[in_next - in_base] = cur_match;
-	mf->hash_tab[hash] = in_next - in_base;
+	mf->next_tab[in_next - in_begin] = cur_match;
+	mf->hash_tab[hash] = in_next - in_begin;
 
 	if (unlikely(best_len >= max_len))
 		goto out;
@@ -127,7 +193,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 		for (;;) {
 			/* No length 3 match found yet.
 			 * Check the first 3 bytes.  */
-			matchptr = &in_base[cur_match];
+			matchptr = &in_begin[cur_match];
 
 			if (load_u24_unaligned(matchptr) == first_3_bytes)
 				break;
@@ -154,7 +220,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 
 	for (;;) {
 		for (;;) {
-			matchptr = &in_base[cur_match];
+			matchptr = &in_begin[cur_match];
 
 			/* Already found a length 3 match.  Try for a longer match;
 			 * start by checking the last 2 bytes and the first 4 bytes.  */
@@ -198,38 +264,37 @@ out:
 }
 
 /*
- * Advance the match-finder, but don't search for matches.
+ * Advance the matchfinder, but don't search for matches.
  *
  * @mf
  *	The matchfinder structure.
- * @in_base
- *	Pointer to the next byte in the input buffer to process _at the last
- *	time hc_matchfinder_init() or hc_matchfinder_slide_window() was called_.
+ * @in_begin
+ *	Pointer to the beginning of the input buffer.
  * @in_next
  *	Pointer to the next byte in the input buffer to process.
  * @in_end
  *	Pointer to the end of the input buffer.
- * @count
- *	Number of bytes to skip; must be > 0.
+ * @n
+ *	The number of bytes to advance (> 0).
  */
 static inline void
 hc_matchfinder_skip_positions(struct hc_matchfinder * restrict mf,
-			      const u8 *in_base,
+			      const u8 *in_begin,
 			      const u8 *in_next,
 			      const u8 *in_end,
-			      unsigned count)
+			      unsigned n)
 {
-	unsigned hash;
+	u32 hash;
 
-	if (unlikely(in_next + count >= in_end - LZ_HASH_REQUIRED_NBYTES))
+	if (unlikely(in_next + n >= in_end - LZ_HASH_REQUIRED_NBYTES))
 		return;
 
 	do {
 		hash = lz_hash_3_bytes(in_next, HC_MATCHFINDER_HASH_ORDER);
-		mf->next_tab[in_next - in_base] = mf->hash_tab[hash];
-		mf->hash_tab[hash] = in_next - in_base;
+		mf->next_tab[in_next - in_begin] = mf->hash_tab[hash];
+		mf->hash_tab[hash] = in_next - in_begin;
 		in_next++;
-	} while (--count);
+	} while (--n);
 }
 
 #endif /* _HC_MATCHFINDER_H */
