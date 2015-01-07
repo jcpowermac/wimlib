@@ -9,7 +9,7 @@
  *
  * ----------------------------------------------------------------------------
  *
- * This is a Binary Tree (bt) based matchfinder.
+ * This is a Binary Trees (bt) based matchfinder.
  *
  * The data structure is a hash table where each hash bucket contains a binary
  * tree of sequences whose first 3 bytes share the same hash code.  Each
@@ -27,18 +27,21 @@
  * re-rooted at the new node.
  *
  * Compared to the simpler algorithm that uses linked lists instead of binary
- * trees (see hc_matchfinder.h), the binary trees version gains more information
- * with each byte comparison.  Ideally, the binary tree version will examine
- * only 'log(n)' nodes to gain the same information that the linked list version
- * will gain by examining 'n' nodes.
- *
- * In addition, the binary tree version can examine fewer bytes at each node by
- * taking advantage of the common prefixes that result from the sort order.
+ * trees (see hc_matchfinder.h), the binary tree version gains more information
+ * at each node visitation.  Ideally, the binary tree version will examine only
+ * 'log(n)' nodes to find the same matches that the linked list version will
+ * find by examining 'n' nodes.  In addition, the binary tree version can
+ * examine fewer bytes at each node by taking advantage of the common prefixes
+ * that result from the sort order, whereas the linked list version may have to
+ * examine up to the full length of the match at each node.
  *
  * However, it is not always best to use the binary tree version.  It requires
  * nearly twice as much memory as the linked list version, and it takes time to
  * keep the binary trees sorted, even at positions where the compressor does not
- * need matches.
+ * need matches.  Generally, when doing fast compression on small buffers,
+ * binary trees are the wrong approach.  They are best suited for thorough
+ * compression and/or large buffers.  (But if you have a *really* large buffer
+ * then you might want to use a suffix array instead!)
  *
  * ----------------------------------------------------------------------------
  */
@@ -124,16 +127,16 @@ bt_right_child(struct bt_matchfinder *mf, pos_t node)
  * @next_hash
  *	Pointer to the hash code for the current sequence, which was computed
  *	one position in advance so that the binary tree root could be
- *	prefetched.  This is an in/out parameter.  Initialize to 0.
+ *	prefetched.  This is an input/output parameter.  Initialize to 0.
  * @best_len_ret
  *	The length of the longest match found is written here.  (This is
- *	actually redundant with the 'lz_match' array, but this is easier for the
- *	compiler to optimize when inlined and the caller immediately does a
- *	check against the best match length.)
+ *	actually redundant with the 'struct lz_match' array, but this is easier
+ *	for the compiler to optimize when inlined and the caller immediately
+ *	does a check against 'best_len'.)
  * @lz_matchptr
- *	An array in which to write the resulting matches.  The resulting matches
- *	will be sorted by strictly increasing length and strictly increasing
- *	offset.  The maximum number of matches that may be found is
+ *	An array in which this function will record the matches.  The recorded
+ *	matches will be sorted by strictly increasing length and strictly
+ *	increasing offset.  The maximum number of matches that may be found is
  *	'min(nice_len, max_len) - 3 + 1'.
  *
  * The return value is a pointer to the next available slot in the @lz_matchptr
@@ -248,12 +251,11 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
  * @next_hash
  *	Pointer to the hash code for the current sequence, which was computed
  *	one position in advance so that the binary tree root could be
- *	prefetched.  This is an in/out parameter.  Initialize to 0.
+ *	prefetched.  This is an input/output parameter.  Initialize to 0.
  *
- * Note: bt_matchfinder_skip_position() is very similar to
- * bt_matchfinder_get_matches() since both need to do hashing and rebalance the
- * binary search tree.  The former is only slightly more stripped down because
- * it does not need to actually record any matches.
+ * Note: this is very similar to bt_matchfinder_get_matches() because both
+ * functions must do hashing and tree re-rooting.  This version just doesn't
+ * actually record any matches.
  */
 static inline void
 bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,

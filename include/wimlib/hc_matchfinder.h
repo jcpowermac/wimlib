@@ -11,7 +11,7 @@
  *
  *				   Algorithm
  *
- * This is a Hash Chain (hc) based matchfinder.
+ * This is a Hash Chains (hc) based matchfinder.
  *
  * The data structure is a hash table where each hash bucket contains a linked
  * list (or "chain") of sequences whose first 3 bytes share the same hash code.
@@ -27,14 +27,14 @@
  * This algorithm has several useful properties:
  *
  * - It only finds true Lempel-Ziv matches; i.e., those where the matching
- *   sequence occurs prior to the sequence being matched.
+ *   sequence occurs prior to the sequence being matched against.
  *
  * - The sequences in each linked list are always sorted by decreasing starting
  *   position.  Therefore, the closest (smallest offset) matches are found
  *   first, which in many compression formats tend to be the cheapest to encode.
  *
  * - Although fast running time is not guaranteed due to the possibility of the
- *   lists getting very long, the worst degenerate behavior can easily be
+ *   lists getting very long, the worst degenerate behavior can be easily
  *   prevented by capping the number of nodes searched at each position.
  *
  * - If the compressor decides not to search for matches at a certain position,
@@ -56,7 +56,7 @@
  *
  * You must allocate the 'struct hc_matchfinder' on a
  * MATCHFINDER_ALIGNMENT-aligned boundary, and its necessary allocation size
- * must be gotten by by calling hc_matchfinder_size().
+ * must be gotten by calling hc_matchfinder_size().
  *
  * ----------------------------------------------------------------------------
  *
@@ -64,32 +64,31 @@
  *
  * The longest_match() and skip_positions() routines are inlined into the
  * compressors that use them.  This isn't just about saving the overhead of a
- * function call.  These routines are called from the inner loops of
- * compressors, where giving the compiler more control over register allocation
- * is very helpful.  There is also significant benefit to be gained from having
- * branches predicted independently at each call site.  For example, "lazy"
- * parsers can be written with two calls to longest_match(), each of which
- * starts with a different 'best_len' and therefore has different performance
- * characteristics.
+ * function call.  These routines are intended to be called from the inner loops
+ * of compressors, where giving the compiler more control over register
+ * allocation is very helpful.  There is also significant benefit to be gained
+ * from having branches predicted independently at each call site.  For example,
+ * "lazy" parsers can be written with two calls to longest_match(), each of
+ * which starts with a different 'best_len' and therefore has significantly
+ * different performance characteristics.
  *
- * There are various other optimizations in the code that are useful in
- * practice:
+ * Although any hash function can be used, a multiplicative hash is fast and
+ * works well.
  *
- *  - Although any hash function can be used, a multiplicative hash is fast and
- *    works well.
+ * On some processors, it is significantly faster to extend matches by whole
+ * words (32 or 64 bits) instead of by individual bytes.  For this to be the
+ * case, the processor must implement unaligned memory accesses efficiently and
+ * must have a fast "find first set bit" or "find last set bit" instruction
+ * (which one is needed depends on the endianness).
  *
- *  - On some processors, comparing whole words at a time is faster than
- *    comparing individual bytes.  For this to be true, the processor must
- *    support fast unaligned memory accesses and must have either a fast "find
- *    first set bit" or "find last set bit" instruction, depending on
- *    endianness.
+ * The code uses one loop for finding the first match and one loop for finding a
+ * longer match.  Each of these loops is tuned for its respective task and in
+ * combination are faster than a single generalized loop that handles both
+ * tasks.
  *
- *  - Use one loop for finding the find match, and one loop for finding a longer
- *    match.
- *
- *  - Use a tight inner loop that only compares the last and first bytes of a
- *    potential match.  Only when these bytes match do we break the loop and do
- *    a full-blown match extension.
+ * The code also uses a tight inner loop that only compares the last and first
+ * bytes of a potential match.  It is only when these bytes match that a full
+ * match extension is attempted.
  *
  * ----------------------------------------------------------------------------
  */
@@ -172,7 +171,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 	pos_t cur_match;
 	u32 first_3_bytes;
 
-	/* Insert the current sequence into the appropriate hash chain.  */
+	/* Insert the current sequence into the appropriate linked list.  */
 	if (unlikely(max_len < LZ_HASH_REQUIRED_NBYTES))
 		goto out;
 	first_3_bytes = load_u24_unaligned(in_next);
@@ -184,7 +183,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 	if (unlikely(best_len >= max_len))
 		goto out;
 
-	/* Search the appropriate hash chain for matches.  */
+	/* Search the appropriate linked list for matches.  */
 
 	if (!(matchfinder_match_in_window(cur_match)))
 		goto out;
@@ -274,19 +273,19 @@ out:
  *	Pointer to the next byte in the input buffer to process.
  * @in_end
  *	Pointer to the end of the input buffer.
- * @n
- *	The number of bytes to advance (> 0).
+ * @count
+ *	The number of bytes to advance.  Must be > 0.
  */
 static inline void
 hc_matchfinder_skip_positions(struct hc_matchfinder * restrict mf,
 			      const u8 *in_begin,
 			      const u8 *in_next,
 			      const u8 *in_end,
-			      unsigned n)
+			      unsigned count)
 {
 	u32 hash;
 
-	if (unlikely(in_next + n >= in_end - LZ_HASH_REQUIRED_NBYTES))
+	if (unlikely(in_next + count >= in_end - LZ_HASH_REQUIRED_NBYTES))
 		return;
 
 	do {
@@ -294,7 +293,7 @@ hc_matchfinder_skip_positions(struct hc_matchfinder * restrict mf,
 		mf->next_tab[in_next - in_begin] = mf->hash_tab[hash];
 		mf->hash_tab[hash] = in_next - in_begin;
 		in_next++;
-	} while (--n);
+	} while (--count);
 }
 
 #endif /* _HC_MATCHFINDER_H */
