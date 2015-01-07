@@ -39,9 +39,6 @@
 
 /* Available match-finding algorithms.  */
 static const struct lz_mf_ops *mf_ops[] = {
-	[LZ_MF_NULL]			= &lz_null_ops,
-	[LZ_MF_HASH_CHAINS]		= &lz_hash_chains_ops,
-	[LZ_MF_BINARY_TREES]		= &lz_binary_trees_ops,
 	[LZ_MF_LCP_INTERVAL_TREE]	= &lz_lcp_interval_tree_ops,
 	[LZ_MF_LINKED_SUFFIX_ARRAY]	= &lz_linked_suffix_array_ops,
 };
@@ -54,11 +51,7 @@ static const struct lz_mf_ops *
 select_mf_ops(enum lz_mf_algo algorithm, u32 max_window_size)
 {
 	if (algorithm == LZ_MF_DEFAULT) {
-		if (max_window_size <= 32768)
-			algorithm = LZ_MF_HASH_CHAINS;
-		else if (max_window_size <= 2097152)
-			algorithm = LZ_MF_BINARY_TREES;
-		else if (max_window_size <= 33554432)
+		if (max_window_size <= 33554432)
 			algorithm = LZ_MF_LCP_INTERVAL_TREE;
 		else
 			algorithm = LZ_MF_LINKED_SUFFIX_ARRAY;

@@ -110,38 +110,6 @@ enum lz_mf_algo {
 	LZ_MF_NULL = 1,
 
 	/*
-	 * Hash Chain match-finding algorithm.
-	 *
-	 * This works well on small windows.
-	 *
-	 * The memory usage is 4 bytes per position, plus 131072 bytes for a
-	 * hash table.
-	 *
-	 * lz_mf_skip_positions() with this algorithm is very fast, so it's good
-	 * if you're doing "greedy" rather than "optimal" parsing.  However, if
-	 * using large windows you might be better off with binary trees or
-	 * suffix arrays, even if doing greedy parsing.
-	 */
-	LZ_MF_HASH_CHAINS = 3,
-
-	/*
-	 * Binary Tree match-finding algorithm.
-	 *
-	 * This works well on small to medium-sized windows.
-	 *
-	 * The memory usage is 8 bytes per position, plus 262144 bytes for a
-	 * hash table.
-	 *
-	 * lz_mf_skip_positions() with this algorithm takes a significant amount
-	 * of time, almost as much as a call to lz_mf_get_matches().  This makes
-	 * this algorithm better suited for optimal parsing than for greedy
-	 * parsing.  However, if the window size becomes sufficiently large,
-	 * this algorithm can outperform hash chains, even when using greedy
-	 * parsing.
-	 */
-	LZ_MF_BINARY_TREES = 4,
-
-	/*
 	 * Longest Common Prefix Interval Tree match-finding algorithm.
 	 *
 	 * This is a suffix array-based algorithm.  It works well on medium to
