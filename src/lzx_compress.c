@@ -1900,6 +1900,13 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 				continue;
 			}
 
+			if (cur_offset == lzx_lru_queue_R0(queue)) {
+				in_next++;
+				cur_offset_data = 0;
+				skip_len = cur_len - 1;
+				goto output_cur_match;
+			}
+
 			cur_offset_data = cur_offset + LZX_OFFSET_OFFSET;
 			cur_score = lzx_explicit_offset_match_score(cur_len, cur_offset_data);
 
