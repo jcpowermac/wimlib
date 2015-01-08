@@ -1692,16 +1692,15 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 	const u8 * const in_begin = c->in_buffer;
 	const u8 *	 in_next = in_begin;
 	const u8 * const in_end  = in_begin + c->in_nbytes;
-	unsigned max_len;
-	unsigned nice_len;
+	unsigned max_len = LZX_MAX_MATCH_LEN;
+	unsigned nice_len = min(c->nice_match_length, max_len);
 	u32 next_hash;
 	struct lzx_lru_queue queue;
 
 	bt_matchfinder_init(&c->bt_mf);
 	matchfinder_init(c->hash2_tab, LZX_HASH2_LENGTH);
-	next_hash = 0;
-	max_len = LZX_MAX_MATCH_LEN;
-	nice_len = min(c->nice_match_length, max_len);
+	if (in_end - in_next >= 3)
+		next_hash = bt_matchfinder_hash_3_bytes(in_next);
 	lzx_lru_queue_init(&queue);
 
 	do {

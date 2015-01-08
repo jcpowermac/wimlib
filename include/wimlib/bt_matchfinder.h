@@ -82,6 +82,12 @@ bt_matchfinder_init(struct bt_matchfinder *mf)
 	matchfinder_init(mf->hash_tab, BT_MATCHFINDER_HASH_LENGTH);
 }
 
+static inline u32
+bt_matchfinder_hash_3_bytes(const u8 *in_next)
+{
+	return lz_hash_3_bytes(in_next, BT_MATCHFINDER_HASH_ORDER);
+}
+
 static inline pos_t *
 bt_child(struct bt_matchfinder *mf, pos_t node, int offset)
 {
@@ -126,7 +132,7 @@ bt_right_child(struct bt_matchfinder *mf, pos_t node)
  * @next_hash
  *	Pointer to the hash code for the current sequence, which was computed
  *	one position in advance so that the binary tree root could be
- *	prefetched.  This is an input/output parameter.  Initialize to 0.
+ *	prefetched.  This is an input/output parameter.
  * @best_len_ret
  *	The length of the longest match found is written here.  (This is
  *	actually redundant with the 'struct lz_match' array, but this is easier
@@ -168,7 +174,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 	}
 
 	hash = *next_hash;
-	*next_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
+	*next_hash = bt_matchfinder_hash_3_bytes(in_next + 1);
 	cur_node = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_begin;
 	prefetch(&mf->hash_tab[*next_hash]);
@@ -248,7 +254,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
  * @next_hash
  *	Pointer to the hash code for the current sequence, which was computed
  *	one position in advance so that the binary tree root could be
- *	prefetched.  This is an input/output parameter.  Initialize to 0.
+ *	prefetched.  This is an input/output parameter.
  *
  * Note: this is very similar to bt_matchfinder_get_matches() because both
  * functions must do hashing and tree re-rooting.  This version just doesn't
@@ -275,7 +281,7 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 		return;
 
 	hash = *next_hash;
-	*next_hash = lz_hash_3_bytes(in_next + 1, BT_MATCHFINDER_HASH_ORDER);
+	*next_hash = bt_matchfinder_hash_3_bytes(in_next + 1);
 	cur_node = mf->hash_tab[hash];
 	mf->hash_tab[hash] = in_next - in_begin;
 	prefetch(&mf->hash_tab[*next_hash]);

@@ -902,9 +902,11 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 	const u8 *in_next = in_begin;
 	const u8 * const in_end = in_begin + in_nbytes;
 	struct lz_match *cache_ptr = c->match_cache;
-	u32 next_hash = 0;
+	u32 next_hash;
 
 	bt_matchfinder_init(&c->bt_mf);
+	if (in_end - in_next >= 3)
+		next_hash = bt_matchfinder_hash_3_bytes(in_next);
 
 	do {
 		struct lz_match *matches;
