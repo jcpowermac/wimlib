@@ -23,7 +23,7 @@
  * that position (the sequence being matched against) is computed.  This
  * identifies the hash bucket to use for that position.  Then, a new binary tree
  * node is created to represent the current sequence.  Then, in a single tree
- * traversal, the hash bucket's binary tree is searched for matches and
+ * traversal, the hash bucket's binary tree is searched for matches and is
  * re-rooted at the new node.
  *
  * Compared to the simpler algorithm that uses linked lists instead of binary
@@ -40,8 +40,7 @@
  * keep the binary trees sorted, even at positions where the compressor does not
  * need matches.  Generally, when doing fast compression on small buffers,
  * binary trees are the wrong approach.  They are best suited for thorough
- * compression and/or large buffers.  (But if you have a *really* large buffer
- * then you might want to use a suffix array instead!)
+ * compression and/or large buffers.
  *
  * ----------------------------------------------------------------------------
  */
@@ -69,11 +68,11 @@ struct bt_matchfinder {
 } _aligned_attribute(MATCHFINDER_ALIGNMENT);
 
 /* Return the number of bytes that must be allocated for a 'bt_matchfinder' that
- * works with buffers up to the specified size.  */
+ * can work with buffers up to the specified size.  */
 static inline size_t
-bt_matchfinder_size(size_t window_size)
+bt_matchfinder_size(size_t max_bufsize)
 {
-	return sizeof(pos_t) * (BT_MATCHFINDER_HASH_LENGTH + (2 * window_size));
+	return sizeof(pos_t) * (BT_MATCHFINDER_HASH_LENGTH + (2 * max_bufsize));
 }
 
 /* Prepare the matchfinder for a new input buffer.  */
@@ -222,9 +221,7 @@ bt_matchfinder_get_matches(struct bt_matchfinder * const restrict mf,
 				len = best_lt_len;
 		}
 
-		if (!matchfinder_node_valid(cur_node) ||
-		    !--depth_remaining)
-		{
+		if (!matchfinder_node_valid(cur_node) || !--depth_remaining) {
 			*pending_lt_ptr = MATCHFINDER_NULL;
 			*pending_gt_ptr = MATCHFINDER_NULL;
 			*best_len_ret = best_len;
@@ -324,9 +321,7 @@ bt_matchfinder_skip_position(struct bt_matchfinder * const restrict mf,
 				len = best_lt_len;
 		}
 
-		if (!matchfinder_node_valid(cur_node) ||
-		    !--depth_remaining)
-		{
+		if (!matchfinder_node_valid(cur_node) || !--depth_remaining) {
 			*pending_lt_ptr = MATCHFINDER_NULL;
 			*pending_gt_ptr = MATCHFINDER_NULL;
 			return;

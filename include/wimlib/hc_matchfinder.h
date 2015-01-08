@@ -117,9 +117,9 @@ struct hc_matchfinder {
 /* Return the number of bytes that must be allocated for a 'hc_matchfinder' that
  * can work with buffers up to the specified size.  */
 static inline size_t
-hc_matchfinder_size(size_t window_size)
+hc_matchfinder_size(size_t max_bufsize)
 {
-	return sizeof(pos_t) * (HC_MATCHFINDER_HASH_LENGTH + window_size);
+	return sizeof(pos_t) * (HC_MATCHFINDER_HASH_LENGTH + max_bufsize);
 }
 
 /* Prepare the matchfinder for a new input buffer.  */
