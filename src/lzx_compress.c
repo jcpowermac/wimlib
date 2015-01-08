@@ -102,7 +102,7 @@
 /*
  * The maximum compression level at which we use the faster algorithm.
  */
-#define LZX_MAX_FAST_LEVEL	29
+#define LZX_MAX_FAST_LEVEL	34
 
 /*
  * LZX_HASH2_ORDER is the log base 2 of the number of entries in the hash table
@@ -1819,19 +1819,19 @@ lzx_explicit_offset_match_score(unsigned len, u32 adjusted_offset)
 {
 	unsigned score = len;
 
-	if (adjusted_offset < 2048)
+	if (adjusted_offset < 4096)
 		score++;
 
-	if (adjusted_offset < 1024)
+	if (adjusted_offset < 256)
 		score++;
 
 	return score;
 }
 
 static inline unsigned
-lzx_repeat_offset_match_score(unsigned len, unsigned slot)
+lzx_repeat_offset_match_score(unsigned rep_len, unsigned rep_idx)
 {
-	return len + 3;
+	return rep_len + 3;
 }
 
 /* This is the "lazy" LZX compressor.  */
@@ -1908,15 +1908,17 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 									   in_end - in_next,
 									   queue,
 									   &rep_max_idx);
+			in_next++;
+
 			if (rep_max_len >= 3 &&
 			    (rep_score = lzx_repeat_offset_match_score(rep_max_len,
 								       rep_max_idx)) >= cur_score)
 			{
 				cur_len = rep_max_len;
 				cur_offset_data = rep_max_idx;
-				cur_score = rep_score;
+				skip_len = rep_max_len - 1;
+				goto output_cur_match;
 			}
-			in_next++;
 
 		have_cur_match:
 
@@ -1957,29 +1959,41 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 									   in_end - in_next,
 									   queue,
 									   &rep_max_idx);
+			in_next++;
+
 			if (rep_max_len >= 3 &&
 			    (rep_score = lzx_repeat_offset_match_score(rep_max_len,
 								       rep_max_idx)) >= next_score)
 			{
-				next_len = rep_max_len;
-				next_offset_data = rep_max_idx;
-				next_score = rep_score;
+
+				if (rep_score > cur_score) {
+					/* Next match is better, and it's a
+					 * repeat offset match.  */
+					lzx_declare_literal(c, *(in_next - 2), &next_chosen_item);
+					cur_len = rep_max_len;
+					cur_offset_data = rep_max_idx;
+					skip_len = cur_len - 1;
+					goto output_cur_match;
+				} else {
+					/* Next match is a repeat offset matche,
+					 * but it is *not* better.  */
+					skip_len = cur_len - 2;
+					goto output_cur_match;
+				}
+			} else {
+				if (next_score > cur_score) {
+					/* The next match is better.  */
+					lzx_declare_literal(c, *(in_next - 2), &next_chosen_item);
+					cur_len = next_len;
+					cur_offset_data = next_offset_data;
+					cur_score = next_score;
+					goto have_cur_match;
+				} else {
+					/* The original match was better.  */
+					skip_len = cur_len - 2;
+					goto output_cur_match;
+				}
 			}
-
-			in_next++;
-
-			if (next_score > cur_score) {
-				/* The next match is better.  */
-				lzx_declare_literal(c, *(in_next - 2), &next_chosen_item);
-				cur_len = next_len;
-				cur_offset_data = next_offset_data;
-				cur_score = next_score;
-				goto have_cur_match;
-			}
-
-			/* The original match was better.  */
-
-			skip_len = cur_len - 2;
 
 		output_cur_match:
 			if (cur_offset_data < LZX_NUM_RECENT_OFFSETS) {
@@ -2095,7 +2109,7 @@ lzx_create_compressor(size_t max_bufsize, unsigned compression_level,
 
 		c->num_optim_passes = 1;
 
-		if (compression_level >= 40)
+		if (compression_level >= 45)
 			c->num_optim_passes++;
 
 		/* Use more optimization passes for higher compression levels.
