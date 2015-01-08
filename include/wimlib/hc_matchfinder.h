@@ -22,7 +22,7 @@
  * that position (the sequence being matched against) is computed.  This
  * identifies the hash bucket to use for that position.  Then, this hash
  * bucket's linked list is searched for matches.  Then, a new linked list node
- * is created to represent the current sequence and prepended to the list.
+ * is created to represent the current sequence and is prepended to the list.
  *
  * This algorithm has several useful properties:
  *
@@ -38,7 +38,7 @@
  *   prevented by capping the number of nodes searched at each position.
  *
  * - If the compressor decides not to search for matches at a certain position,
- *   then that position can quickly be inserted without searching the list.
+ *   then that position can be quickly inserted without searching the list.
  *
  * - The algorithm is adaptable to sliding windows: just store the positions
  *   relative to a "base" value that is updated from time to time, and stop
@@ -60,17 +60,17 @@
  *
  * ----------------------------------------------------------------------------
  *
- *				Optimizations
+ *				 Optimizations
  *
- * The longest_match() and skip_positions() routines are inlined into the
+ * The longest_match() and skip_positions() functions are inlined into the
  * compressors that use them.  This isn't just about saving the overhead of a
- * function call.  These routines are intended to be called from the inner loops
- * of compressors, where giving the compiler more control over register
+ * function call.  These functions are intended to be called from the inner
+ * loops of compressors, where giving the compiler more control over register
  * allocation is very helpful.  There is also significant benefit to be gained
- * from having branches predicted independently at each call site.  For example,
- * "lazy" parsers can be written with two calls to longest_match(), each of
- * which starts with a different 'best_len' and therefore has significantly
- * different performance characteristics.
+ * from allowing the CPU to predict branches independently at each call site.
+ * For example, "lazy"-style compressors can be written with two calls to
+ * longest_match(), each of which starts with a different 'best_len' and
+ * therefore has significantly different performance characteristics.
  *
  * Although any hash function can be used, a multiplicative hash is fast and
  * works well.
@@ -78,8 +78,8 @@
  * On some processors, it is significantly faster to extend matches by whole
  * words (32 or 64 bits) instead of by individual bytes.  For this to be the
  * case, the processor must implement unaligned memory accesses efficiently and
- * must have a fast "find first set bit" or "find last set bit" instruction
- * (which one is needed depends on the endianness).
+ * must have either a fast "find first set bit" instruction or a fast "find last
+ * set bit" instruction, depending on the processor's endianness.
  *
  * The code uses one loop for finding the first match and one loop for finding a
  * longer match.  Each of these loops is tuned for its respective task and in
@@ -115,7 +115,7 @@ struct hc_matchfinder {
 } _aligned_attribute(MATCHFINDER_ALIGNMENT);
 
 /* Return the number of bytes that must be allocated for a 'hc_matchfinder' that
- * works with buffers up to the specified size.  */
+ * can work with buffers up to the specified size.  */
 static inline size_t
 hc_matchfinder_size(size_t window_size)
 {
@@ -148,7 +148,7 @@ hc_matchfinder_init(struct hc_matchfinder *mf)
  * @max_search_depth
  *	Limit on the number of potential matches to consider.
  * @offset_ret
- *	The match offset is returned here.
+ *	If a match is found, its offset is returned in this location.
  *
  * Return the length of the match found, or 'best_len' if no match longer than
  * 'best_len' was found.
@@ -167,9 +167,9 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 	const u8 *best_matchptr = best_matchptr; /* uninitialized */
 	const u8 *matchptr;
 	unsigned len;
+	u32 first_3_bytes;
 	u32 hash;
 	pos_t cur_node;
-	u32 first_3_bytes;
 
 	/* Insert the current sequence into the appropriate linked list.  */
 	if (unlikely(max_len < LZ_HASH_REQUIRED_NBYTES))
@@ -197,23 +197,19 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 			if (load_u24_unaligned(matchptr) == first_3_bytes)
 				break;
 
-			/* Not a match; keep trying.  */
+			/* The first 3 bytes did not match.  Keep trying.  */
 			cur_node = mf->next_tab[cur_node];
-			if (!matchfinder_node_valid(cur_node))
-				goto out;
-			if (!--depth_remaining)
+			if (!matchfinder_node_valid(cur_node) || !--depth_remaining)
 				goto out;
 		}
 
-		/* Found a length 3 match.  */
+		/* Found a match of length >= 3.  Extend it to its full length.  */
 		best_matchptr = matchptr;
 		best_len = lz_extend(in_next, best_matchptr, 3, max_len);
 		if (best_len >= nice_len)
 			goto out;
 		cur_node = mf->next_tab[cur_node];
-		if (!matchfinder_node_valid(cur_node))
-			goto out;
-		if (!--depth_remaining)
+		if (!matchfinder_node_valid(cur_node) || !--depth_remaining)
 			goto out;
 	}
 
@@ -234,16 +230,15 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 				break;
 
 			cur_node = mf->next_tab[cur_node];
-			if (!matchfinder_node_valid(cur_node))
-				goto out;
-			if (!--depth_remaining)
+			if (!matchfinder_node_valid(cur_node) || !--depth_remaining)
 				goto out;
 		}
 
-		if (UNALIGNED_ACCESS_IS_FAST)
-			len = 4;
-		else
-			len = 0;
+	#if UNALIGNED_ACCESS_IS_FAST
+		len = 4;
+	#else
+		len = 0;
+	#endif
 		len = lz_extend(in_next, matchptr, len, max_len);
 		if (len > best_len) {
 			best_len = len;
@@ -252,9 +247,7 @@ hc_matchfinder_longest_match(struct hc_matchfinder * const restrict mf,
 				goto out;
 		}
 		cur_node = mf->next_tab[cur_node];
-		if (!matchfinder_node_valid(cur_node))
-			goto out;
-		if (!--depth_remaining)
+		if (!matchfinder_node_valid(cur_node) || !--depth_remaining)
 			goto out;
 	}
 out:
