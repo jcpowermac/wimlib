@@ -110,7 +110,7 @@
  * hash function is trivial), but using a smaller hash table speeds up
  * compression due to reduced cache pressure.
  */
-#define LZX_HASH2_ORDER		10
+#define LZX_HASH2_ORDER		12
 #define LZX_HASH2_LENGTH	(1UL << LZX_HASH2_ORDER)
 
 #include "wimlib/lzx_common.h"
@@ -1613,7 +1613,7 @@ lzx_set_default_costs(struct lzx_compressor *c, const u8 *block, u32 block_size)
 		c->costs.main[i] = 170;
 
 	for (i = 0; i < LZX_LENCODE_NUM_SYMBOLS; i++)
-		c->costs.len[i] = 127;
+		c->costs.len[i] = 103 + (i / 4);
 
 	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
 		c->costs.aligned[i] = 48;
