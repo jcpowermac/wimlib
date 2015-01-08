@@ -1149,7 +1149,7 @@ lzx_match_cost_raw_smalllen(unsigned len, unsigned offset_slot,
  * Consider coding the match at repeat offset index @rep_idx.  Consider each
  * length from the minimum (2) to the full match length (@rep_len).
  */
-static inline void
+static void
 lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 				 struct lzx_optimum_node *cur_node,
 				 unsigned rep_len, unsigned rep_idx)
@@ -1342,7 +1342,7 @@ lzx_consider_explicit_offset_matches_slow(struct lzx_compressor *c,
  * guaranteed to be optimal due to the possibility of a larger offset costing
  * less than a smaller offset to code, this is a very useful heuristic.
  */
-static inline void
+static void
 lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 				     struct lzx_optimum_node *cur_node,
 				     const struct lz_match matches[],
@@ -1497,38 +1497,44 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			unsigned rep_max_len;
 			unsigned rep_max_idx;
 
-			/*
-			 * Find the longest repeat offset match with the current
-			 * position.
-			 *
-			 * Heuristics:
-			 *
-			 * - Only search for repeat offset matches if the
-			 *   matchfinder already found at least one match.
-			 *
-			 * - Only consider the longest repeat offset match.  It
-			 *   seems to be rare for the minimum cost path to
-			 *   include a repeat offset match that doesn't have the
-			 *   longest length (allowing for the possibility that
-			 *   not all of that length is actually used).
-			 */
-			rep_max_len =
-				lzx_find_longest_repeat_offset_match(in_next,
-								     block_end - in_next,
-								     QUEUE(in_next),
-								     &rep_max_idx);
+			if (cache_ptr[num_matches-1].offset == lzx_lru_queue_R0(QUEUE(in_next))) {
+				lzx_consider_repeat_offset_match(c, cur_node,
+								 cache_ptr[num_matches-1].length, 0);
+			} else {
 
-			/* If we found a repeat offset match, consider coding it.  */
-			if (rep_max_len) {
-				lzx_consider_repeat_offset_match(c,
-								 cur_node,
-								 rep_max_len,
-								 rep_max_idx);
+				/*
+				 * Find the longest repeat offset match with the current
+				 * position.
+				 *
+				 * Heuristics:
+				 *
+				 * - Only search for repeat offset matches if the
+				 *   matchfinder already found at least one match.
+				 *
+				 * - Only consider the longest repeat offset match.  It
+				 *   seems to be rare for the minimum cost path to
+				 *   include a repeat offset match that doesn't have the
+				 *   longest length (allowing for the possibility that
+				 *   not all of that length is actually used).
+				 */
+				rep_max_len =
+					lzx_find_longest_repeat_offset_match(in_next,
+									     block_end - in_next,
+									     QUEUE(in_next),
+									     &rep_max_idx);
+				/* If we found a repeat offset match, consider coding it.  */
+				if (rep_max_len) {
+					lzx_consider_repeat_offset_match(c,
+									 cur_node,
+									 rep_max_len,
+									 rep_max_idx);
+				}
+
+				/* Consider coding an explicit offset match.  */
+				lzx_consider_explicit_offset_matches(c, cur_node,
+								     cache_ptr, num_matches);
 			}
 
-			/* Consider coding an explicit offset match.  */
-			lzx_consider_explicit_offset_matches(c, cur_node,
-							     cache_ptr, num_matches);
 
 			cache_ptr += num_matches;
 		}
