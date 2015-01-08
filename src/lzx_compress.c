@@ -1850,6 +1850,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 
 	do {
 		/* Starting a new block  */
+
 		const u8 * const in_block_begin = in_next;
 		const u8 * const in_block_end =
 			in_next + min(LZX_DIV_BLOCK_SIZE, in_end - in_next);
@@ -1858,41 +1859,33 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 		u32 cur_offset;
 		u32 cur_offset_data;
 		unsigned cur_score;
+		unsigned next_len;
+		u32 next_offset;
+		u32 next_offset_data;
+		unsigned next_score;
 		unsigned rep_max_len;
 		unsigned rep_max_idx;
 		unsigned rep_score;
-		unsigned prev_len;
-		unsigned prev_score;
-		u32 prev_offset_data;
 		unsigned skip_len;
 
 		lzx_reset_symbol_frequencies(c);
 
-		prev_len = 2;
-		prev_offset_data = 0;
-		prev_score = 0;
-
 		do {
-
-			/* If approaching the end of the input buffer, adjust
-			 * 'max_len' and 'nice_len' accordingly.  */
 			if (unlikely(max_len > in_end - in_next)) {
 				max_len = in_end - in_next;
 				nice_len = min(max_len, nice_len);
 			}
 
+			/* Find the longest match at the current position.  */
+
 			cur_len = hc_matchfinder_longest_match(&c->hc_mf,
 							       in_begin,
 							       in_next,
-							       prev_len,
+							       2,
 							       max_len,
 							       nice_len,
 							       c->max_search_depth,
 							       &cur_offset);
-			if (cur_len <= prev_len)
-				cur_len = 0;
-			in_next++;
-
 			if (cur_len < 3 ||
 			    (cur_len == 3 &&
 			     cur_offset >= 8192 - LZX_OFFSET_OFFSET &&
@@ -1900,32 +1893,21 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 			     cur_offset != lzx_lru_queue_R1(queue) &&
 			     cur_offset != lzx_lru_queue_R2(queue)))
 			{
-				/* No match found, or the only match found was a distant
-				 * length 3 match.  Output the previous match if there
-				 * is one; otherwise output a literal.  */
-
-			no_match_found:
-
-				if (prev_len >= 3) {
-					skip_len = prev_len - 2;
-					goto output_prev_match;
-				} else {
-					lzx_declare_literal(c, *(in_next - 1),
-							    &next_chosen_item);
-					continue;
-				}
+				/* There was no match found, or the only match found
+				 * was a distant length 3 match.  Output a literal.  */
+				lzx_declare_literal(c, *in_next++,
+						    &next_chosen_item);
+				continue;
 			}
 
-			/* Find the longest repeat offset match with the current
-			 * position.  */
-			rep_max_len = lzx_find_longest_repeat_offset_match(in_next - 1,
-									   in_end - (in_next - 1),
-									   queue,
-									   &rep_max_idx);
 			cur_offset_data = cur_offset + LZX_OFFSET_OFFSET;
 			cur_score = lzx_explicit_offset_match_score(cur_len, cur_offset_data);
 
-			/* Select the better of the explicit and repeat offset matches.  */
+			/* Consider a repeat offset match  */
+			rep_max_len = lzx_find_longest_repeat_offset_match(in_next,
+									   in_end - in_next,
+									   queue,
+									   &rep_max_idx);
 			if (rep_max_len >= 3 &&
 			    (rep_score = lzx_repeat_offset_match_score(rep_max_len,
 								       rep_max_idx)) >= cur_score)
@@ -1934,49 +1916,82 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 				cur_offset_data = rep_max_idx;
 				cur_score = rep_score;
 			}
+			in_next++;
 
-			if (prev_len < 3 || cur_score > prev_score) {
-				/* No previous match, or the current match is better
-				 * than the previous match.
-				 *
-				 * If there's a previous match, then output a literal in
-				 * its place.
-				 *
-				 * In both cases, if the current match is very long,
-				 * then output it immediately.  Otherwise, attempt a
-				 * lazy match by waiting to see if there's a better
-				 * match at the next position.  */
+		have_cur_match:
 
-				if (prev_len >= 3)
-					lzx_declare_literal(c, *(in_next - 2), &next_chosen_item);
+			/* We have a match at the current position.  */
 
-				prev_len = cur_len;
-				prev_offset_data = cur_offset_data;
-				prev_score = cur_score;
-
-				if (prev_len >= c->nice_match_length) {
-					skip_len = prev_len - 1;
-					goto output_prev_match;
-				}
-				continue;
+			/* If we have a very long match, choose it immediately.  */
+			if (cur_len >= nice_len) {
+				skip_len = cur_len - 1;
+				goto output_cur_match;
 			}
 
-			/* Current match is not better than the previous match, so
-			 * output the previous match.  */
+			/* See if there's a better match at the next position.  */
 
-			skip_len = prev_len - 2;
+			if (unlikely(max_len > in_end - in_next)) {
+				max_len = in_end - in_next;
+				nice_len = min(max_len, nice_len);
+			}
 
-		output_prev_match:
-			if (prev_offset_data < LZX_NUM_RECENT_OFFSETS) {
-				lzx_declare_repeat_offset_match(c, prev_len,
-								prev_offset_data,
+			next_len = hc_matchfinder_longest_match(&c->hc_mf,
+								in_begin,
+								in_next,
+								cur_len - 2,
+								max_len,
+								nice_len,
+								c->max_search_depth / 2,
+								&next_offset);
+
+			if (next_len <= cur_len - 2) {
+				in_next++;
+				skip_len = cur_len - 2;
+				goto output_cur_match;
+			}
+
+			next_offset_data = next_offset + LZX_OFFSET_OFFSET;
+			next_score = lzx_explicit_offset_match_score(next_len, next_offset_data);
+
+			rep_max_len = lzx_find_longest_repeat_offset_match(in_next,
+									   in_end - in_next,
+									   queue,
+									   &rep_max_idx);
+			if (rep_max_len >= 3 &&
+			    (rep_score = lzx_repeat_offset_match_score(rep_max_len,
+								       rep_max_idx)) >= next_score)
+			{
+				next_len = rep_max_len;
+				next_offset_data = rep_max_idx;
+				next_score = rep_score;
+			}
+
+			in_next++;
+
+			if (next_score > cur_score) {
+				/* The next match is better.  */
+				lzx_declare_literal(c, *(in_next - 2), &next_chosen_item);
+				cur_len = next_len;
+				cur_offset_data = next_offset_data;
+				cur_score = next_score;
+				goto have_cur_match;
+			}
+
+			/* The original match was better.  */
+
+			skip_len = cur_len - 2;
+
+		output_cur_match:
+			if (cur_offset_data < LZX_NUM_RECENT_OFFSETS) {
+				lzx_declare_repeat_offset_match(c, cur_len,
+								cur_offset_data,
 								&next_chosen_item);
-				queue = lzx_lru_queue_swap(queue, prev_offset_data);
+				queue = lzx_lru_queue_swap(queue, cur_offset_data);
 			} else {
-				lzx_declare_explicit_offset_match(c, prev_len,
-								  prev_offset_data - LZX_OFFSET_OFFSET,
+				lzx_declare_explicit_offset_match(c, cur_len,
+								  cur_offset_data - LZX_OFFSET_OFFSET,
 								  &next_chosen_item);
-				queue = lzx_lru_queue_push(queue, prev_offset_data - LZX_OFFSET_OFFSET);
+				queue = lzx_lru_queue_push(queue, cur_offset_data - LZX_OFFSET_OFFSET);
 			}
 
 			hc_matchfinder_skip_positions(&c->hc_mf,
@@ -1985,7 +2000,6 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 						      in_end,
 						      skip_len);
 			in_next += skip_len;
-			prev_len = 2;
 		} while (in_next < in_block_end);
 
 		lzx_finish_block(c, os, in_next - in_block_begin,
@@ -2057,10 +2071,13 @@ lzx_create_compressor(size_t max_bufsize, unsigned compression_level,
 		goto oom1;
 
 	if (compression_level <= LZX_MAX_FAST_LEVEL) {
+
 		/* Fast compression: Use lazy parsing.  */
+
 		c->impl = lzx_compress_lazy;
-		c->nice_match_length = 25 + compression_level * 2;
-		c->max_search_depth = 25 + compression_level;
+		c->max_search_depth = (36 * compression_level) / 20;
+		c->nice_match_length = (72 * compression_level) / 20;
+
 	} else {
 
 		/* Normal / high compression: Use near-optimal parsing.  */
