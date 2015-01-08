@@ -1689,9 +1689,9 @@ static void
 lzx_compress_near_optimal(struct lzx_compressor *c,
 			  struct lzx_output_bitstream *os)
 {
-	const u8 * const in_base = c->in_buffer;
-	const u8 *	 in_next = in_base;
-	const u8 * const in_end  = in_base + c->in_nbytes;
+	const u8 * const in_begin = c->in_buffer;
+	const u8 *	 in_next = in_begin;
+	const u8 * const in_end  = in_begin + c->in_nbytes;
 	unsigned max_len;
 	unsigned nice_len;
 	u32 next_hash;
@@ -1736,21 +1736,21 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 			/* Check for a length 2 match.  */
 			hash2 = lz_hash_2_bytes(in_next);
 			cur_match = c->hash2_tab[hash2];
-			c->hash2_tab[hash2] = in_next - in_base;
+			c->hash2_tab[hash2] = in_next - in_begin;
 			if (matchfinder_node_valid(cur_match) &&
 			    (LZX_HASH2_ORDER == 16 ||
-			     load_u16_unaligned(&in_base[cur_match]) ==
+			     load_u16_unaligned(&in_begin[cur_match]) ==
 			     load_u16_unaligned(in_next)) &&
-			    in_base[cur_match + 2] != in_next[2])
+			    in_begin[cur_match + 2] != in_next[2])
 			{
 				lz_matchptr->length = 2;
-				lz_matchptr->offset = in_next - &in_base[cur_match];
+				lz_matchptr->offset = in_next - &in_begin[cur_match];
 				lz_matchptr++;
 			}
 
 			/* Check for matches of length >= 3.  */
 			lz_matchptr = bt_matchfinder_get_matches(&c->bt_mf,
-								 in_base,
+								 in_begin,
 								 in_next,
 								 3,
 								 max_len,
@@ -1789,9 +1789,9 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 						}
 					}
 					c->hash2_tab[lz_hash_2_bytes(in_next)] =
-						in_next - in_base;
+						in_next - in_begin;
 					bt_matchfinder_skip_position(&c->bt_mf,
-								     in_base,
+								     in_begin,
 								     in_next,
 								     in_end,
 								     nice_len,
