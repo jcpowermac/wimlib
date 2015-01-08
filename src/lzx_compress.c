@@ -1694,12 +1694,12 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 	const u8 * const in_end  = in_base + c->in_nbytes;
 	unsigned max_len;
 	unsigned nice_len;
-	u32 prev_hash;
+	u32 next_hash;
 	struct lzx_lru_queue queue;
 
 	bt_matchfinder_init(&c->bt_mf);
 	matchfinder_init(c->hash2_tab, LZX_HASH2_LENGTH);
-	prev_hash = 0;
+	next_hash = 0;
 	max_len = LZX_MAX_MATCH_LEN;
 	nice_len = min(c->nice_match_length, max_len);
 	lzx_lru_queue_init(&queue);
@@ -1756,7 +1756,7 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 								 max_len,
 								 nice_len,
 								 c->max_search_depth,
-								 &prev_hash,
+								 &next_hash,
 								 &best_len,
 								 lz_matchptr);
 			in_next++;
@@ -1796,7 +1796,7 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 								     in_end,
 								     nice_len,
 								     c->max_search_depth,
-								     &prev_hash);
+								     &next_hash);
 					in_next++;
 					cache_ptr->length = 0;
 					cache_ptr++;
