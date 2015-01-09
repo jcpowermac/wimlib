@@ -153,6 +153,9 @@ struct lzx_costs {
 	u32 main[LZX_MAINCODE_MAX_NUM_SYMBOLS];
 	u32 len[LZX_LENCODE_NUM_SYMBOLS];
 	u32 aligned[LZX_ALIGNEDCODE_NUM_SYMBOLS];
+
+	/* 'rep_costs' is computed from 'main' and 'len'.  */
+	u32 rep_costs[LZX_NUM_RECENT_OFFSETS][LZX_NUM_PRIMARY_LENS + LZX_LENCODE_NUM_SYMBOLS];
 };
 
 /* Codewords and lengths for the LZX Huffman codes.  */
@@ -1154,67 +1157,16 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 				 struct lzx_optimum_node *cur_node,
 				 unsigned rep_len, unsigned rep_idx)
 {
+	unsigned len = 2;
 	u32 base_cost = cur_node->cost;
-	u32 cost;
-	unsigned len;
-
-#if 1   /* Optimized version */
-
-	if (rep_len < LZX_MIN_MATCH_LEN + LZX_NUM_PRIMARY_LENS) {
-		/* All lengths being considered are small.  */
-		len = 2;
-		do {
-			cost = base_cost +
-			       lzx_match_cost_raw_smalllen(len, rep_idx, &c->costs);
-			if (cost < (cur_node + len)->cost) {
-				(cur_node + len)->item =
-					(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-				(cur_node + len)->cost = cost;
-			}
-		} while (++len <= rep_len);
-	} else {
-		/* Some lengths being considered are small, and some are big.
-		 * Start with the optimized loop for small lengths, then switch
-		 * to the optimized loop for big lengths.  */
-		len = 2;
-		do {
-			cost = base_cost +
-			       lzx_match_cost_raw_smalllen(len, rep_idx, &c->costs);
-			if (cost < (cur_node + len)->cost) {
-				(cur_node + len)->item =
-					(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-				(cur_node + len)->cost = cost;
-			}
-		} while (++len < LZX_MIN_MATCH_LEN + LZX_NUM_PRIMARY_LENS);
-
-		/* The main symbol is now fixed.  */
-		base_cost += c->costs.main[LZX_NUM_CHARS +
-					   ((rep_idx << 3) | LZX_NUM_PRIMARY_LENS)];
-		do {
-			cost = base_cost +
-			       c->costs.len[len - LZX_MIN_MATCH_LEN -
-					    LZX_NUM_PRIMARY_LENS];
-			if (cost < (cur_node + len)->cost) {
-				(cur_node + len)->item =
-					(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-				(cur_node + len)->cost = cost;
-			}
-		} while (++len <= rep_len);
-	}
-
-#else   /* Unoptimized version  */
-
-	len = 2;
 	do {
-		cost = base_cost +
-		       lzx_match_cost_raw(len, rep_idx, &c->costs);
+		u32 cost = base_cost + c->costs.rep_costs[rep_idx][len - 2];
 		if (cost < (cur_node + len)->cost) {
 			(cur_node + len)->item =
 				(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
 			(cur_node + len)->cost = cost;
 		}
 	} while (++len <= rep_len);
-#endif
 }
 
 static inline void
@@ -1581,6 +1533,20 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 	return QUEUE(block_end);
 }
 
+static void
+lzx_set_rep_costs(struct lzx_costs *costs)
+{
+	for (unsigned rep_idx = 0; rep_idx < LZX_NUM_RECENT_OFFSETS; rep_idx++) {
+		unsigned mainsym = LZX_NUM_CHARS + (rep_idx << 3);
+		for (unsigned i = 0; i < 7; i++, mainsym++)
+			costs->rep_costs[rep_idx][i] = costs->main[mainsym];
+		BUILD_BUG_ON(7 + LZX_LENCODE_NUM_SYMBOLS != 256);
+		for (unsigned i = 7; i < 256; i++)
+			costs->rep_costs[rep_idx][i] = costs->main[mainsym] +
+						       costs->len[i - 7];
+	}
+}
+
 /* Set default LZX Huffman symbol costs to bootstrap the iterative optimization
  * algorithm.  */
 static void
@@ -1623,6 +1589,8 @@ lzx_set_default_costs(struct lzx_compressor *c, const u8 *block, u32 block_size)
 
 	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
 		c->costs.aligned[i] = 48;
+
+	lzx_set_rep_costs(&c->costs);
 }
 
 /* Update the current cost model to reflect the computed Huffman codes.  */
@@ -1643,6 +1611,8 @@ lzx_update_costs(struct lzx_compressor *c)
 	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
 		c->costs.aligned[i] = (lens->aligned[i] ? lens->aligned[i] : 7)
 				<< LZX_COST_SHIFT;
+
+	lzx_set_rep_costs(&c->costs);
 }
 
 static struct lzx_lru_queue
