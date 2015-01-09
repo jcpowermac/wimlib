@@ -305,15 +305,13 @@ lzx_lru_queue_swap(struct lzx_lru_queue queue, unsigned idx)
 /* The main LZX compressor structure  */
 struct lzx_compressor {
 
-	/* Pointer to the compress() implementation chosen at allocation time */
-	void (*impl)(struct lzx_compressor *, struct lzx_output_bitstream *);
+	/* The "nice" match length: if a match of this length is found, then
+	 * choose it immediately without further consideration.  */
+	unsigned nice_match_length;
 
-	/* The preprocessed buffer of data being compressed  */
-	u8 *in_buffer;
-
-	/* The number of bytes of data to be compressed, which is the number of
-	 * bytes of data in @in_buffer that are actually valid.  */
-	size_t in_nbytes;
+	/* The maximum search depth: consider at most this many potential
+	 * matches at each position.  */
+	unsigned max_search_depth;
 
 	/* The log base 2 of the LZX window size for LZ match offset encoding
 	 * purposes.  This will be >= LZX_MIN_WINDOW_ORDER and <=
@@ -325,6 +323,19 @@ struct lzx_compressor {
 	 * offset.  */
 	unsigned num_main_syms;
 
+	/* Number of optimization passes per block  */
+	unsigned num_optim_passes;
+
+	/* The preprocessed buffer of data being compressed  */
+	u8 *in_buffer;
+
+	/* The number of bytes of data to be compressed, which is the number of
+	 * bytes of data in @in_buffer that are actually valid.  */
+	size_t in_nbytes;
+
+	/* Pointer to the compress() implementation chosen at allocation time */
+	void (*impl)(struct lzx_compressor *, struct lzx_output_bitstream *);
+
 	/* The Huffman symbol frequency counters for the current block.  */
 	struct lzx_freqs freqs;
 
@@ -333,14 +344,6 @@ struct lzx_compressor {
 	 * for the previous block.  */
 	struct lzx_codes codes[2];
 	unsigned codes_index;
-
-	/* The "nice" match length: if a match of this length is found, then
-	 * choose it immediately without further consideration.  */
-	unsigned nice_match_length;
-
-	/* The maximum search depth: consider at most this many potential
-	 * matches at each position.  */
-	unsigned max_search_depth;
 
 	/* The match/literal sequence the algorithm chose for the current block.
 	 */
@@ -359,15 +362,6 @@ struct lzx_compressor {
 
 		/* Data for near-optimal parsing  */
 		struct {
-			/* Hash table for finding length 2 matches  */
-			pos_t hash2_tab[LZX_HASH2_LENGTH]
-				_aligned_attribute(MATCHFINDER_ALIGNMENT);
-
-			/* Cached matches for the current block  */
-			struct lz_match match_cache[LZX_CACHE_LEN + 1 +
-						    LZX_MAX_MATCHES_PER_POS];
-			struct lz_match *cache_overflow_mark;
-
 			/* The graph nodes for the current block  */
 			struct lzx_optimum_node optimum_nodes[LZX_DIV_BLOCK_SIZE +
 							      LZX_MAX_MATCH_LEN + 1];
@@ -375,8 +369,14 @@ struct lzx_compressor {
 			/* The cost model for the current block  */
 			struct lzx_costs costs;
 
-			/* Number of optimization passes per block  */
-			unsigned num_optim_passes;
+			/* Cached matches for the current block  */
+			struct lz_match match_cache[LZX_CACHE_LEN + 1 +
+						    LZX_MAX_MATCHES_PER_POS];
+			struct lz_match *cache_overflow_mark;
+
+			/* Hash table for finding length 2 matches  */
+			pos_t hash2_tab[LZX_HASH2_LENGTH]
+				_aligned_attribute(MATCHFINDER_ALIGNMENT);
 
 			/* Binary trees matchfinder (MUST BE LAST!!!)  */
 			struct bt_matchfinder bt_mf;
