@@ -223,7 +223,7 @@ struct lzx_optimum_node {
  * offsets of 21 bits each.  Bit 64 is garbage.
  */
 struct lzx_lru_queue {
-	u64 R;
+	u32 R[3];
 };
 
 #define LZX_QUEUE64_OFFSET_SHIFT 21
@@ -240,66 +240,23 @@ struct lzx_lru_queue {
 static inline void
 lzx_lru_queue_init(struct lzx_lru_queue *queue)
 {
-	queue->R = ((u64)1 << LZX_QUEUE64_R0_SHIFT) |
-		   ((u64)1 << LZX_QUEUE64_R1_SHIFT) |
-		   ((u64)1 << LZX_QUEUE64_R2_SHIFT);
-}
-
-static inline u64
-lzx_lru_queue_R0(struct lzx_lru_queue queue)
-{
-	return (queue.R >> LZX_QUEUE64_R0_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
-}
-
-static inline u64
-lzx_lru_queue_R1(struct lzx_lru_queue queue)
-{
-	return (queue.R >> LZX_QUEUE64_R1_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
-}
-
-static inline u64
-lzx_lru_queue_R2(struct lzx_lru_queue queue)
-{
-	return (queue.R >> LZX_QUEUE64_R2_SHIFT) & LZX_QUEUE64_OFFSET_MASK;
+	queue->R[0] = queue->R[1] = queue->R[2] = 1;
 }
 
 /* Push a match offset onto the front (most recently used) end of the queue.  */
-static inline struct lzx_lru_queue
-lzx_lru_queue_push(struct lzx_lru_queue queue, u32 offset)
+static inline void
+lzx_lru_queue_push(struct lzx_lru_queue *queue, u32 offset)
 {
-	return (struct lzx_lru_queue) {
-		.R = (queue.R << LZX_QUEUE64_OFFSET_SHIFT) | offset,
-	};
-}
-
-/* Pop a match offset off the front (most recently used) end of the queue.  */
-static inline u32
-lzx_lru_queue_pop(struct lzx_lru_queue *queue_p)
-{
-	u32 offset = queue_p->R & LZX_QUEUE64_OFFSET_MASK;
-	queue_p->R >>= LZX_QUEUE64_OFFSET_SHIFT;
-	return offset;
+	queue->R[2] = queue->R[1];
+	queue->R[1] = queue->R[0];
+	queue->R[0] = offset;
 }
 
 /* Swap a match offset to the front of the queue.  */
-static inline struct lzx_lru_queue
-lzx_lru_queue_swap(struct lzx_lru_queue queue, unsigned idx)
+static inline void
+lzx_lru_queue_swap(struct lzx_lru_queue *queue, unsigned idx)
 {
-	if (idx == 0)
-		return queue;
-
-	if (idx == 1)
-		return (struct lzx_lru_queue) {
-			.R = (lzx_lru_queue_R1(queue) << LZX_QUEUE64_R0_SHIFT) |
-			     (lzx_lru_queue_R0(queue) << LZX_QUEUE64_R1_SHIFT) |
-			     (queue.R & LZX_QUEUE64_R2_MASK),
-		};
-
-	return (struct lzx_lru_queue) {
-		.R = (lzx_lru_queue_R2(queue) << LZX_QUEUE64_R0_SHIFT) |
-		     (queue.R & LZX_QUEUE64_R1_MASK) |
-		     (lzx_lru_queue_R0(queue) << LZX_QUEUE64_R2_SHIFT),
-	};
+	swap(queue->R[0], queue->R[idx]);
 }
 
 /* The main LZX compressor structure  */
@@ -1370,7 +1327,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 static unsigned
 lzx_find_longest_repeat_offset_match(const u8 * const in_next,
 				     const u32 bytes_remaining,
-				     struct lzx_lru_queue queue,
+				     const struct lzx_lru_queue *queue,
 				     unsigned *rep_max_idx_ret)
 {
 	BUILD_BUG_ON(LZX_NUM_RECENT_OFFSETS != 3);
@@ -1383,14 +1340,14 @@ lzx_find_longest_repeat_offset_match(const u8 * const in_next,
 	unsigned rep_max_idx;
 	unsigned rep_len;
 
-	matchptr = in_next - lzx_lru_queue_pop(&queue);
+	matchptr = in_next - queue->R[0];
 	if (load_u16_unaligned(matchptr) == next_2_bytes)
 		rep_max_len = lz_extend(in_next, matchptr, 2, max_len);
 	else
 		rep_max_len = 0;
 	rep_max_idx = 0;
 
-	matchptr = in_next - lzx_lru_queue_pop(&queue);
+	matchptr = in_next - queue->R[1];
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1399,7 +1356,7 @@ lzx_find_longest_repeat_offset_match(const u8 * const in_next,
 		}
 	}
 
-	matchptr = in_next - lzx_lru_queue_pop(&queue);
+	matchptr = in_next - queue->R[2];
 	if (load_u16_unaligned(matchptr) == next_2_bytes) {
 		rep_len = lz_extend(in_next, matchptr, 2, max_len);
 		if (rep_len > rep_max_len) {
@@ -1497,7 +1454,7 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			unsigned rep_max_len;
 			unsigned rep_max_idx;
 
-			if (cache_ptr[num_matches-1].offset == lzx_lru_queue_R0(QUEUE(in_next))) {
+			if (cache_ptr[num_matches-1].offset == QUEUE(in_next).R[0]) {
 				lzx_consider_repeat_offset_match(c, cur_node,
 								 cache_ptr[num_matches-1].length, 0);
 			} else {
@@ -1520,7 +1477,7 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 				rep_max_len =
 					lzx_find_longest_repeat_offset_match(in_next,
 									     block_end - in_next,
-									     QUEUE(in_next),
+									     &QUEUE(in_next),
 									     &rep_max_idx);
 				/* If we found a repeat offset match, consider coding it.  */
 				if (rep_max_len) {
@@ -1563,16 +1520,19 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			/* Match: queue update is needed.  */
 			len = cur_node->item & OPTIMUM_LEN_MASK;
 			offset_data = cur_node->item >> OPTIMUM_OFFSET_SHIFT;
+
+			struct lzx_lru_queue *new_queue = &QUEUE(in_next);
+			struct lzx_lru_queue *old_queue = &QUEUE(in_next - len);
+
 			if (offset_data >= LZX_NUM_RECENT_OFFSETS) {
 				/* Explicit offset match: offset is inserted at front  */
-				QUEUE(in_next) =
-					lzx_lru_queue_push(QUEUE(in_next - len),
-							   offset_data - LZX_OFFSET_OFFSET);
+				new_queue->R[0] = offset_data - LZX_OFFSET_OFFSET;
+				new_queue->R[1] = old_queue->R[0];
+				new_queue->R[2] = old_queue->R[1];
 			} else {
 				/* Repeat offset match: offset is swapped to front  */
-				QUEUE(in_next) =
-					lzx_lru_queue_swap(QUEUE(in_next - len),
-							   offset_data);
+				*new_queue = *old_queue;
+				swap(new_queue->R[0], new_queue->R[offset_data]);
 			}
 		}
 	} while (cur_node != end_node);
@@ -1895,9 +1855,9 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 			if (cur_len < 3 ||
 			    (cur_len == 3 &&
 			     cur_offset >= 8192 - LZX_OFFSET_OFFSET &&
-			     cur_offset != lzx_lru_queue_R0(queue) &&
-			     cur_offset != lzx_lru_queue_R1(queue) &&
-			     cur_offset != lzx_lru_queue_R2(queue)))
+			     cur_offset != queue.R[0] &&
+			     cur_offset != queue.R[1] &&
+			     cur_offset != queue.R[2]))
 			{
 				/* There was no match found, or the only match found
 				 * was a distant length 3 match.  Output a literal.  */
@@ -1906,7 +1866,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 				continue;
 			}
 
-			if (cur_offset == lzx_lru_queue_R0(queue)) {
+			if (cur_offset == queue.R[0]) {
 				in_next++;
 				cur_offset_data = 0;
 				skip_len = cur_len - 1;
@@ -1919,7 +1879,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 			/* Consider a repeat offset match  */
 			rep_max_len = lzx_find_longest_repeat_offset_match(in_next,
 									   in_end - in_next,
-									   queue,
+									   &queue,
 									   &rep_max_idx);
 			in_next++;
 
@@ -1970,7 +1930,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 
 			rep_max_len = lzx_find_longest_repeat_offset_match(in_next,
 									   in_end - in_next,
-									   queue,
+									   &queue,
 									   &rep_max_idx);
 			in_next++;
 
@@ -2010,12 +1970,12 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 				lzx_declare_repeat_offset_match(c, cur_len,
 								cur_offset_data,
 								&next_chosen_item);
-				queue = lzx_lru_queue_swap(queue, cur_offset_data);
+				lzx_lru_queue_swap(&queue, cur_offset_data);
 			} else {
 				lzx_declare_explicit_offset_match(c, cur_len,
 								  cur_offset_data - LZX_OFFSET_OFFSET,
 								  &next_chosen_item);
-				queue = lzx_lru_queue_push(queue, cur_offset_data - LZX_OFFSET_OFFSET);
+				lzx_lru_queue_push(&queue, cur_offset_data - LZX_OFFSET_OFFSET);
 			}
 
 			hc_matchfinder_skip_positions(&c->hc_mf,
