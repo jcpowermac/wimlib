@@ -82,7 +82,7 @@
  * virtually the time, all matches found in a given block can fit in the match
  * cache.  However, fallback behavior on cache overflow is still required.
  */
-#define LZX_CACHE_PER_POS	8
+#define LZX_CACHE_PER_POS	6
 
 #define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
 
