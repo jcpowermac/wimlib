@@ -1910,7 +1910,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 				in_next++;
 				cur_offset_data = 0;
 				skip_len = cur_len - 1;
-				goto output_cur_match;
+				goto choose_cur_match;
 			}
 
 			cur_offset_data = cur_offset + LZX_OFFSET_OFFSET;
@@ -1930,7 +1930,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 				cur_len = rep_max_len;
 				cur_offset_data = rep_max_idx;
 				skip_len = rep_max_len - 1;
-				goto output_cur_match;
+				goto choose_cur_match;
 			}
 
 		have_cur_match:
@@ -1940,7 +1940,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 			/* If we have a very long match, choose it immediately.  */
 			if (cur_len >= nice_len) {
 				skip_len = cur_len - 1;
-				goto output_cur_match;
+				goto choose_cur_match;
 			}
 
 			/* See if there's a better match at the next position.  */
@@ -1962,7 +1962,7 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 			if (next_len <= cur_len - 2) {
 				in_next++;
 				skip_len = cur_len - 2;
-				goto output_cur_match;
+				goto choose_cur_match;
 			}
 
 			next_offset_data = next_offset + LZX_OFFSET_OFFSET;
@@ -1980,35 +1980,32 @@ lzx_compress_lazy(struct lzx_compressor *c, struct lzx_output_bitstream *os)
 			{
 
 				if (rep_score > cur_score) {
-					/* Next match is better, and it's a
+					/* The next match is better, and it's a
 					 * repeat offset match.  */
-					lzx_declare_literal(c, *(in_next - 2), &next_chosen_item);
+					lzx_declare_literal(c, *(in_next - 2),
+							    &next_chosen_item);
 					cur_len = rep_max_len;
 					cur_offset_data = rep_max_idx;
 					skip_len = cur_len - 1;
-					goto output_cur_match;
-				} else {
-					/* Next match is a repeat offset matche,
-					 * but it is *not* better.  */
-					skip_len = cur_len - 2;
-					goto output_cur_match;
+					goto choose_cur_match;
 				}
 			} else {
 				if (next_score > cur_score) {
-					/* The next match is better.  */
-					lzx_declare_literal(c, *(in_next - 2), &next_chosen_item);
+					/* The next match is better, and it's an
+					 * explicit offset match.  */
+					lzx_declare_literal(c, *(in_next - 2),
+							    &next_chosen_item);
 					cur_len = next_len;
 					cur_offset_data = next_offset_data;
 					cur_score = next_score;
 					goto have_cur_match;
-				} else {
-					/* The original match was better.  */
-					skip_len = cur_len - 2;
-					goto output_cur_match;
 				}
 			}
 
-		output_cur_match:
+			/* The original match was better.  */
+			skip_len = cur_len - 2;
+
+		choose_cur_match:
 			if (cur_offset_data < LZX_NUM_RECENT_OFFSETS) {
 				lzx_declare_repeat_offset_match(c, cur_len,
 								cur_offset_data,
