@@ -1161,7 +1161,7 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 	u32 base_cost = cur_node->cost;
 	do {
 		u32 cost = base_cost + c->costs.rep_costs[rep_idx][len - 2];
-		if (cost < (cur_node + len)->cost) {
+		if (cost <= (cur_node + len)->cost) {
 			(cur_node + len)->item =
 				(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
 			(cur_node + len)->cost = cost;
