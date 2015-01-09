@@ -2113,7 +2113,7 @@ lzx_create_compressor(size_t max_bufsize, unsigned compression_level,
 
 		/* Scale nice_match_length and max_search_depth with the
 		 * compression level.  */
-		c->max_search_depth = (50 * compression_level) / 50;
+		c->max_search_depth = (24 * compression_level) / 50;
 		c->nice_match_length = min((32 * compression_level) / 50,
 					   LZX_MAX_MATCH_LEN);
 
