@@ -1452,6 +1452,9 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			if (cache_ptr[num_matches-1].offset == lzx_lru_queue_R0(QUEUE(in_next))) {
 				lzx_consider_repeat_offset_match(c, cur_node,
 								 cache_ptr[num_matches-1].length, 0);
+			} else if (cache_ptr[num_matches-1].offset == lzx_lru_queue_R1(QUEUE(in_next))) {
+				lzx_consider_repeat_offset_match(c, cur_node,
+								 cache_ptr[num_matches-1].length, 1);
 			} else {
 
 				/*
