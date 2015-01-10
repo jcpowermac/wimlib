@@ -1106,94 +1106,6 @@ lzx_tally_item_list(struct lzx_compressor *c, struct lzx_optimum_node *cur_node)
 	} while (cur_node != c->optimum_nodes);
 }
 
-static inline void
-lzx_consider_match(struct lzx_compressor *c,
-		   struct lzx_optimum_node *cur_node,
-		   unsigned offset_slot, u32 offset_data,
-		   unsigned min_len, unsigned max_len,
-		   bool prefer_this_if_tied)
-{
-	unsigned len = min_len;
-	do {
-		u32 cost = cur_node->cost +
-			   c->costs.cost[offset_slot][len - LZX_MIN_MATCH_LEN];
-		if ((prefer_this_if_tied && cost <= (cur_node + len)->cost) ||
-		    (!prefer_this_if_tied && cost < (cur_node + len)->cost))
-		{
-			(cur_node + len)->cost = cost;
-			(cur_node + len)->item =
-				(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-		}
-	} while (++len <= max_len);
-}
-
-/*
- * Consider coding the match at repeat offset index @rep_idx.  Consider each
- * length from the minimum (2) to the full match length (@rep_len).
- */
-static inline void
-lzx_consider_repeat_offset_match(struct lzx_compressor *c,
-				 struct lzx_optimum_node *cur_node,
-				 unsigned rep_len, unsigned rep_idx)
-{
-	lzx_consider_match(c, cur_node, rep_idx, rep_idx,
-			   LZX_MIN_MATCH_LEN, rep_len, true);
-}
-
-static inline void
-lzx_do_consider_explicit_offset_matches(struct lzx_compressor *c,
-					struct lzx_optimum_node *cur_node,
-					const struct lz_match matches[],
-					unsigned num_matches,
-					bool fast_offset)
-{
-	/*
-	 * Note: we just consider the number of extra offset bits and don't
-	 * account for the aligned offset code.  Usually this has very little
-	 * effect on the compression ratio.
-	 */
-	unsigned i = 0;
-	unsigned len = LZX_MIN_MATCH_LEN;
-	do {
-		u32 offset = matches[i].offset;
-		u32 offset_data = offset + LZX_OFFSET_OFFSET;
-		unsigned offset_slot = (fast_offset) ?
-				lzx_get_offset_slot_fast(c, offset) :
-				lzx_get_offset_slot_raw(offset_data);
-		lzx_consider_match(c, cur_node, offset_slot, offset_data,
-				   len, matches[i].length, false);
-		len = matches[i].length + 1;
-	} while (++i != num_matches);
-}
-
-/*
- * Consider coding each match in @matches as an explicit offset match.
- *
- * @matches must be sorted by strictly increasing length and strictly increasing
- * offset.  This is guaranteed by the matchfinder.
- *
- * We consider each length from the minimum (2) to the longest
- * (matches[num_matches - 1].length).  For each length, we consider only the
- * smallest offset for which that length is available.  Although this is not
- * guaranteed to be optimal due to the possibility of a larger offset costing
- * less than a smaller offset to code, this is a very useful heuristic.
- */
-static inline void
-lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
-				     struct lzx_optimum_node *cur_node,
-				     const struct lz_match matches[],
-				     unsigned num_matches)
-{
-
-	if (matches[num_matches - 1].offset < LZX_NUM_FAST_OFFSETS) {
-		lzx_do_consider_explicit_offset_matches(c, cur_node, matches,
-							num_matches, true);
-	} else {
-		lzx_do_consider_explicit_offset_matches(c, cur_node, matches,
-							num_matches, false);
-	}
-}
-
 /*
  * Given a pointer to the current byte sequence and the current list of recent
  * match offsets, find the longest repeat offset match.
@@ -1347,28 +1259,10 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			unsigned next_len = LZX_MIN_MATCH_LEN;
 			unsigned max_len = min(block_end - in_next, LZX_MAX_MATCH_LEN);
 			struct lzx_lru_queue queue = QUEUE(in_next);
+			const u8 *matchptr;
 
 			for (unsigned rep_idx = 0; rep_idx < LZX_NUM_RECENT_OFFSETS; rep_idx++) {
-				u32 R = lzx_lru_queue_pop(&queue);
-				struct lz_match *m;
-				const u8 *matchptr;
-
-				m = cache_ptr;
-				do {
-					if (m->offset == R) {
-						lzx_consider_match(c, cur_node,
-								   rep_idx, rep_idx,
-								   next_len, m->length,
-								   true);
-						next_len = m->length + 1;
-						cache_ptr = m + 1;
-						if (cache_ptr == end_matches)
-							goto done_matches;
-						goto this_rep_done;
-					}
-				} while (++m != end_matches);
-
-				matchptr = in_next - R;
+				matchptr = in_next - lzx_lru_queue_pop(&queue);
 				if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
 					goto this_rep_done;
 				if (matchptr[next_len - 1] != in_next[next_len - 1])
@@ -1385,29 +1279,34 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 						(cur_node + next_len)->item =
 							(rep_idx << OPTIMUM_OFFSET_SHIFT) | next_len;
 					}
-					if (++next_len > max_len) {
+					if (unlikely(++next_len > max_len)) {
 						cache_ptr = end_matches;
 						goto done_matches;
 					}
 				} while (in_next[next_len - 1] == matchptr[next_len - 1]);
 
-				while (next_len > cache_ptr->length)
-					if (++cache_ptr == end_matches)
-						goto done_matches;
 			this_rep_done:
 				;
 			}
 
+			while (next_len > cache_ptr->length)
+				if (++cache_ptr == end_matches)
+					goto done_matches;
 			do {
-				unsigned max_len = cache_ptr->length;
 				u32 offset = cache_ptr->offset;
 				u32 offset_data = offset + LZX_OFFSET_OFFSET;
 				unsigned offset_slot = (offset < LZX_NUM_FAST_OFFSETS) ?
 						lzx_get_offset_slot_fast(c, offset) :
 						lzx_get_offset_slot_raw(offset_data);
-				lzx_consider_match(c, cur_node, offset_slot, offset_data,
-						   next_len, max_len, true);
-				next_len = max_len + 1;
+				do {
+					u32 cost = cur_node->cost +
+						   c->costs.cost[offset_slot][next_len - LZX_MIN_MATCH_LEN];
+					if (cost < (cur_node + next_len)->cost) {
+						(cur_node + next_len)->cost = cost;
+						(cur_node + next_len)->item =
+							(offset_data << OPTIMUM_OFFSET_SHIFT) | next_len;
+					}
+				} while (++next_len <= cache_ptr->length);
 			} while (++cache_ptr != end_matches);
 		}
 
