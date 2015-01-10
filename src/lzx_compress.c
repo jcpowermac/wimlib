@@ -1227,28 +1227,27 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 		u32 cost;
 
 		/*
-		 * The matches for the block were already saved in 'match_cache'
-		 * so that we don't have to run the uncompressed data through
-		 * the matchfinder on every optimization pass.
+		 * A selection of matches for the block was already saved in
+		 * memory so that we don't have to run the uncompressed data
+		 * through the matchfinder on every optimization pass.  However,
+		 * we still search for repeat offset matches during each
+		 * optimization pass because we cannot predict the state of the
+		 * recent offsets queue.  But as a heuristic, we don't bother
+		 * searching for repeat offset matches if the general-purpose
+		 * matchfinder failed to find any matches.
 		 *
-		 * However, we still search for repeat offset matches during
-		 * each optimization pass because we cannot, in general, predict
-		 * the state of the recent offsets queue.
-		 *
-		 * At the same time, we use various heuristics to save time with
-		 * the repeat offset matches:
-		 *
-		 * - If the general-purpose matchfinder failed to find any
-		 *   matches at this position, then don't bother searching for
-		 *   repeat offset matches.
-		 *
-		 * - If the longest match found by the general-purpose
-		 *   matchfinder has the most recently used offset (R0), then
-		 *   just consider that match as a repeat offset match and don't
-		 *   consider any other matches.
-		 *
-		 * - If there is more than one possible repeat offset match,
-		 *   then only consider the longest one.
+		 * Note that a match of length n at some offset implies there is
+		 * also a match of length l for LZX_MIN_MATCH_LEN <= l <= n at
+		 * that same offset.  In other words, we don't necessarily need
+		 * to use the full length of a match.  The key heuristic that
+		 * saves a significicant amount of time is that for each
+		 * distinct length, we only consider the smallest offset for
+		 * which that length is available.  This heuristic also applies
+		 * to repeat offsets, which we order specially: R0 < R1 < R2 <
+		 * any explicit offset.  Of course, this heuristic may be
+		 * produce suboptimal results because offset slots in LZX are
+		 * subject to entropy encoding, but in practice this is a useful
+		 * heuristic.
 		 */
 
 		num_matches = cache_ptr->length;
@@ -1264,6 +1263,7 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			matchptr = in_next - lzx_lru_queue_R0(QUEUE(in_next));
 			if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
 				goto R0_done;
+			BUILD_BUG_ON(LZX_MIN_MATCH_LEN != 2);
 			do {
 				u32 cost = cur_node->cost +
 					   c->costs.cost[0][
