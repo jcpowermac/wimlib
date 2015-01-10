@@ -1258,11 +1258,10 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			struct lz_match *end_matches = cache_ptr + num_matches;
 			unsigned next_len = LZX_MIN_MATCH_LEN;
 			unsigned max_len = min(block_end - in_next, LZX_MAX_MATCH_LEN);
-			struct lzx_lru_queue queue = QUEUE(in_next);
 			const u8 *matchptr;
 
 			/* Consider R0 match  */
-			matchptr = in_next - lzx_lru_queue_pop(&queue);
+			matchptr = in_next - lzx_lru_queue_R0(QUEUE(in_next));
 			if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
 				goto R0_done;
 			do {
@@ -1283,7 +1282,7 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 		R0_done:
 
 			/* Consider R1 match  */
-			matchptr = in_next - lzx_lru_queue_pop(&queue);
+			matchptr = in_next - lzx_lru_queue_R1(QUEUE(in_next));
 			if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
 				goto R1_done;
 			if (matchptr[next_len - 1] != in_next[next_len - 1])
@@ -1309,7 +1308,7 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 		R1_done:
 
 			/* Consider R2 match  */
-			matchptr = in_next - lzx_lru_queue_pop(&queue);
+			matchptr = in_next - lzx_lru_queue_R2(QUEUE(in_next));
 			if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
 				goto R2_done;
 			if (matchptr[next_len - 1] != in_next[next_len - 1])
@@ -1549,8 +1548,7 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 
 	bt_matchfinder_init(&c->bt_mf);
 	matchfinder_init(c->hash2_tab, LZX_HASH2_LENGTH);
-	if (in_end - in_next >= 3)
-		next_hash = bt_matchfinder_hash_3_bytes(in_next);
+	next_hash = bt_matchfinder_hash_3_bytes(in_next);
 	lzx_lru_queue_init(&queue);
 
 	do {
