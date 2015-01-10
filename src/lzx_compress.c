@@ -1261,37 +1261,84 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 			struct lzx_lru_queue queue = QUEUE(in_next);
 			const u8 *matchptr;
 
-			for (unsigned rep_idx = 0; rep_idx < LZX_NUM_RECENT_OFFSETS; rep_idx++) {
-				matchptr = in_next - lzx_lru_queue_pop(&queue);
-				if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
-					goto this_rep_done;
-				if (matchptr[next_len - 1] != in_next[next_len - 1])
-					goto this_rep_done;
-				for (unsigned len = 2; len < next_len - 1; len++)
-					if (matchptr[len] != in_next[len])
-						goto this_rep_done;
-				do {
-					u32 cost = cur_node->cost +
-						   c->costs.cost[rep_idx][
-						   		next_len - LZX_MIN_MATCH_LEN];
-					if (cost <= (cur_node + next_len)->cost) {
-						(cur_node + next_len)->cost = cost;
-						(cur_node + next_len)->item =
-							(rep_idx << OPTIMUM_OFFSET_SHIFT) | next_len;
-					}
-					if (unlikely(++next_len > max_len)) {
-						cache_ptr = end_matches;
-						goto done_matches;
-					}
-				} while (in_next[next_len - 1] == matchptr[next_len - 1]);
+			/* Consider R0 match  */
+			matchptr = in_next - lzx_lru_queue_pop(&queue);
+			if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
+				goto R0_done;
+			do {
+				u32 cost = cur_node->cost +
+					   c->costs.cost[0][
+							next_len - LZX_MIN_MATCH_LEN];
+				if (cost <= (cur_node + next_len)->cost) {
+					(cur_node + next_len)->cost = cost;
+					(cur_node + next_len)->item =
+						(0 << OPTIMUM_OFFSET_SHIFT) | next_len;
+				}
+				if (unlikely(++next_len > max_len)) {
+					cache_ptr = end_matches;
+					goto done_matches;
+				}
+			} while (in_next[next_len - 1] == matchptr[next_len - 1]);
 
-			this_rep_done:
-				;
-			}
+		R0_done:
+
+			/* Consider R1 match  */
+			matchptr = in_next - lzx_lru_queue_pop(&queue);
+			if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
+				goto R1_done;
+			if (matchptr[next_len - 1] != in_next[next_len - 1])
+				goto R1_done;
+			for (unsigned len = 2; len < next_len - 1; len++)
+				if (matchptr[len] != in_next[len])
+					goto R1_done;
+			do {
+				u32 cost = cur_node->cost +
+					   c->costs.cost[1][
+							next_len - LZX_MIN_MATCH_LEN];
+				if (cost <= (cur_node + next_len)->cost) {
+					(cur_node + next_len)->cost = cost;
+					(cur_node + next_len)->item =
+						(1 << OPTIMUM_OFFSET_SHIFT) | next_len;
+				}
+				if (unlikely(++next_len > max_len)) {
+					cache_ptr = end_matches;
+					goto done_matches;
+				}
+			} while (in_next[next_len - 1] == matchptr[next_len - 1]);
+
+		R1_done:
+
+			/* Consider R2 match  */
+			matchptr = in_next - lzx_lru_queue_pop(&queue);
+			if (load_u16_unaligned(matchptr) != load_u16_unaligned(in_next))
+				goto R2_done;
+			if (matchptr[next_len - 1] != in_next[next_len - 1])
+				goto R2_done;
+			for (unsigned len = 2; len < next_len - 1; len++)
+				if (matchptr[len] != in_next[len])
+					goto R2_done;
+			do {
+				u32 cost = cur_node->cost +
+					   c->costs.cost[2][
+							next_len - LZX_MIN_MATCH_LEN];
+				if (cost <= (cur_node + next_len)->cost) {
+					(cur_node + next_len)->cost = cost;
+					(cur_node + next_len)->item =
+						(2 << OPTIMUM_OFFSET_SHIFT) | next_len;
+				}
+				if (unlikely(++next_len > max_len)) {
+					cache_ptr = end_matches;
+					goto done_matches;
+				}
+			} while (in_next[next_len - 1] == matchptr[next_len - 1]);
+
+		R2_done:
 
 			while (next_len > cache_ptr->length)
 				if (++cache_ptr == end_matches)
 					goto done_matches;
+
+			/* Consider explicit offset matches  */
 			do {
 				u32 offset = cache_ptr->offset;
 				u32 offset_data = offset + LZX_OFFSET_OFFSET;
