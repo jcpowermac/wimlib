@@ -2000,7 +2000,7 @@ lzx_compress(const void *in, size_t in_nbytes,
 	struct lzx_output_bitstream os;
 
 	/* Don't bother trying to compress very small inputs.  */
-	if (out_nbytes_avail < 100)
+	if (in_nbytes < 100)
 		return 0;
 
 	/* Copy the input data into the internal buffer and preprocess it.  */

@@ -905,8 +905,7 @@ xpress_find_matches(struct xpress_compressor * restrict c,
 	u32 next_hash;
 
 	bt_matchfinder_init(&c->bt_mf);
-	if (in_end - in_next >= 3)
-		next_hash = bt_matchfinder_hash_3_bytes(in_next);
+	next_hash = bt_matchfinder_hash_3_bytes(in_next);
 
 	do {
 		struct lz_match *matches;
@@ -1128,6 +1127,10 @@ xpress_compress(const void *in, size_t in_nbytes,
 		void *out, size_t out_nbytes_avail, void *_c)
 {
 	struct xpress_compressor *c = _c;
+
+	/* Don't bother trying to compress very small inputs.  */
+	if (in_nbytes < 25)
+		return 0;
 
 	if (out_nbytes_avail <= XPRESS_NUM_SYMBOLS / 2 + 4)
 		return 0;
