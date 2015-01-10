@@ -85,7 +85,8 @@
 
 #define LZX_CACHE_LEN		(LZX_DIV_BLOCK_SIZE * (LZX_CACHE_PER_POS + 1))
 
-#define LZX_MAX_MATCHES_PER_POS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
+#define LZX_NUM_POSSIBLE_LENGTHS	(LZX_MAX_MATCH_LEN - LZX_MIN_MATCH_LEN + 1)
+#define LZX_MAX_MATCHES_PER_POS		LZX_NUM_POSSIBLE_LENGTHS
 
 /*
  * LZX_COST_SHIFT is a scaling factor that makes it possible to consider
@@ -148,15 +149,18 @@ struct lzx_lens {
 	u8 aligned[LZX_ALIGNEDCODE_NUM_SYMBOLS];
 };
 
-/* Estimated cost to output each symbol in the LZX Huffman codes.  */
+/* Cost model for near-optimal parsing  */
 struct lzx_costs {
-	u32 main[LZX_MAINCODE_MAX_NUM_SYMBOLS];
-	u32 len[LZX_LENCODE_NUM_SYMBOLS];
-	u32 aligned[LZX_ALIGNEDCODE_NUM_SYMBOLS];
 
-	/* 'rep_costs' is computed from 'main' and 'len'.  */
-	u32 rep_costs[LZX_NUM_RECENT_OFFSETS][LZX_NUM_PRIMARY_LENS +
-					      LZX_LENCODE_NUM_SYMBOLS];
+	/* 'cost[offset_slot][len - LZX_MIN_MATCH_LEN]' is the cost for a match
+	 * with offset belonging to 'offset_slot' and having length' len'.  */
+	u32 cost[LZX_MAX_OFFSET_SLOTS][LZX_NUM_POSSIBLE_LENGTHS];
+
+	/* Cost for each symbol in the main code  */
+	u32 main[LZX_MAINCODE_MAX_NUM_SYMBOLS];
+
+	/* Cost for each symbol in the length code  */
+	u32 len[LZX_LENCODE_NUM_SYMBOLS];
 };
 
 /* Codewords and lengths for the LZX Huffman codes.  */
@@ -1110,129 +1114,16 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 				 struct lzx_optimum_node *cur_node,
 				 unsigned rep_len, unsigned rep_idx)
 {
-	unsigned len = 2;
-	u32 base_cost = cur_node->cost;
+	unsigned len = LZX_MIN_MATCH_LEN;
 	do {
-		u32 cost = base_cost + c->costs.rep_costs[rep_idx][len - 2];
+		u32 cost = cur_node->cost +
+			   c->costs.cost[rep_idx][len - LZX_MIN_MATCH_LEN];
 		if (cost <= (cur_node + len)->cost) {
+			(cur_node + len)->cost = cost;
 			(cur_node + len)->item =
 				(rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
-			(cur_node + len)->cost = cost;
 		}
 	} while (++len <= rep_len);
-}
-
-static inline void
-lzx_consider_explicit_offset_matches_fast(struct lzx_compressor *c,
-					  struct lzx_optimum_node *cur_node,
-					  const struct lz_match matches[],
-					  unsigned num_matches)
-{
-	unsigned i;
-	unsigned len;
-	unsigned offset_slot;
-	u32 base_cost;
-	u32 cost;
-	u32 offset_data;
-
-	/*
-	 * Offset is small; the offset slot can be looked up directly in
-	 * c->offset_slot_fast.
-	 *
-	 * Additional optimizations:
-	 *
-	 * - Since the offset is small, it falls in the exponential part of the
-	 *   offset slot bases and the number of extra offset bits can be
-	 *   calculated directly as (offset_slot >> 1) - 1.
-	 *
-	 * - Just consider the number of extra offset bits; don't account for
-	 *   the aligned offset code.  Usually this has very little effect on
-	 *   the compression ratio.
-	 *
-	 * - Start out in a loop optimized for small lengths.  When the length
-	 *   becomes high enough that a length symbol will be needed, jump into
-	 *   a loop optimized for big lengths.
-	 */
-
-	LZX_ASSERT(offset_slot <= 37); /* for extra bits formula  */
-
-	len = 2;
-	i = 0;
-	do {
-		offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
-		base_cost = cur_node->cost +
-			    (((offset_slot >> 1) - 1) << LZX_COST_SHIFT);
-		offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
-		do {
-			if (len >= LZX_MIN_MATCH_LEN + LZX_NUM_PRIMARY_LENS)
-				goto biglen;
-			cost = base_cost +
-			       c->costs.main[LZX_NUM_CHARS + ((offset_slot << 3) |
-					     (len - LZX_MIN_MATCH_LEN))];
-			if (cost < (cur_node + len)->cost) {
-				(cur_node + len)->cost = cost;
-				(cur_node + len)->item =
-					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-			}
-		} while (++len <= matches[i].length);
-	} while (++i != num_matches);
-
-	return;
-
-	do {
-		offset_slot = lzx_get_offset_slot_fast(c, matches[i].offset);
-biglen:
-		base_cost = cur_node->cost +
-			    (((offset_slot >> 1) - 1) << LZX_COST_SHIFT) +
-			    c->costs.main[LZX_NUM_CHARS + ((offset_slot << 3) |
-					   LZX_NUM_PRIMARY_LENS)];
-		offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
-		do {
-			cost = base_cost +
-			       c->costs.len[len - LZX_MIN_MATCH_LEN -
-					    LZX_NUM_PRIMARY_LENS];
-			if (cost < (cur_node + len)->cost) {
-				(cur_node + len)->cost = cost;
-				(cur_node + len)->item =
-					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-			}
-		} while (++len <= matches[i].length);
-	} while (++i != num_matches);
-}
-
-static inline void
-lzx_consider_explicit_offset_matches_slow(struct lzx_compressor *c,
-					  struct lzx_optimum_node *cur_node,
-					  const struct lz_match matches[],
-					  unsigned num_matches)
-{
-	unsigned len = 2;
-	unsigned i = 0;
-	do {
-		u32 offset_data = matches[i].offset + LZX_OFFSET_OFFSET;
-		unsigned offset_slot = lzx_get_offset_slot_raw(offset_data);
-		u32 base_cost = cur_node->cost +
-				(lzx_extra_offset_bits[offset_slot] << LZX_COST_SHIFT);
-		do {
-			u32 cost = base_cost;
-			unsigned len_header;
-			unsigned main_symbol;
-
-			if (len - LZX_MIN_MATCH_LEN < LZX_NUM_PRIMARY_LENS) {
-				len_header = len - LZX_MIN_MATCH_LEN;
-			} else {
-				len_header = LZX_NUM_PRIMARY_LENS;
-				cost += c->costs.len[len - LZX_MIN_MATCH_LEN - LZX_NUM_PRIMARY_LENS];
-			}
-			main_symbol = LZX_NUM_CHARS + ((offset_slot << 3) | len_header);
-			cost += c->costs.main[main_symbol];
-			if (cost < (cur_node + len)->cost) {
-				(cur_node + len)->cost = cost;
-				(cur_node + len)->item =
-					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-			}
-		} while (++len <= matches[i].length);
-	} while (++i != num_matches);
 }
 
 /*
@@ -1253,14 +1144,31 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 				     const struct lz_match matches[],
 				     unsigned num_matches)
 {
-	LZX_ASSERT(num_matches > 0);
+	/*
+	 * Note: we just consider the number of extra offset bits and don't
+	 * account for the aligned offset code.  Usually this has very little
+	 * effect on the compression ratio.
+	 */
 
-	if (matches[num_matches - 1].offset < LZX_NUM_FAST_OFFSETS)
-		lzx_consider_explicit_offset_matches_fast(c, cur_node,
-							  matches, num_matches);
-	else
-		lzx_consider_explicit_offset_matches_slow(c, cur_node,
-							  matches, num_matches);
+	unsigned len = LZX_MIN_MATCH_LEN;
+	unsigned i = 0;
+	do {
+		u32 offset = matches[i].offset;
+		u32 offset_data = offset + LZX_OFFSET_OFFSET;
+		unsigned offset_slot =
+			(offset < LZX_NUM_FAST_OFFSETS) ?
+				lzx_get_offset_slot_fast(c, offset) :
+				lzx_get_offset_slot_raw(offset_data);
+		do {
+			u32 cost = cur_node->cost +
+				   c->costs.cost[offset_slot][len - LZX_MIN_MATCH_LEN];
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->cost = cost;
+				(cur_node + len)->item =
+					(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
+			}
+		} while (++len <= matches[i].length);
+	} while (++i != num_matches);
 }
 
 /*
@@ -1404,8 +1312,8 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 		 *   just consider that match as a repeat offset match and don't
 		 *   consider any other matches.
 		 *
-		 * - If there are multiple possible repeat offset matches (e.g.
-		 *   both R0 and R2 matches), only consider the longest one.
+		 * - If there is more than one possible repeat offset match,
+		 *   then only consider the longest one.
 		 */
 
 		num_matches = cache_ptr->length;
@@ -1480,16 +1388,26 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 }
 
 static void
-lzx_set_rep_costs(struct lzx_costs *costs)
+lzx_set_costs(struct lzx_compressor *c)
 {
-	for (unsigned rep_idx = 0; rep_idx < LZX_NUM_RECENT_OFFSETS; rep_idx++) {
-		unsigned main_symbol = LZX_NUM_CHARS + (rep_idx << 3);
-		for (unsigned i = 0; i < 7; i++, main_symbol++)
-			costs->rep_costs[rep_idx][i] = costs->main[main_symbol];
-		BUILD_BUG_ON(7 + LZX_LENCODE_NUM_SYMBOLS != 256);
-		for (unsigned i = 7; i < 256; i++)
-			costs->rep_costs[rep_idx][i] = costs->main[main_symbol] +
-						       costs->len[i - 7];
+	unsigned num_offset_slots = (c->num_main_syms - LZX_NUM_CHARS) >> 3;
+	struct lzx_costs *costs = &c->costs;
+
+	for (unsigned offset_slot = 0; offset_slot < num_offset_slots; offset_slot++) {
+
+		u32 extra_cost = (u32)lzx_extra_offset_bits[offset_slot] << LZX_COST_SHIFT;
+		unsigned main_symbol = LZX_NUM_CHARS + (offset_slot << 3);
+		unsigned i;
+
+		for (i = 0; i < LZX_NUM_PRIMARY_LENS; i++)
+			costs->cost[offset_slot][i] = costs->main[main_symbol++] +
+						      extra_cost;
+
+		extra_cost += costs->main[main_symbol];
+
+		for (; i < LZX_NUM_POSSIBLE_LENGTHS; i++)
+			costs->cost[offset_slot][i] = costs->len[i - LZX_NUM_PRIMARY_LENS] +
+						      extra_cost;
 	}
 }
 
@@ -1536,10 +1454,7 @@ lzx_set_default_costs(struct lzx_compressor *c, const u8 *block, u32 block_size)
 	for (i = 0; i < LZX_LENCODE_NUM_SYMBOLS; i++)
 		c->costs.len[i] = 103 + (i / 4);
 
-	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
-		c->costs.aligned[i] = 48;
-
-	lzx_set_rep_costs(&c->costs);
+	lzx_set_costs(c);
 }
 
 /* Update the current cost model to reflect the computed Huffman codes.  */
@@ -1557,11 +1472,7 @@ lzx_update_costs(struct lzx_compressor *c)
 		c->costs.len[i] = (lens->len[i] ? lens->len[i] : 15)
 				<< LZX_COST_SHIFT;
 
-	for (i = 0; i < LZX_ALIGNEDCODE_NUM_SYMBOLS; i++)
-		c->costs.aligned[i] = (lens->aligned[i] ? lens->aligned[i] : 7)
-				<< LZX_COST_SHIFT;
-
-	lzx_set_rep_costs(&c->costs);
+	lzx_set_costs(c);
 }
 
 static struct lzx_lru_queue
