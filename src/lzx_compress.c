@@ -1296,8 +1296,8 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 #define QUEUE(in) (queues[(uintptr_t)(in) % ARRAY_LEN(queues)])
 
 	/* Initially, the cost to reach each node is "infinity".  */
-	for (u32 i = 0; i <= block_size; i++)
-		c->optimum_nodes[i].cost = ~0;
+	memset(c->optimum_nodes, 0xFF,
+	       (block_size + 1) * sizeof(c->optimum_nodes[0]));
 
 	QUEUE(block_begin) = initial_queue;
 
