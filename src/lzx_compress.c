@@ -1126,23 +1126,12 @@ lzx_consider_repeat_offset_match(struct lzx_compressor *c,
 	} while (++len <= rep_len);
 }
 
-/*
- * Consider coding each match in @matches as an explicit offset match.
- *
- * @matches must be sorted by strictly increasing length and strictly increasing
- * offset.  This is guaranteed by the matchfinder.
- *
- * We consider each length from the minimum (2) to the longest
- * (matches[num_matches - 1].length).  For each length, we consider only the
- * smallest offset for which that length is available.  Although this is not
- * guaranteed to be optimal due to the possibility of a larger offset costing
- * less than a smaller offset to code, this is a very useful heuristic.
- */
-static void
-lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
-				     struct lzx_optimum_node *cur_node,
-				     const struct lz_match matches[],
-				     unsigned num_matches)
+static inline void
+lzx_do_consider_explicit_offset_matches(struct lzx_compressor *c,
+					struct lzx_optimum_node *cur_node,
+					const struct lz_match matches[],
+					unsigned num_matches,
+					bool fast_offset)
 {
 	/*
 	 * Note: we just consider the number of extra offset bits and don't
@@ -1155,8 +1144,7 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 	do {
 		u32 offset = matches[i].offset;
 		u32 offset_data = offset + LZX_OFFSET_OFFSET;
-		unsigned offset_slot =
-			(offset < LZX_NUM_FAST_OFFSETS) ?
+		unsigned offset_slot = (fast_offset) ?
 				lzx_get_offset_slot_fast(c, offset) :
 				lzx_get_offset_slot_raw(offset_data);
 		do {
@@ -1169,6 +1157,34 @@ lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
 			}
 		} while (++len <= matches[i].length);
 	} while (++i != num_matches);
+}
+
+/*
+ * Consider coding each match in @matches as an explicit offset match.
+ *
+ * @matches must be sorted by strictly increasing length and strictly increasing
+ * offset.  This is guaranteed by the matchfinder.
+ *
+ * We consider each length from the minimum (2) to the longest
+ * (matches[num_matches - 1].length).  For each length, we consider only the
+ * smallest offset for which that length is available.  Although this is not
+ * guaranteed to be optimal due to the possibility of a larger offset costing
+ * less than a smaller offset to code, this is a very useful heuristic.
+ */
+static inline void
+lzx_consider_explicit_offset_matches(struct lzx_compressor *c,
+				     struct lzx_optimum_node *cur_node,
+				     const struct lz_match matches[],
+				     unsigned num_matches)
+{
+
+	if (matches[num_matches - 1].offset < LZX_NUM_FAST_OFFSETS) {
+		lzx_do_consider_explicit_offset_matches(c, cur_node, matches,
+							num_matches, true);
+	} else {
+		lzx_do_consider_explicit_offset_matches(c, cur_node, matches,
+							num_matches, false);
+	}
 }
 
 /*
