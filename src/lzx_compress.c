@@ -121,6 +121,7 @@
 #define MATCHFINDER_MAX_WINDOW_ORDER	LZX_MAX_WINDOW_ORDER
 
 #include <assert.h>
+#include <math.h>
 #include <string.h>
 
 #include "wimlib/bt_matchfinder.h"
@@ -1401,7 +1402,7 @@ lzx_optim_pass(struct lzx_compressor * const restrict c,
 }
 
 static void
-lzx_set_costs(struct lzx_compressor *c)
+lzx_set_match_costs(struct lzx_compressor *c)
 {
 	unsigned num_offset_slots = (c->num_main_syms - LZX_NUM_CHARS) >> 3;
 	struct lzx_costs *costs = &c->costs;
@@ -1467,25 +1468,60 @@ lzx_set_default_costs(struct lzx_compressor *c, const u8 *block, u32 block_size)
 	for (i = 0; i < LZX_LENCODE_NUM_SYMBOLS; i++)
 		c->costs.len[i] = 103 + (i / 4);
 
-	lzx_set_costs(c);
+	lzx_set_match_costs(c);
+}
+
+static void
+lzx_update_sym_costs(const u32 * restrict freqs, u32 * restrict costs,
+		     unsigned num_syms, u32 unused_cost)
+{
+	unsigned sym;
+	u32 total_freq = 0;
+
+	for (sym = 0; sym < num_syms; sym++)
+		total_freq += freqs[sym];
+
+	if (total_freq == 0)
+		return;
+
+	// bits = -log2(probability)
+	//      = -log2(freq / total_freq)
+	//      = -(log2(freq) - log2(total_freq))
+	//      = log2(total_freq) - log2(freq)
+	//
+	// cost = 16 * bits
+	//      = 16 * (log2(total_freq) - log2(freq))
+
+	double log2_total_freq = log2(total_freq);
+	for (sym = 0; sym < num_syms; sym++) {
+		if (freqs[sym] == 0)
+			costs[sym] = unused_cost;
+		else
+			costs[sym] = 16.0 * (log2_total_freq - log2(freqs[sym]));
+	}
 }
 
 /* Update the current cost model to reflect the computed Huffman codes.  */
 static void
 lzx_update_costs(struct lzx_compressor *c)
 {
-	unsigned i;
+#if 1
+	lzx_update_sym_costs(c->freqs.main, c->costs.main,
+			     c->num_main_syms, 15 << LZX_COST_SHIFT);
+	lzx_update_sym_costs(c->freqs.len, c->costs.len,
+			     LZX_LENCODE_NUM_SYMBOLS, 15 << LZX_COST_SHIFT);
+#else
+	lzx_make_huffman_codes(c);
+
 	const struct lzx_lens *lens = &c->codes[c->codes_index].lens;
 
-	for (i = 0; i < c->num_main_syms; i++)
-		c->costs.main[i] = (lens->main[i] ? lens->main[i] : 15)
-				<< LZX_COST_SHIFT;
+	for (unsigned sym = 0; sym < c->num_main_syms; sym++)
+		c->costs.main[sym] = (lens->main[sym] ? lens->main[sym] : 15) << LZX_COST_SHIFT;
 
-	for (i = 0; i < LZX_LENCODE_NUM_SYMBOLS; i++)
-		c->costs.len[i] = (lens->len[i] ? lens->len[i] : 15)
-				<< LZX_COST_SHIFT;
-
-	lzx_set_costs(c);
+	for (unsigned sym = 0; sym < LZX_LENCODE_NUM_SYMBOLS; sym++)
+		c->costs.len[sym] = (lens->len[sym] ? lens->len[sym] : 15) << LZX_COST_SHIFT;
+#endif
+	lzx_set_match_costs(c);
 }
 
 static struct lzx_lru_queue
@@ -1509,7 +1545,6 @@ lzx_optimize_and_write_block(struct lzx_compressor *c,
 					   initial_queue);
 		if (num_passes_remaining > 1) {
 			lzx_tally_item_list(c, c->optimum_nodes + block_size);
-			lzx_make_huffman_codes(c);
 			lzx_update_costs(c);
 			lzx_reset_symbol_frequencies(c);
 		}
