@@ -6,7 +6,7 @@
 
 /*
  *
- * Copyright (C) 2012, 2013 Eric Biggers
+ * Copyright (C) 2012, 2013, 2015 Eric Biggers
  *
  * This file is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -75,7 +75,7 @@
 /* This value is chosen for fast decompression.  */
 #define XPRESS_TABLEBITS 12
 
-typedef unsigned int bitbuf_t;
+typedef u32 bitbuf_t;
 #define BITBUF_NBITS (8 * sizeof(bitbuf_t))
 
 #define ENSURE_BITS(n)							\
@@ -94,14 +94,13 @@ typedef unsigned int bitbuf_t;
 #define BITS(n)								\
 ({									\
 	bitbuf_t bits = 0;						\
-	if ((n) != 0)							\
+	if (n)								\
 		bits = bitbuf >> (BITBUF_NBITS - (n));			\
 	bits;								\
 })
 
 #define REMOVE_BITS(n)							\
 ({									\
-									\
  	bitbuf <<= (n);							\
 	bitsleft -= (n);						\
 })
