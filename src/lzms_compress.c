@@ -5,7 +5,7 @@
  */
 
 /*
- * Copyright (C) 2013, 2014 Eric Biggers
+ * Copyright (C) 2013, 2014, 2015 Eric Biggers
  *
  * This file is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -26,7 +26,6 @@
 #endif
 
 #include <limits.h>
-#include <pthread.h>
 #include <string.h>
 
 #include "wimlib/compress_common.h"
@@ -34,221 +33,170 @@
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
 #include "wimlib/lcpit_matchfinder.h"
-#include "wimlib/lz_repsearch.h"
+#include "wimlib/lz_extend.h"
 #include "wimlib/lzms_common.h"
 #include "wimlib/unaligned.h"
 #include "wimlib/util.h"
 
-/* Stucture used for writing raw bits as a series of 16-bit little endian coding
- * units.  This starts at the *end* of the compressed data buffer and proceeds
- * backwards.  */
+/*
+ * The values defined below are not intrinsic to the LZMS format itself --- they
+ * are specific to this compressor implementation.
+ */
+
+/*
+ * LZMS_MAX_FAST_LENGTH is the maximum match length for which the length slot
+ * can be looked up directly in the 'length_slot_fast' array.
+ *
+ * We also limit the 'nice_match_len' parameter to this value.  Consequently, if
+ * the longest match found is shorter than 'nice_match_len', then it must also
+ * be shorter than LZMS_MAX_FAST_LENGTH.  This makes it possible to do fast
+ * lookups of length costs using the 'length_cost_fast' array without having to
+ * keep checking whether the length exceeds LZMS_MAX_FAST_LENGTH or not.
+ */
+#define LZMS_MAX_FAST_LENGTH	255
+
+/*
+ * LZMS_MAX_FAST_OFFSET is the maximum match offset for which the offset slot
+ * can be looked up directly in the 'offset_slot_fast' array.
+ */
+#define LZMS_MAX_FAST_OFFSET	32767
+
+/*
+ * LZMS_NUM_OPTIM_NODES is the maximum number of bytes the parsing algorithm
+ * will step forward before forcing the pending items to be encoded.  If this
+ * value is increased, then there will be fewer forced flushes, but the
+ * probability entries and Huffman codes will be more likely to become outdated.
+ */
+#define LZMS_NUM_OPTIM_NODES	1024
+
+/*
+ * LZMS_COST_SHIFT is a scaling factor that makes it possible to consider
+ * fractional bit costs.  A single bit has a cost of (1 << LZMS_COST_SHIFT).
+ */
+#define LZMS_COST_SHIFT		6
+
+/* This structure tracks the state of writing bits as a series of 16-bit coding
+ * units, starting at the end of the output buffer and proceeding backwards.  */
 struct lzms_output_bitstream {
 
-	/* Bits that haven't yet been written to the output buffer.  */
+	/* Bits that haven't yet been written to the output buffer  */
 	u64 bitbuf;
 
-	/* Number of bits currently held in @bitbuf.  */
+	/* Number of bits currently held in @bitbuf  */
 	unsigned bitcount;
 
-	/* Pointer to one past the next position in the compressed data buffer
-	 * at which to output a 16-bit coding unit.  */
+	/* Pointer to one past the next position in the output buffer at which
+	 * to output a 16-bit coding unit  */
 	le16 *next;
 
-	/* Pointer to the beginning of the output buffer.  (The "end" when
+	/* Pointer to the beginning of the output buffer (this is the "end" when
 	 * writing backwards!)  */
 	le16 *begin;
 };
 
-/* Stucture used for range encoding (raw version).  This starts at the
- * *beginning* of the compressed data buffer and proceeds forward.  */
-struct lzms_range_encoder_raw {
+/* This structure tracks the state of range encoding and its output, which
+ * starts at the beginning of the output buffer and proceeds forwards.  */
+struct lzms_range_encoder {
 
-	/* A 33-bit variable that holds the low boundary of the current range.
-	 * The 33rd bit is needed to catch carries.  */
+	/* The low boundary of the current range.  Logically, this is a 33-bit
+	 * integer whose high bit is needed to detect carries.  */
 	u64 low;
 
-	/* Size of the current range.  */
-	u32 range;
+	/* The size of the current range  */
+	u32 range_size;
 
-	/* Next 16-bit coding unit to output.  */
+	/* The next 16-bit coding unit to output  */
 	u16 cache;
 
-	/* Number of 16-bit coding units whose output has been delayed due to
-	 * possible carrying.  The first such coding unit is @cache; all
+	/* The number of 16-bit coding units whose output has been delayed due
+	 * to possible carrying.  The first such coding unit is @cache; all
 	 * subsequent such coding units are 0xffff.  */
 	u32 cache_size;
 
-	/* Pointer to the beginning of the output buffer.  */
+	/* Pointer to the beginning of the output buffer  */
 	le16 *begin;
 
 	/* Pointer to the position in the output buffer at which the next coding
-	 * unit must be written.  */
+	 * unit must be written  */
 	le16 *next;
 
-	/* Pointer just past the end of the output buffer.  */
+	/* Pointer just past the end of the output buffer  */
 	le16 *end;
 };
 
-/* Structure used for range encoding.  This wraps around `struct
- * lzms_range_encoder_raw' to use and maintain probability entries.  */
-struct lzms_range_encoder {
+/* An encoder for bits in a specific context  */
+struct lzms_bit_encoder {
 
-	/* Pointer to the raw range encoder, which has no persistent knowledge
-	 * of probabilities.  Multiple lzms_range_encoder's share the same
-	 * lzms_range_encoder_raw.  */
-	struct lzms_range_encoder_raw *rc;
+	/* Pointer to the range encoder to use  */
+	struct lzms_range_encoder *rc;
 
-	/* Bits recently encoded by this range encoder.  This is used as an
-	 * index into @prob_entries.  */
-	u32 state;
+	/* The current state for this bit encoder, which identifies the entry in
+	 * @prob_entries to use next.  The state consists of the most recently
+	 * encoded bits by this bit encoder, where bit 0 is the most recent, bit
+	 * 1 is the second most recent, etc.  */
+	unsigned state;
 
 	/* Bitmask for @state to prevent its value from exceeding the number of
-	 * probability entries.  */
-	u32 mask;
+	 * probability entries  */
+	unsigned mask;
 
-	/* Probability entries being used for this range encoder.  */
+	/* Probability entries for this context  */
 	struct lzms_probability_entry prob_entries[LZMS_MAX_NUM_STATES];
 };
 
-/* Structure used for Huffman encoding.  */
+/* This structure manages Huffman encoding of symbols from an alphabet.  */
 struct lzms_huffman_encoder {
 
-	/* Bitstream to write Huffman-encoded symbols and verbatim bits to.
-	 * Multiple lzms_huffman_encoder's share the same lzms_output_bitstream.
-	 */
+	/* Bitstream to which the Huffman encoded symbols are written  */
 	struct lzms_output_bitstream *os;
 
-	/* Number of symbols that have been written using this code far.  Reset
-	 * to 0 whenever the code is rebuilt.  */
-	u32 num_syms_written;
-
-	/* When @num_syms_written reaches this number, the Huffman code must be
-	 * rebuilt.  */
-	u32 rebuild_freq;
-
-	/* Number of symbols in the represented Huffman code.  */
+	/* Number of symbols in the alphabet  */
 	unsigned num_syms;
+
+	/* Each time this number of symbols have been encoded, the code is
+	 * rebuilt.  */
+	unsigned rebuild_freq;
+
+	/* Symbol count until the next rebuild  */
+	unsigned num_syms_until_rebuild;
 
 	/* Running totals of symbol frequencies.  These are diluted slightly
 	 * whenever the code is rebuilt.  */
-	u32 sym_freqs[LZMS_MAX_NUM_SYMS];
+	u32 freqs[LZMS_MAX_NUM_SYMS];
 
-	/* The length, in bits, of each symbol in the Huffman code.  */
+	/* The length, in bits, of each codeword in the current code  */
 	u8 lens[LZMS_MAX_NUM_SYMS];
 
-	/* The codeword of each symbol in the Huffman code.  */
+	/* The codewords in the current code  */
 	u32 codewords[LZMS_MAX_NUM_SYMS];
 };
 
-/* Internal compression parameters  */
-struct lzms_compressor_params {
-	u32 min_match_length;
-	u32 nice_match_length;
-	u32 optim_array_length;
-};
-
-/* State of the LZMS compressor  */
-struct lzms_compressor {
-
-	/* Internal compression parameters  */
-	struct lzms_compressor_params params;
-
-	/* Data currently being compressed  */
-	u8 *cur_window;
-	u32 cur_window_size;
-
-	/* Lempel-Ziv match-finder  */
-	struct lcpit_matchfinder mf;
-
-	/* Temporary space to store found matches  */
-	struct lz_match *matches;
-
-	/* Per-position data for near-optimal parsing  */
-	struct lzms_mc_pos_data *optimum;
-	struct lzms_mc_pos_data *optimum_end;
-
-	/* Raw range encoder which outputs to the beginning of the compressed
-	 * data buffer, proceeding forwards  */
-	struct lzms_range_encoder_raw rc;
-
-	/* Bitstream which outputs to the end of the compressed data buffer,
-	 * proceeding backwards  */
-	struct lzms_output_bitstream os;
-
-	/* Range encoders  */
-	struct lzms_range_encoder main_range_encoder;
-	struct lzms_range_encoder match_range_encoder;
-	struct lzms_range_encoder lz_match_range_encoder;
-	struct lzms_range_encoder lz_repeat_match_range_encoders[LZMS_NUM_RECENT_OFFSETS - 1];
-	struct lzms_range_encoder delta_match_range_encoder;
-	struct lzms_range_encoder delta_repeat_match_range_encoders[LZMS_NUM_RECENT_OFFSETS - 1];
-
-	/* Huffman encoders  */
-	struct lzms_huffman_encoder literal_encoder;
-	struct lzms_huffman_encoder lz_offset_encoder;
-	struct lzms_huffman_encoder length_encoder;
-	struct lzms_huffman_encoder delta_power_encoder;
-	struct lzms_huffman_encoder delta_offset_encoder;
-
-	/* Used for preprocessing  */
-	s32 last_target_usages[65536];
-
-#define LZMS_NUM_FAST_LENGTHS 256
-	/* Table: length => length slot for small lengths  */
-	u8 length_slot_fast[LZMS_NUM_FAST_LENGTHS];
-
-	/* Table: length => current cost for small match lengths  */
-	u32 length_cost_fast[LZMS_NUM_FAST_LENGTHS];
-
-#define LZMS_NUM_FAST_OFFSETS 32768
-	/* Table: offset => offset slot for small offsets  */
-	u8 offset_slot_fast[LZMS_NUM_FAST_OFFSETS];
-};
-
+/* The LRU queue for offsets of LZ-style matches  */
 struct lzms_lz_lru_queue {
 	u32 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
 	u32 prev_offset;
 	u32 upcoming_offset;
 };
 
-static void
-lzms_init_lz_lru_queue(struct lzms_lz_lru_queue *queue)
-{
-	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
-		queue->recent_offsets[i] = i + 1;
-
-	queue->prev_offset = 0;
-	queue->upcoming_offset = 0;
-}
-
-static void
-lzms_update_lz_lru_queue(struct lzms_lz_lru_queue *queue)
-{
-	if (queue->prev_offset != 0) {
-		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
-			queue->recent_offsets[i + 1] = queue->recent_offsets[i];
-		queue->recent_offsets[0] = queue->prev_offset;
-	}
-	queue->prev_offset = queue->upcoming_offset;
-}
-
 /*
- * Match chooser position data:
+ * This structure represents a byte position in the input buffer and a node in
+ * the graph of possible match/literal choices.
  *
- * An array of these structures is used during the near-optimal match-choosing
- * algorithm.  They correspond to consecutive positions in the window and are
- * used to keep track of the cost to reach each position, and the match/literal
- * choices that need to be chosen to reach that position.
+ * Logically, each incoming edge to this node is labeled with a literal or a
+ * match that can be taken to reach this position from an earlier position; and
+ * each outgoing edge from this node is labeled with a literal or a match that
+ * can be taken to advance from this position to a later position.
  */
-struct lzms_mc_pos_data {
+struct lzms_optimum_node {
 
 	/* The cost, in bits, of the lowest-cost path that has been found to
 	 * reach this position.  This can change as progressively lower cost
 	 * paths are found to reach this position.  */
 	u32 cost;
-#define MC_INFINITE_COST UINT32_MAX
+#define INFINITE_COST UINT32_MAX
 
-	/* The match or literal that was taken to reach this position.  This can
+	/*
+	 * The match or literal that was taken to reach this position.  This can
 	 * change as progressively lower cost paths are found to reach this
 	 * position.
 	 *
@@ -263,11 +211,12 @@ struct lzms_mc_pos_data {
 	 * Repeat offset matches:
 	 *	Low bits are the match length, high bits are the queue index.
 	 */
-	u64 mc_item_data;
-#define MC_OFFSET_SHIFT 32
-#define MC_LEN_MASK (((u64)1 << MC_OFFSET_SHIFT) - 1)
+	u64 item;
+#define OPTIMUM_OFFSET_SHIFT 32
+#define OPTIMUM_LEN_MASK (((u64)1 << OPTIMUM_OFFSET_SHIFT) - 1)
 
-	/* The LZMS adaptive state that exists at this position.  This is filled
+	/*
+	 * The LZMS adaptive state that exists at this position.  This is filled
 	 * in lazily, only after the minimum-cost path to this position is
 	 * found.
 	 *
@@ -278,42 +227,102 @@ struct lzms_mc_pos_data {
 	 * that position.  This can happen if such a path prefix results in a
 	 * different adaptive state which results in lower costs later.  We do
 	 * not solve this problem; we only consider the lowest cost to reach
-	 * each position, which seems to be an acceptable approximation.
+	 * each position.
 	 *
 	 * Note: this adaptive state also does not include the probability
 	 * entries or current Huffman codewords.  Those aren't maintained
-	 * per-position and are only updated occassionally.  */
+	 * per-position and are only updated occassionally.
+	 */
 	struct lzms_adaptive_state {
 		struct lzms_lz_lru_queue lru;
 		u8 main_state;
 		u8 match_state;
 		u8 lz_match_state;
-		u8 lz_repeat_match_state[LZMS_NUM_RECENT_OFFSETS - 1];
+		u8 lz_repmatch_states[LZMS_NUM_RECENT_OFFSETS - 1];
 	} state;
 };
 
+/* The main LZMS compressor structure  */
+struct lzms_compressor {
+
+	/* The matchfinder for LZ77-style matches  */
+	struct lcpit_matchfinder mf;
+
+	/* Temporary space to store matches found by the matchfinder  */
+	struct lz_match matches[LZMS_MAX_FAST_LENGTH - LZMS_MIN_MATCH_LEN + 1];
+
+	/* The preprocessed buffer of data being compressed  */
+	u8 *in_buffer;
+
+	/* The number of bytes of data to be compressed, which is the number of
+	 * bytes of data in @in_buffer that are actually valid  */
+	size_t in_nbytes;
+
+	/* The per-byte graph nodes for near-optimal parsing  */
+	struct lzms_optimum_node optimum_nodes[LZMS_NUM_OPTIM_NODES +
+					       LZMS_MAX_FAST_LENGTH];
+
+	/* Range encoder which outputs to the beginning of the compressed data
+	 * buffer, proceeding forwards  */
+	struct lzms_range_encoder rc;
+
+	/* Bitstream which outputs to the end of the compressed data buffer,
+	 * proceeding backwards  */
+	struct lzms_output_bitstream os;
+
+	/* Bit encoders for item type disambiguation  */
+	struct lzms_bit_encoder main_bit_encoder;
+	struct lzms_bit_encoder match_bit_encoder;
+	struct lzms_bit_encoder lz_match_bit_encoder;
+	struct lzms_bit_encoder lz_repmatch_bit_encoders[LZMS_NUM_RECENT_OFFSETS - 1];
+
+	/* Huffman encoders, one per alphabet  */
+	struct lzms_huffman_encoder literal_encoder;
+	struct lzms_huffman_encoder lz_offset_encoder;
+	struct lzms_huffman_encoder length_encoder;
+
+	/* An array that is needed for preprocessing  */
+	s32 last_target_usages[65536];
+
+	/* Table: length => length slot for small match lengths  */
+	u8 length_slot_fast[LZMS_MAX_FAST_LENGTH + 1];
+
+	/* Table: length => current cost for small match lengths  */
+	u32 length_cost_fast[LZMS_MAX_FAST_LENGTH + 1];
+
+	/* Table: offset => offset slot for small match offsets  */
+	u8 offset_slot_fast[LZMS_MAX_FAST_OFFSET + 1];
+};
+
+/* Generate a table that maps small lengths to length slots.  */
 static void
 lzms_init_fast_slots(struct lzms_compressor *c)
 {
-	/* Create table mapping small lengths to length slots.  */
-	for (unsigned slot = 0, i = 0; i < LZMS_NUM_FAST_LENGTHS; i++) {
-		while (i >= lzms_length_slot_base[slot + 1])
+	u32 length;
+	u32 offset;
+	unsigned slot;
+
+	/* Create a table mapping small lengths to length slots.  */
+	slot = 0;
+	for (length = LZMS_MIN_MATCH_LEN; length <= LZMS_MAX_FAST_LENGTH; length++) {
+		while (length >= lzms_length_slot_base[slot + 1])
 			slot++;
-		c->length_slot_fast[i] = slot;
+		c->length_slot_fast[length] = slot;
 	}
 
-	/* Create table mapping small offsets to offset slots.  */
-	for (unsigned slot = 0, i = 0; i < LZMS_NUM_FAST_OFFSETS; i++) {
-		while (i >= lzms_offset_slot_base[slot + 1])
+	/* Create a table mapping small offsets to offset slots.  */
+	slot = 0;
+	for (offset = 1; offset <= LZMS_MAX_FAST_OFFSET; offset++) {
+		while (offset >= lzms_offset_slot_base[slot + 1])
 			slot++;
-		c->offset_slot_fast[i] = slot;
+		c->offset_slot_fast[offset] = slot;
 	}
 }
 
 static inline unsigned
 lzms_get_length_slot_fast(const struct lzms_compressor *c, u32 length)
 {
-	if (likely(length < LZMS_NUM_FAST_LENGTHS))
+	if (likely(length <= LZMS_MAX_FAST_LENGTH))
 		return c->length_slot_fast[length];
 	else
 		return lzms_get_length_slot(length);
@@ -322,35 +331,34 @@ lzms_get_length_slot_fast(const struct lzms_compressor *c, u32 length)
 static inline unsigned
 lzms_get_offset_slot_fast(const struct lzms_compressor *c, u32 offset)
 {
-	if (offset < LZMS_NUM_FAST_OFFSETS)
+	if (offset <= LZMS_MAX_FAST_OFFSET)
 		return c->offset_slot_fast[offset];
 	else
 		return lzms_get_offset_slot(offset);
 }
 
 /* Initialize the output bitstream @os to write backwards to the specified
- * compressed data buffer @out that is @out_limit 16-bit integers long.  */
+ * buffer @out that is @count 16-bit integers long.  */
 static void
 lzms_output_bitstream_init(struct lzms_output_bitstream *os,
-			   le16 *out, size_t out_limit)
+			   le16 *out, size_t count)
 {
 	os->bitbuf = 0;
 	os->bitcount = 0;
-	os->next = out + out_limit;
+	os->next = out + count;
 	os->begin = out;
 }
 
 /*
- * Write some bits, contained in the low @num_bits bits of @bits (ordered from
- * high-order to low-order), to the output bitstream @os.
+ * Write some bits, contained in the low-order @num_bits bits of @bits, to the
+ * output bitstream @os.
  *
  * @max_num_bits is a compile-time constant that specifies the maximum number of
  * bits that can ever be written at this call site.
  */
 static inline void
-lzms_output_bitstream_put_varbits(struct lzms_output_bitstream *os,
-				  u32 bits, unsigned num_bits,
-				  unsigned max_num_bits)
+lzms_output_bitstream_put_varbits(struct lzms_output_bitstream *os, u32 bits,
+				  unsigned num_bits, unsigned max_num_bits)
 {
 	LZMS_ASSERT(num_bits <= 48);
 
@@ -389,19 +397,18 @@ lzms_output_bitstream_flush(struct lzms_output_bitstream *os)
 	return true;
 }
 
-/* Initialize the range encoder @rc to write forwards to the specified
- * compressed data buffer @out that is @out_limit 16-bit integers long.  */
+/* Initialize the range encoder @rc to write forwards to the specified buffer
+ * @out that is @count 16-bit integers long.  */
 static void
-lzms_range_encoder_raw_init(struct lzms_range_encoder_raw *rc,
-			    le16 *out, size_t out_limit)
+lzms_range_encoder_init(struct lzms_range_encoder *rc, le16 *out, size_t count)
 {
 	rc->low = 0;
-	rc->range = 0xffffffff;
+	rc->range_size = 0xffffffff;
 	rc->cache = 0;
 	rc->cache_size = 1;
 	rc->begin = out;
 	rc->next = out - 1;
-	rc->end = out + out_limit;
+	rc->end = out + count;
 }
 
 /*
@@ -419,7 +426,7 @@ lzms_range_encoder_raw_init(struct lzms_range_encoder_raw *rc,
  * a carry is needed.
  */
 static void
-lzms_range_encoder_raw_shift_low(struct lzms_range_encoder_raw *rc)
+lzms_range_encoder_shift_low(struct lzms_range_encoder *rc)
 {
 	if ((u32)(rc->low) < 0xffff0000 ||
 	    (u32)(rc->low >> 32) != 0)
@@ -445,51 +452,45 @@ lzms_range_encoder_raw_shift_low(struct lzms_range_encoder_raw *rc)
 	rc->low = (rc->low & 0xffff) << 16;
 }
 
-static void
-lzms_range_encoder_raw_normalize(struct lzms_range_encoder_raw *rc)
-{
-	if (rc->range <= 0xffff) {
-		rc->range <<= 16;
-		lzms_range_encoder_raw_shift_low(rc);
-	}
-}
-
 static bool
-lzms_range_encoder_raw_flush(struct lzms_range_encoder_raw *rc)
+lzms_range_encoder_flush(struct lzms_range_encoder *rc)
 {
 	for (unsigned i = 0; i < 4; i++)
-		lzms_range_encoder_raw_shift_low(rc);
+		lzms_range_encoder_shift_low(rc);
 	return rc->next != rc->end;
 }
 
-/* Encode the next bit using the range encoder (raw version).
+/* Encode the next bit using the range encoder.
  *
  * @prob is the chance out of LZMS_PROBABILITY_MAX that the next bit is 0.  */
 static inline void
-lzms_range_encoder_raw_encode_bit(struct lzms_range_encoder_raw *rc,
-				  int bit, u32 prob)
+lzms_range_encode_bit(struct lzms_range_encoder *rc, int bit, u32 prob)
 {
-	lzms_range_encoder_raw_normalize(rc);
+	/* Normalize if needed.  */
+	if (rc->range_size <= 0xffff) {
+		rc->range_size <<= 16;
+		lzms_range_encoder_shift_low(rc);
+	}
 
-	u32 bound = (rc->range >> LZMS_PROBABILITY_BITS) * prob;
+	u32 bound = (rc->range_size >> LZMS_PROBABILITY_BITS) * prob;
 	if (bit == 0) {
-		rc->range = bound;
+		rc->range_size = bound;
 	} else {
 		rc->low += bound;
-		rc->range -= bound;
+		rc->range_size -= bound;
 	}
 }
 
-/* Encode a bit using the specified range encoder. This wraps around
- * lzms_range_encoder_raw_encode_bit() to handle using and updating the
- * appropriate state and probability entry.  */
+/* Encode a bit using the specified bit encoder.  This wraps around
+ * lzms_range_encode_bit() to handle using and updating the appropriate state
+ * and probability entry.  */
 static void
-lzms_range_encode_bit(struct lzms_range_encoder *enc, int bit)
+lzms_encode_bit(struct lzms_bit_encoder *enc, int bit)
 {
 	struct lzms_probability_entry *prob_entry;
 	u32 prob;
 
-	/* Load the probability entry corresponding to the current state.  */
+	/* Load the probability entry for the current state.  */
 	prob_entry = &enc->prob_entries[enc->state];
 
 	/* Update the state based on the next bit.  */
@@ -501,72 +502,70 @@ lzms_range_encode_bit(struct lzms_range_encoder *enc, int bit)
 	/* Update the probability entry.  */
 	lzms_update_probability_entry(prob_entry, bit);
 
-	/* Encode the bit.  */
-	lzms_range_encoder_raw_encode_bit(enc->rc, bit, prob);
+	/* Encode the bit using the range encoder.  */
+	lzms_range_encode_bit(enc->rc, bit, prob);
 }
 
-/* Called when an adaptive Huffman code needs to be rebuilt.  */
-static void
+static noinline void
 lzms_rebuild_huffman_code(struct lzms_huffman_encoder *enc)
 {
-	make_canonical_huffman_code(enc->num_syms,
-				    LZMS_MAX_CODEWORD_LEN,
-				    enc->sym_freqs,
-				    enc->lens,
-				    enc->codewords);
+	make_canonical_huffman_code(enc->num_syms, LZMS_MAX_CODEWORD_LEN,
+				    enc->freqs, enc->lens, enc->codewords);
 
-	/* Dilute the frequencies.  */
-	for (unsigned i = 0; i < enc->num_syms; i++) {
-		enc->sym_freqs[i] >>= 1;
-		enc->sym_freqs[i] += 1;
-	}
-	enc->num_syms_written = 0;
+	for (unsigned sym = 0; sym < enc->num_syms; sym++)
+		enc->freqs[sym] = (enc->freqs[sym] >> 1) + 1;
+
+	enc->num_syms_until_rebuild = enc->rebuild_freq;
 }
 
-/* Encode a symbol using the specified Huffman encoder.  */
-static inline void
+/* Encode a symbol using the specified Huffman encoder.  If needed, the Huffman
+ * code will be rebuilt.  Returns a boolean that indicates whether the Huffman
+ * code was rebuilt or not.  */
+static inline bool
 lzms_huffman_encode_symbol(struct lzms_huffman_encoder *enc, unsigned sym)
 {
 	lzms_output_bitstream_put_varbits(enc->os,
 					  enc->codewords[sym],
 					  enc->lens[sym],
 					  LZMS_MAX_CODEWORD_LEN);
-	++enc->sym_freqs[sym];
-	if (++enc->num_syms_written == enc->rebuild_freq)
+	++enc->freqs[sym];
+	if (--enc->num_syms_until_rebuild == 0) {
 		lzms_rebuild_huffman_code(enc);
+		return true;
+	}
+	return false;
 }
 
 static void
 lzms_update_fast_length_costs(struct lzms_compressor *c);
 
-/* Encode a match length.  */
+/* Encode a match length.  If this causes the Huffman code for length symbols to
+ * be rebuilt, also update the length costs array.  */
 static void
 lzms_encode_length(struct lzms_compressor *c, u32 length)
 {
 	unsigned slot;
-	unsigned num_extra_bits;
 	u32 extra_bits;
+	unsigned num_extra_bits;
 
 	slot = lzms_get_length_slot_fast(c, length);
 
 	extra_bits = length - lzms_length_slot_base[slot];
 	num_extra_bits = lzms_extra_length_bits[slot];
 
-	lzms_huffman_encode_symbol(&c->length_encoder, slot);
-	if (c->length_encoder.num_syms_written == 0)
+	if (lzms_huffman_encode_symbol(&c->length_encoder, slot))
 		lzms_update_fast_length_costs(c);
 
 	lzms_output_bitstream_put_varbits(c->length_encoder.os,
 					  extra_bits, num_extra_bits, 30);
 }
 
-/* Encode an LZ match offset.  */
 static void
 lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 {
 	unsigned slot;
-	unsigned num_extra_bits;
 	u32 extra_bits;
+	unsigned num_extra_bits;
 
 	slot = lzms_get_offset_slot_fast(c, offset);
 
@@ -578,60 +577,55 @@ lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 					  extra_bits, num_extra_bits, 30);
 }
 
-/* Encode a literal byte.  */
 static void
 lzms_encode_literal(struct lzms_compressor *c, unsigned literal)
 {
 	/* Main bit: 0 = a literal, not a match.  */
-	lzms_range_encode_bit(&c->main_range_encoder, 0);
+	lzms_encode_bit(&c->main_bit_encoder, 0);
 
 	/* Encode the literal using the current literal Huffman code.  */
 	lzms_huffman_encode_symbol(&c->literal_encoder, literal);
 }
 
-/* Encode an LZ repeat offset match.  */
 static void
 lzms_encode_lz_repeat_offset_match(struct lzms_compressor *c,
-				   u32 length, unsigned rep_index)
+				   u32 length, unsigned rep_idx)
 {
-	unsigned i;
-
 	/* Main bit: 1 = a match, not a literal.  */
-	lzms_range_encode_bit(&c->main_range_encoder, 1);
+	lzms_encode_bit(&c->main_bit_encoder, 1);
 
 	/* Match bit: 0 = an LZ match, not a delta match.  */
-	lzms_range_encode_bit(&c->match_range_encoder, 0);
+	lzms_encode_bit(&c->match_bit_encoder, 0);
 
 	/* LZ match bit: 1 = repeat offset, not an explicit offset.  */
-	lzms_range_encode_bit(&c->lz_match_range_encoder, 1);
+	lzms_encode_bit(&c->lz_match_bit_encoder, 1);
 
 	/* Encode the repeat offset index.  A 1 bit is encoded for each index
 	 * passed up.  This sequence of 1 bits is terminated by a 0 bit, or
 	 * automatically when (LZMS_NUM_RECENT_OFFSETS - 1) 1 bits have been
 	 * encoded.  */
-	for (i = 0; i < rep_index; i++)
-		lzms_range_encode_bit(&c->lz_repeat_match_range_encoders[i], 1);
+	for (unsigned i = 0; i < rep_idx; i++)
+		lzms_encode_bit(&c->lz_repmatch_bit_encoders[i], 1);
 
-	if (i < LZMS_NUM_RECENT_OFFSETS - 1)
-		lzms_range_encode_bit(&c->lz_repeat_match_range_encoders[i], 0);
+	if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+		lzms_encode_bit(&c->lz_repmatch_bit_encoders[rep_idx], 0);
 
 	/* Encode the match length.  */
 	lzms_encode_length(c, length);
 }
 
-/* Encode an LZ explicit offset match.  */
 static void
 lzms_encode_lz_explicit_offset_match(struct lzms_compressor *c,
 				     u32 length, u32 offset)
 {
 	/* Main bit: 1 = a match, not a literal.  */
-	lzms_range_encode_bit(&c->main_range_encoder, 1);
+	lzms_encode_bit(&c->main_bit_encoder, 1);
 
 	/* Match bit: 0 = an LZ match, not a delta match.  */
-	lzms_range_encode_bit(&c->match_range_encoder, 0);
+	lzms_encode_bit(&c->match_bit_encoder, 0);
 
 	/* LZ match bit: 0 = explicit offset, not a repeat offset.  */
-	lzms_range_encode_bit(&c->lz_match_range_encoder, 0);
+	lzms_encode_bit(&c->lz_match_bit_encoder, 0);
 
 	/* Encode the match offset.  */
 	lzms_encode_lz_offset(c, offset);
@@ -641,140 +635,107 @@ lzms_encode_lz_explicit_offset_match(struct lzms_compressor *c,
 }
 
 static void
-lzms_encode_item(struct lzms_compressor *c, u64 mc_item_data)
+lzms_encode_item(struct lzms_compressor *c, u64 item)
 {
-	u32 len = mc_item_data & MC_LEN_MASK;
-	u32 offset_data = mc_item_data >> MC_OFFSET_SHIFT;
+	u32 len = item & OPTIMUM_LEN_MASK;
+	u32 offset_data = item >> OPTIMUM_OFFSET_SHIFT;
 
 	if (len == 1)
 		lzms_encode_literal(c, offset_data);
 	else if (offset_data < LZMS_NUM_RECENT_OFFSETS)
 		lzms_encode_lz_repeat_offset_match(c, len, offset_data);
 	else
-		lzms_encode_lz_explicit_offset_match(c, len, offset_data - LZMS_OFFSET_OFFSET);
+		lzms_encode_lz_explicit_offset_match(c, len, offset_data - LZMS_OFFSET_ADJUSTMENT);
 }
 
 /* Encode a list of matches and literals chosen by the parsing algorithm.  */
 static void
 lzms_encode_item_list(struct lzms_compressor *c,
-		      struct lzms_mc_pos_data *cur_optimum_ptr)
+		      struct lzms_optimum_node *cur_node)
 {
-	struct lzms_mc_pos_data *end_optimum_ptr;
+	struct lzms_optimum_node *end_node;
 	u64 saved_item;
 	u64 item;
 
 	/* The list is currently in reverse order (last item to first item).
 	 * Reverse it.  */
-	end_optimum_ptr = cur_optimum_ptr;
-	saved_item = cur_optimum_ptr->mc_item_data;
+	end_node = cur_node;
+	saved_item = cur_node->item;
 	do {
 		item = saved_item;
-		cur_optimum_ptr -= item & MC_LEN_MASK;
-		saved_item = cur_optimum_ptr->mc_item_data;
-		cur_optimum_ptr->mc_item_data = item;
-	} while (cur_optimum_ptr != c->optimum);
+		cur_node -= item & OPTIMUM_LEN_MASK;
+		saved_item = cur_node->item;
+		cur_node->item = item;
+	} while (cur_node != c->optimum_nodes);
 
 	/* Walk the list of items from beginning to end, encoding each item.  */
 	do {
-		lzms_encode_item(c, cur_optimum_ptr->mc_item_data);
-		cur_optimum_ptr += (cur_optimum_ptr->mc_item_data) & MC_LEN_MASK;
-	} while (cur_optimum_ptr != end_optimum_ptr);
+		lzms_encode_item(c, cur_node->item);
+		cur_node += (cur_node->item) & OPTIMUM_LEN_MASK;
+	} while (cur_node != end_node);
 }
 
-/* Each bit costs 1 << LZMS_COST_SHIFT units.  */
-#define LZMS_COST_SHIFT 6
+/*
+ * If p is the predicted probability of the next bit being a 0, then the number
+ * of bits required to range encode a 0 bit is the real number -log2(p), and the
+ * number of bits required to range encode a 1 bit is the real number
+ * -log2(1 - p).  To avoid computing either of these expressions at runtime,
+ * lzms_rc_costs is a precomputed table that stores a mapping from probability
+ * to cost for each possible probability.  Specifically, the array indices are
+ * the numerators of the possible probabilities in LZMS, where the denominators
+ * are LZMS_PROBABILITY_MAX; and the stored costs are the bit costs multiplied
+ * by 2**LZMS_COST_SHIFT and rounded down to the nearest integer.  Furthermore,
+ * the values stored for 0/64 and 64/64 probabilities are equal to the adjacent
+ * values, since these probabilities are not actually permitted.
+ */
+static const u32 lzms_rc_costs[LZMS_PROBABILITY_MAX + 1] = {
+	384, 384, 320, 282, 256, 235, 218, 204,
+	192, 181, 171, 162, 154, 147, 140, 133,
+	128, 122, 117, 112, 107, 102, 98,  94,
+	90,  86,  83,  79,  76,  73,  69,  66,
+	64,  61,  58,  55,  53,  50,  48,  45,
+	43,  41,  38,  36,  34,  32,  30,  28,
+	26,  24,  22,  20,  19,  17,  15,  13,
+	12,  10,  9,   7,   5,   4,   2,   1,
+	1,
+};
 
-/*#define LZMS_RC_COSTS_USE_FLOATING_POINT*/
-
-static u32
-lzms_rc_costs[LZMS_PROBABILITY_MAX + 1];
-
-#ifdef LZMS_RC_COSTS_USE_FLOATING_POINT
-#  include <math.h>
-#endif
-
-static void
-lzms_do_init_rc_costs(void)
+static inline void
+lzms_check_cost_shift(void)
 {
-	/* Fill in a table that maps range coding probabilities needed to code a
-	 * bit X (0 or 1) to the number of bits (scaled by a constant factor, to
-	 * handle fractional costs) needed to code that bit X.
-	 *
-	 * Consider the range of the range decoder.  To eliminate exactly half
-	 * the range (logical probability of 0.5), we need exactly 1 bit.  For
-	 * lower probabilities we need more bits and for higher probabilities we
-	 * need fewer bits.  In general, a logical probability of N will
-	 * eliminate the proportion 1 - N of the range; this information takes
-	 * log2(1 / N) bits to encode.
-	 *
-	 * The below loop is simply calculating this number of bits for each
-	 * possible probability allowed by the LZMS compression format, but
-	 * without using real numbers.  To handle fractional probabilities, each
-	 * cost is multiplied by (1 << LZMS_COST_SHIFT).  These techniques are
-	 * based on those used by LZMA.
-	 *
-	 * Note that in LZMS, a probability x really means x / 64, and 0 / 64 is
-	 * really interpreted as 1 / 64 and 64 / 64 is really interpreted as
-	 * 63 / 64.
-	 */
-	for (u32 i = 0; i <= LZMS_PROBABILITY_MAX; i++) {
-		u32 prob = i;
-
-		if (prob == 0)
-			prob = 1;
-		else if (prob == LZMS_PROBABILITY_MAX)
-			prob = LZMS_PROBABILITY_MAX - 1;
-
-	#ifdef LZMS_RC_COSTS_USE_FLOATING_POINT
-		lzms_rc_costs[i] = log2((double)LZMS_PROBABILITY_MAX / prob) *
-					(1 << LZMS_COST_SHIFT);
-	#else
-		u32 w = prob;
-		u32 bit_count = 0;
-		for (u32 j = 0; j < LZMS_COST_SHIFT; j++) {
-			w *= w;
-			bit_count <<= 1;
-			while (w >= ((u32)1 << 16)) {
-				w >>= 1;
-				++bit_count;
-			}
-		}
-		lzms_rc_costs[i] = (LZMS_PROBABILITY_BITS << LZMS_COST_SHIFT) -
-				   (15 + bit_count);
-	#endif
-	}
+	/* lzms_rc_costs is hard-coded to the current LZMS_COST_SHIFT.  */
+	BUILD_BUG_ON(LZMS_COST_SHIFT != 6);
 }
+
+#if 0
+#include <math.h>
 
 static void
 lzms_init_rc_costs(void)
 {
-	static pthread_once_t once = PTHREAD_ONCE_INIT;
+	for (u32 i = 0; i <= LZMS_PROBABILITY_MAX; i++) {
+		u32 prob = i;
+		if (prob == 0)
+			prob++;
+		else if (prob == LZMS_PROBABILITY_MAX)
+			prob--;
 
-	pthread_once(&once, lzms_do_init_rc_costs);
+		lzms_rc_costs[i] = -log2((double)prob / LZMS_PROBABILITY_MAX) *
+					(1 << LZMS_COST_SHIFT);
+	}
 }
+#endif
 
-/* Return the cost to range-encode the specified bit from the specified state.*/
+/* Return the cost to encode the specified bit using the specified bit encoder
+ * when in the specified state.  */
 static inline u32
-lzms_rc_bit_cost(const struct lzms_range_encoder *enc, u8 cur_state, int bit)
+lzms_bit_cost(const struct lzms_bit_encoder *enc, unsigned state, int bit)
 {
-	u32 prob_zero;
-	u32 prob_correct;
-
-	prob_zero = enc->prob_entries[cur_state].num_recent_zero_bits;
-
+	u32 prob = enc->prob_entries[state].num_recent_zero_bits;
 	if (bit == 0)
-		prob_correct = prob_zero;
+		return lzms_rc_costs[prob];
 	else
-		prob_correct = LZMS_PROBABILITY_MAX - prob_zero;
-
-	return lzms_rc_costs[prob_correct];
-}
-
-/* Return the cost to Huffman-encode the specified symbol.  */
-static inline u32
-lzms_huffman_symbol_cost(const struct lzms_huffman_encoder *enc, unsigned sym)
-{
-	return (u32)enc->lens[sym] << LZMS_COST_SHIFT;
+		return lzms_rc_costs[LZMS_PROBABILITY_MAX - prob];
 }
 
 /* Return the cost to encode the specified literal byte.  */
@@ -782,8 +743,8 @@ static inline u32
 lzms_literal_cost(const struct lzms_compressor *c, unsigned literal,
 		  const struct lzms_adaptive_state *state)
 {
-	return lzms_rc_bit_cost(&c->main_range_encoder, state->main_state, 0) +
-	       lzms_huffman_symbol_cost(&c->literal_encoder, literal);
+	return lzms_bit_cost(&c->main_bit_encoder, state->main_state, 0) +
+	       ((u32)c->literal_encoder.lens[literal] << LZMS_COST_SHIFT);
 }
 
 /* Update the table that directly provides the costs for small lengths.  */
@@ -794,24 +755,22 @@ lzms_update_fast_length_costs(struct lzms_compressor *c)
 	int slot = -1;
 	u32 cost = 0;
 
-	for (len = 1; len < LZMS_NUM_FAST_LENGTHS; len++) {
-
+	for (len = LZMS_MIN_MATCH_LEN; len <= LZMS_MAX_FAST_LENGTH; len++) {
 		while (len >= lzms_length_slot_base[slot + 1]) {
 			slot++;
 			cost = (u32)(c->length_encoder.lens[slot] +
 				     lzms_extra_length_bits[slot]) << LZMS_COST_SHIFT;
 		}
-
 		c->length_cost_fast[len] = cost;
 	}
 }
 
 /* Return the cost to encode the specified match length, which must be less than
- * LZMS_NUM_FAST_LENGTHS.  */
+ * or equal to LZMS_MAX_FAST_LENGTH.  */
 static inline u32
 lzms_fast_length_cost(const struct lzms_compressor *c, u32 length)
 {
-	LZMS_ASSERT(length < LZMS_NUM_FAST_LENGTHS);
+	LZMS_ASSERT(length <= LZMS_MAX_FAST_LENGTH);
 	return c->length_cost_fast[length];
 }
 
@@ -826,54 +785,46 @@ lzms_lz_offset_cost(const struct lzms_compressor *c, u32 offset)
 }
 
 /*
- * Consider coding the match at repeat offset index @rep_idx.  Consider each
- * length from the minimum (2) to the full match length (@rep_len).
+ * Consider coding the LZ-style match at repeat offset index @rep_idx.  Consider
+ * each length from the minimum (2) to the full match length (@rep_len).
  */
 static inline void
 lzms_consider_lz_repeat_offset_match(const struct lzms_compressor *c,
-				     struct lzms_mc_pos_data *cur_optimum_ptr,
+				     struct lzms_optimum_node *cur_node,
 				     u32 rep_len, unsigned rep_idx)
 {
-	u32 len;
-	u32 base_cost;
-	u32 cost;
-	unsigned i;
+	u32 base_cost = cur_node->cost +
+			lzms_bit_cost(&c->main_bit_encoder,
+				      cur_node->state.main_state, 1) +
+			lzms_bit_cost(&c->match_bit_encoder,
+				      cur_node->state.match_state, 0) +
+			lzms_bit_cost(&c->lz_match_bit_encoder,
+				      cur_node->state.lz_match_state, 1);
 
-	base_cost = cur_optimum_ptr->cost;
+	for (unsigned i = 0; i < rep_idx; i++)
+		base_cost += lzms_bit_cost(&c->lz_repmatch_bit_encoders[i],
+					   cur_node->state.lz_repmatch_states[i], 1);
 
-	base_cost += lzms_rc_bit_cost(&c->main_range_encoder,
-				      cur_optimum_ptr->state.main_state, 1);
+	if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+		base_cost += lzms_bit_cost(&c->lz_repmatch_bit_encoders[rep_idx],
+					   cur_node->state.lz_repmatch_states[rep_idx], 0);
 
-	base_cost += lzms_rc_bit_cost(&c->match_range_encoder,
-				      cur_optimum_ptr->state.match_state, 0);
-
-	base_cost += lzms_rc_bit_cost(&c->lz_match_range_encoder,
-				      cur_optimum_ptr->state.lz_match_state, 1);
-
-	for (i = 0; i < rep_idx; i++)
-		base_cost += lzms_rc_bit_cost(&c->lz_repeat_match_range_encoders[i],
-					      cur_optimum_ptr->state.lz_repeat_match_state[i], 1);
-
-	if (i < LZMS_NUM_RECENT_OFFSETS - 1)
-		base_cost += lzms_rc_bit_cost(&c->lz_repeat_match_range_encoders[i],
-					      cur_optimum_ptr->state.lz_repeat_match_state[i], 0);
-
-	len = 2;
+	u32 len = 2;
 	do {
-		cost = base_cost + lzms_fast_length_cost(c, len);
-		if (cost < (cur_optimum_ptr + len)->cost) {
-			(cur_optimum_ptr + len)->mc_item_data =
-				((u64)rep_idx << MC_OFFSET_SHIFT) | len;
-			(cur_optimum_ptr + len)->cost = cost;
+		u32 cost = base_cost + lzms_fast_length_cost(c, len);
+		if (cost < (cur_node + len)->cost) {
+			(cur_node + len)->item =
+				((u64)rep_idx << OPTIMUM_OFFSET_SHIFT) | len;
+			(cur_node + len)->cost = cost;
 		}
 	} while (++len <= rep_len);
 }
 
 /*
- * Consider coding each match in @matches as an explicit offset match.
+ * Consider coding each LZ-style match in @matches as an explicit offset match.
  *
  * @matches must be sorted by strictly decreasing length.  This is guaranteed by
- * the match-finder.
+ * the matchfinder.
  *
  * We consider each length from the minimum (2) to the longest
  * (matches[num_matches - 1].len).  For each length, we consider only the
@@ -883,87 +834,124 @@ lzms_consider_lz_repeat_offset_match(const struct lzms_compressor *c,
  */
 static inline void
 lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
-					 struct lzms_mc_pos_data *cur_optimum_ptr,
+					 struct lzms_optimum_node *cur_node,
 					 const struct lz_match matches[],
 					 u32 num_matches)
 {
-	u32 len;
-	u32 i;
-	u32 base_cost;
-	u32 position_cost;
-	u32 cost;
-
-	base_cost = cur_optimum_ptr->cost;
-
-	base_cost += lzms_rc_bit_cost(&c->main_range_encoder,
-				      cur_optimum_ptr->state.main_state, 1);
-
-	base_cost += lzms_rc_bit_cost(&c->match_range_encoder,
-				      cur_optimum_ptr->state.match_state, 0);
-
-	base_cost += lzms_rc_bit_cost(&c->lz_match_range_encoder,
-				      cur_optimum_ptr->state.lz_match_state, 0);
-	len = 2;
-	i = num_matches - 1;
+	u32 base_cost = cur_node->cost +
+			lzms_bit_cost(&c->main_bit_encoder,
+				      cur_node->state.main_state, 1) +
+			lzms_bit_cost(&c->match_bit_encoder,
+				      cur_node->state.match_state, 0) +
+			lzms_bit_cost(&c->lz_match_bit_encoder,
+				      cur_node->state.lz_match_state, 0);
+	u32 len = 2;
+	u32 i = num_matches - 1;
 	do {
-		position_cost = base_cost + lzms_lz_offset_cost(c, matches[i].offset);
+		u32 position_cost = base_cost + lzms_lz_offset_cost(c, matches[i].offset);
 		do {
-			cost = position_cost + lzms_fast_length_cost(c, len);
-			if (cost < (cur_optimum_ptr + len)->cost) {
-				(cur_optimum_ptr + len)->mc_item_data =
-					((u64)(matches[i].offset + LZMS_OFFSET_OFFSET)
-						<< MC_OFFSET_SHIFT) | len;
-				(cur_optimum_ptr + len)->cost = cost;
+			u32 cost = position_cost + lzms_fast_length_cost(c, len);
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->item =
+					((u64)(matches[i].offset + LZMS_OFFSET_ADJUSTMENT)
+						<< OPTIMUM_OFFSET_SHIFT) | len;
+				(cur_node + len)->cost = cost;
 			}
 		} while (++len <= matches[i].length);
 	} while (i--);
 }
 
 static void
+lzms_init_lz_lru_queue(struct lzms_lz_lru_queue *queue)
+{
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
+		queue->recent_offsets[i] = i + 1;
+
+	queue->prev_offset = 0;
+	queue->upcoming_offset = 0;
+}
+
+static void
 lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 {
-	unsigned i;
-
 	lzms_init_lz_lru_queue(&state->lru);
 	state->main_state = 0;
 	state->match_state = 0;
 	state->lz_match_state = 0;
-	for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
-		state->lz_repeat_match_state[i] = 0;
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+		state->lz_repmatch_states[i] = 0;
+}
+
+static void
+lzms_update_lz_lru_queue(struct lzms_lz_lru_queue *queue)
+{
+	if (queue->prev_offset != 0) {
+		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
+			queue->recent_offsets[i + 1] = queue->recent_offsets[i];
+		queue->recent_offsets[0] = queue->prev_offset;
+	}
+	queue->prev_offset = queue->upcoming_offset;
 }
 
 static inline void
 lzms_update_main_state(struct lzms_adaptive_state *state, int is_match)
 {
-	state->main_state = ((state->main_state << 1) | is_match) % LZMS_NUM_MAIN_STATES;
+	state->main_state =
+		((state->main_state << 1) | is_match) % LZMS_NUM_MAIN_STATES;
 }
 
 static inline void
 lzms_update_match_state(struct lzms_adaptive_state *state, int is_delta)
 {
-	state->match_state = ((state->match_state << 1) | is_delta) % LZMS_NUM_MATCH_STATES;
+	state->match_state =
+		((state->match_state << 1) | is_delta) % LZMS_NUM_MATCH_STATES;
 }
 
 static inline void
 lzms_update_lz_match_state(struct lzms_adaptive_state *state, int is_repeat_offset)
 {
-	state->lz_match_state = ((state->lz_match_state << 1) | is_repeat_offset) % LZMS_NUM_LZ_MATCH_STATES;
+	state->lz_match_state =
+		((state->lz_match_state << 1) | is_repeat_offset) %
+			LZMS_NUM_LZ_MATCH_STATES;
 }
 
 static inline void
-lzms_update_lz_repeat_match_state(struct lzms_adaptive_state *state, int rep_idx)
+lzms_update_lz_repmatch_states(struct lzms_adaptive_state *state, unsigned rep_idx)
 {
-	int i;
-
-	for (i = 0; i < rep_idx; i++)
-		state->lz_repeat_match_state[i] =
-			((state->lz_repeat_match_state[i] << 1) | 1) %
+	for (unsigned i = 0; i < rep_idx; i++)
+		state->lz_repmatch_states[i] =
+			((state->lz_repmatch_states[i] << 1) | 1) %
 				LZMS_NUM_LZ_REPEAT_MATCH_STATES;
 
-	if (i < LZMS_NUM_RECENT_OFFSETS - 1)
-		state->lz_repeat_match_state[i] =
-			((state->lz_repeat_match_state[i] << 1) | 0) %
+	if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+		state->lz_repmatch_states[rep_idx] =
+			((state->lz_repmatch_states[rep_idx] << 1) | 0) %
 				LZMS_NUM_LZ_REPEAT_MATCH_STATES;
+}
+
+/*
+ * Find the longest LZ-style repeat offset match with the current sequence.  If
+ * none is found, return 0; otherwise return its length and set
+ * *best_rep_idx_ret to the index of its offset in the queue.
+ */
+static u32
+lzms_find_longest_repeat_offset_match(const u8 * const in_next,
+				      const u32 max_len,
+				      const struct lzms_lz_lru_queue *queue,
+				      unsigned *best_rep_idx_ret)
+{
+	u32 best_rep_len = 0;
+	for (unsigned rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
+		const u8 *matchptr = in_next - queue->recent_offsets[rep_idx];
+		if (load_u16_unaligned(in_next) == load_u16_unaligned(matchptr)) {
+			u32 rep_len = lz_extend(in_next, matchptr, 2, max_len);
+			if (rep_len > best_rep_len) {
+				best_rep_len = rep_len;
+				*best_rep_idx_ret = rep_idx;
+			}
+		}
+	}
+	return best_rep_len;
 }
 
 /*
@@ -988,66 +976,62 @@ lzms_update_lz_repeat_match_state(struct lzms_adaptive_state *state, int rep_idx
  * - The costs of literals and matches are estimated using the range encoder
  *   states and the semi-adaptive Huffman codes.  Except for range encoding
  *   states, costs are assumed to be constant throughout a single run of the
- *   parsing algorithm, which can parse up to @optim_array_length bytes of data.
- *   This introduces a source of inaccuracy because the probabilities and
+ *   parsing algorithm, which can parse up to LZMS_NUM_OPTIM_NODES bytes of
+ *   data.  This introduces a source of inaccuracy because the probabilities and
  *   Huffman codes can change over this part of the data.
  */
 static void
 lzms_near_optimal_parse(struct lzms_compressor *c)
 {
-	const u8 *window_ptr;
-	const u8 *window_end;
-	struct lzms_mc_pos_data *cur_optimum_ptr;
-	struct lzms_mc_pos_data *end_optimum_ptr;
-	u32 num_matches;
-	u32 longest_len;
-	u32 rep_max_len;
-	unsigned rep_max_idx;
-	unsigned literal;
-	unsigned i;
-	u32 cost;
-	u32 len;
-	u32 offset_data;
+	const u8 *in_next = c->in_buffer;
+	const u8 * const in_end = &c->in_buffer[c->in_nbytes];
+	struct lzms_optimum_node *cur_node;
+	struct lzms_optimum_node *end_node;
 
-	window_ptr = c->cur_window;
-	window_end = window_ptr + c->cur_window_size;
+	/* Set initial length costs for lengths <= LZMS_MAX_FAST_LENGTH.  */
+	lzms_update_fast_length_costs(c);
 
-	lzms_init_adaptive_state(&c->optimum[0].state);
+	/* Set up the initial adaptive state.  */
+	lzms_init_adaptive_state(&c->optimum_nodes[0].state);
 
 begin:
 	/* Start building a new list of items, which will correspond to the next
 	 * piece of the overall minimum-cost path.  */
 
-	cur_optimum_ptr = c->optimum;
-	cur_optimum_ptr->cost = 0;
-	end_optimum_ptr = cur_optimum_ptr;
+	cur_node = c->optimum_nodes;
+	cur_node->cost = 0;
+	end_node = cur_node;
 
 	/* States should currently be consistent with the encoders.  */
-	LZMS_ASSERT(cur_optimum_ptr->state.main_state == c->main_range_encoder.state);
-	LZMS_ASSERT(cur_optimum_ptr->state.match_state == c->match_range_encoder.state);
-	LZMS_ASSERT(cur_optimum_ptr->state.lz_match_state == c->lz_match_range_encoder.state);
-	for (i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
-		LZMS_ASSERT(cur_optimum_ptr->state.lz_repeat_match_state[i] ==
-			    c->lz_repeat_match_range_encoders[i].state);
+	LZMS_ASSERT(cur_node->state.main_state == c->main_bit_encoder.state);
+	LZMS_ASSERT(cur_node->state.match_state == c->match_bit_encoder.state);
+	LZMS_ASSERT(cur_node->state.lz_match_state == c->lz_match_bit_encoder.state);
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+		LZMS_ASSERT(cur_node->state.lz_repmatch_states[i] ==
+			    c->lz_repmatch_bit_encoders[i].state);
 
-	if (window_ptr == window_end)
+	if (in_next == in_end)
 		return;
 
-	/* The following loop runs once for each per byte in the window, except
-	 * in a couple shortcut cases.  */
+	/* The following loop runs once for each per byte in the input buffer,
+	 * except in a couple shortcut cases.  */
 	for (;;) {
+		u32 num_matches;
+		unsigned literal;
+		u32 literal_cost;
 
-		/* Find explicit offset matches with the current position.  */
+		/* Find LZ-style matches with the current position.  */
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
 		if (num_matches) {
+			u32 best_len;
+			u32 best_rep_len;
+			unsigned best_rep_idx;
+
 			/*
-			 * Find the longest repeat offset match with the current
-			 * position.
-			 *
-			 * Heuristics:
+			 * Heuristics for repeat offset matches:
 			 *
 			 * - Only search for repeat offset matches if the
-			 *   match-finder already found at least one match.
+			 *   matchfinder already found at least one match.
 			 *
 			 * - Only consider the longest repeat offset match.  It
 			 *   seems to be rare for the optimal parse to include a
@@ -1055,109 +1039,107 @@ begin:
 			 *   length (allowing for the possibility that not all
 			 *   of that length is actually used).
 			 */
-			if (likely(window_ptr - c->cur_window >= LZMS_MAX_INIT_RECENT_OFFSET)) {
-				BUILD_BUG_ON(LZMS_NUM_RECENT_OFFSETS != 3);
-				rep_max_len = lz_repsearch3(window_ptr,
-							    window_end - window_ptr,
-							    cur_optimum_ptr->state.lru.recent_offsets,
-							    &rep_max_idx);
+			if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET)) {
+				best_rep_len = lzms_find_longest_repeat_offset_match(
+							in_next,
+							in_end - in_next,
+							&cur_node->state.lru,
+							&best_rep_idx);
 			} else {
-				rep_max_len = 0;
+				best_rep_len = 0;
 			}
 
-			if (rep_max_len) {
+			if (best_rep_len) {
 				/* If there's a very long repeat offset match,
-				 * choose it immediately.  */
-				if (rep_max_len >= c->params.nice_match_length) {
+				 * then choose it immediately.  */
+				if (best_rep_len >= c->mf.nice_match_len) {
 
-					lcpit_matchfinder_skip_bytes(&c->mf, rep_max_len - 1);
-					window_ptr += rep_max_len;
+					lcpit_matchfinder_skip_bytes(&c->mf, best_rep_len - 1);
+					in_next += best_rep_len;
 
-					if (cur_optimum_ptr != c->optimum)
-						lzms_encode_item_list(c, cur_optimum_ptr);
+					if (cur_node != c->optimum_nodes)
+						lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_lz_repeat_offset_match(c, rep_max_len,
-									   rep_max_idx);
+					lzms_encode_lz_repeat_offset_match(c, best_rep_len, best_rep_idx);
 
-					c->optimum[0].state = cur_optimum_ptr->state;
+					c->optimum_nodes[0].state = cur_node->state;
 
-					lzms_update_main_state(&c->optimum[0].state, 1);
-					lzms_update_match_state(&c->optimum[0].state, 0);
-					lzms_update_lz_match_state(&c->optimum[0].state, 1);
-					lzms_update_lz_repeat_match_state(&c->optimum[0].state,
-									  rep_max_idx);
+					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_match_state(&c->optimum_nodes[0].state, 0);
+					lzms_update_lz_match_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state, best_rep_idx);
 
-					c->optimum[0].state.lru.upcoming_offset =
-						c->optimum[0].state.lru.recent_offsets[rep_max_idx];
+					c->optimum_nodes[0].state.lru.upcoming_offset =
+						c->optimum_nodes[0].state.lru.recent_offsets[best_rep_idx];
 
-					for (i = rep_max_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						c->optimum[0].state.lru.recent_offsets[i] =
-							c->optimum[0].state.lru.recent_offsets[i + 1];
+					for (unsigned i = best_rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
+						c->optimum_nodes[0].state.lru.recent_offsets[i] =
+							c->optimum_nodes[0].state.lru.recent_offsets[i + 1];
 
-					lzms_update_lz_lru_queue(&c->optimum[0].state.lru);
+					lzms_update_lz_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
 				}
 
 				/* If reaching any positions for the first time,
 				 * initialize their costs to "infinity".  */
-				while (end_optimum_ptr < cur_optimum_ptr + rep_max_len)
-					(++end_optimum_ptr)->cost = MC_INFINITE_COST;
+				while (end_node < cur_node + best_rep_len)
+					(++end_node)->cost = INFINITE_COST;
 
 				/* Consider coding a repeat offset match.  */
-				lzms_consider_lz_repeat_offset_match(c, cur_optimum_ptr,
-								     rep_max_len, rep_max_idx);
+				lzms_consider_lz_repeat_offset_match(c, cur_node,
+								     best_rep_len, best_rep_idx);
 			}
 
-			longest_len = c->matches[0].length;
+			best_len = c->matches[0].length;
 
-			/* If there's a very long explicit offset match, choose
-			 * it immediately.  */
-			if (longest_len >= c->params.nice_match_length) {
+			/* If there's a very long explicit offset match, then
+			 * choose it immediately.  */
+			if (best_len >= c->mf.nice_match_len) {
 
 				u32 offset = c->matches[0].offset;
 
 				/* Extend the match as far as possible.  (The
 				 * LCP-interval tree matchfinder only reports up
-				 * to the "nice" length.)  */
-				longest_len = lz_extend(window_ptr,
-							window_ptr - offset,
-							longest_len,
-							window_end - window_ptr);
+				 * to nice_match_len bytes.)  */
+				best_len = lz_extend(in_next,
+						     in_next - offset,
+						     best_len,
+						     in_end - in_next);
 
-				lcpit_matchfinder_skip_bytes(&c->mf, longest_len - 1);
-				window_ptr += longest_len;
+				lcpit_matchfinder_skip_bytes(&c->mf, best_len - 1);
+				in_next += best_len;
 
-				if (cur_optimum_ptr != c->optimum)
-					lzms_encode_item_list(c, cur_optimum_ptr);
+				if (cur_node != c->optimum_nodes)
+					lzms_encode_item_list(c, cur_node);
 
-				lzms_encode_lz_explicit_offset_match(c, longest_len, offset);
+				lzms_encode_lz_explicit_offset_match(c, best_len, offset);
 
-				c->optimum[0].state = cur_optimum_ptr->state;
+				c->optimum_nodes[0].state = cur_node->state;
 
-				lzms_update_main_state(&c->optimum[0].state, 1);
-				lzms_update_match_state(&c->optimum[0].state, 0);
-				lzms_update_lz_match_state(&c->optimum[0].state, 0);
+				lzms_update_main_state(&c->optimum_nodes[0].state, 1);
+				lzms_update_match_state(&c->optimum_nodes[0].state, 0);
+				lzms_update_lz_match_state(&c->optimum_nodes[0].state, 0);
 
-				c->optimum[0].state.lru.upcoming_offset = offset;
+				c->optimum_nodes[0].state.lru.upcoming_offset = offset;
 
-				lzms_update_lz_lru_queue(&c->optimum[0].state.lru);
+				lzms_update_lz_lru_queue(&c->optimum_nodes[0].state.lru);
 				goto begin;
 			}
 
 			/* If reaching any positions for the first time,
 			 * initialize their costs to "infinity".  */
-			while (end_optimum_ptr < cur_optimum_ptr + longest_len)
-				(++end_optimum_ptr)->cost = MC_INFINITE_COST;
+			while (end_node < cur_node + best_len)
+				(++end_node)->cost = INFINITE_COST;
 
 			/* Consider coding an explicit offset match.  */
-			lzms_consider_lz_explicit_offset_matches(c, cur_optimum_ptr,
+			lzms_consider_lz_explicit_offset_matches(c, cur_node,
 								 c->matches, num_matches);
 		} else {
 			/* No matches found.  The only choice at this position
 			 * is to code a literal.  */
 
-			if (end_optimum_ptr == cur_optimum_ptr)
-				(++end_optimum_ptr)->cost = MC_INFINITE_COST;
+			if (end_node == cur_node)
+				(++end_node)->cost = INFINITE_COST;
 		}
 
 		/* Consider coding a literal.
@@ -1165,68 +1147,64 @@ begin:
 		 * To avoid an extra unpredictable brench, actually checking the
 		 * preferability of coding a literal is integrated into the
 		 * adaptive state update code below.  */
-		literal = *window_ptr++;
-		cost = cur_optimum_ptr->cost +
-		       lzms_literal_cost(c, literal, &cur_optimum_ptr->state);
+		literal = *in_next++;
+		literal_cost = cur_node->cost +
+			       lzms_literal_cost(c, literal, &cur_node->state);
 
 		/* Advance to the next position.  */
-		cur_optimum_ptr++;
+		cur_node++;
 
 		/* The lowest-cost path to the current position is now known.
 		 * Finalize the adaptive state that results from taking this
 		 * lowest-cost path.  */
 
-		if (cost < cur_optimum_ptr->cost) {
+		if (literal_cost < cur_node->cost) {
 			/* Literal  */
-			cur_optimum_ptr->cost = cost;
-			cur_optimum_ptr->mc_item_data = ((u64)literal << MC_OFFSET_SHIFT) | 1;
-
-			cur_optimum_ptr->state = (cur_optimum_ptr - 1)->state;
-
-			lzms_update_main_state(&cur_optimum_ptr->state, 0);
-
-			cur_optimum_ptr->state.lru.upcoming_offset = 0;
+			cur_node->cost = literal_cost;
+			cur_node->item = ((u64)literal << OPTIMUM_OFFSET_SHIFT) | 1;
+			cur_node->state = (cur_node - 1)->state;
+			lzms_update_main_state(&cur_node->state, 0);
+			cur_node->state.lru.upcoming_offset = 0;
 		} else {
 			/* LZ match  */
-			len = cur_optimum_ptr->mc_item_data & MC_LEN_MASK;
-			offset_data = cur_optimum_ptr->mc_item_data >> MC_OFFSET_SHIFT;
+			u32 len = cur_node->item & OPTIMUM_LEN_MASK;
+			u32 offset_data = cur_node->item >> OPTIMUM_OFFSET_SHIFT;
 
-			cur_optimum_ptr->state = (cur_optimum_ptr - len)->state;
+			cur_node->state = (cur_node - len)->state;
 
-			lzms_update_main_state(&cur_optimum_ptr->state, 1);
-			lzms_update_match_state(&cur_optimum_ptr->state, 0);
+			lzms_update_main_state(&cur_node->state, 1);
+			lzms_update_match_state(&cur_node->state, 0);
 
 			if (offset_data >= LZMS_NUM_RECENT_OFFSETS) {
 
 				/* Explicit offset LZ match  */
 
-				lzms_update_lz_match_state(&cur_optimum_ptr->state, 0);
+				lzms_update_lz_match_state(&cur_node->state, 0);
 
-				cur_optimum_ptr->state.lru.upcoming_offset =
-					offset_data - LZMS_OFFSET_OFFSET;
+				cur_node->state.lru.upcoming_offset =
+					offset_data - LZMS_OFFSET_ADJUSTMENT;
 			} else {
 				/* Repeat offset LZ match  */
 
-				lzms_update_lz_match_state(&cur_optimum_ptr->state, 1);
-				lzms_update_lz_repeat_match_state(&cur_optimum_ptr->state,
-								  offset_data);
+				lzms_update_lz_match_state(&cur_node->state, 1);
+				lzms_update_lz_repmatch_states(&cur_node->state, offset_data);
 
-				cur_optimum_ptr->state.lru.upcoming_offset =
-					cur_optimum_ptr->state.lru.recent_offsets[offset_data];
+				cur_node->state.lru.upcoming_offset =
+					cur_node->state.lru.recent_offsets[offset_data];
 
-				for (i = offset_data; i < LZMS_NUM_RECENT_OFFSETS; i++)
-					cur_optimum_ptr->state.lru.recent_offsets[i] =
-						cur_optimum_ptr->state.lru.recent_offsets[i + 1];
+				for (u32 i = offset_data; i < LZMS_NUM_RECENT_OFFSETS; i++)
+					cur_node->state.lru.recent_offsets[i] =
+						cur_node->state.lru.recent_offsets[i + 1];
 			}
 		}
 
-		lzms_update_lz_lru_queue(&cur_optimum_ptr->state.lru);
+		lzms_update_lz_lru_queue(&cur_node->state.lru);
 
 		/*
 		 * This loop will terminate when either of the following
 		 * conditions is true:
 		 *
-		 * (1) cur_optimum_ptr == end_optimum_ptr
+		 * (1) cur_node == end_node
 		 *
 		 *	There are no paths that extend beyond the current
 		 *	position.  In this case, any path to a later position
@@ -1234,7 +1212,7 @@ begin:
 		 *	ahead and choose the list of items that led to this
 		 *	position.
 		 *
-		 * (2) cur_optimum_ptr == c->optimum_end
+		 * (2) cur_node == &c->optimum_nodes[LZMS_NUM_OPTIM_NODES]
 		 *
 		 *	This bounds the number of times the algorithm can step
 		 *	forward before it is guaranteed to start choosing items.
@@ -1242,26 +1220,22 @@ begin:
 		 *	the parser will not go too long without updating the
 		 *	probability tables.
 		 *
-		 * Note: no check for end-of-window is needed because
-		 * end-of-window will trigger condition (1).
+		 * Note: no check for end-of-buffer is needed because
+		 * end-of-buffer will trigger condition (1).
 		 */
-		if (cur_optimum_ptr == end_optimum_ptr ||
-		    cur_optimum_ptr == c->optimum_end)
+		if (cur_node == end_node ||
+		    cur_node == &c->optimum_nodes[LZMS_NUM_OPTIM_NODES])
 		{
-			c->optimum[0].state = cur_optimum_ptr->state;
-			break;
+			lzms_encode_item_list(c, cur_node);
+			c->optimum_nodes[0].state = cur_node->state;
+			goto begin;
 		}
 	}
-
-	/* Output the current list of items that constitute the minimum-cost
-	 * path to the current position.  */
-	lzms_encode_item_list(c, cur_optimum_ptr);
-	goto begin;
 }
 
 static void
-lzms_init_range_encoder(struct lzms_range_encoder *enc,
-			struct lzms_range_encoder_raw *rc, u32 num_states)
+lzms_init_bit_encoder(struct lzms_bit_encoder *enc,
+		      struct lzms_range_encoder *rc, unsigned num_states)
 {
 	enc->rc = rc;
 	enc->state = 0;
@@ -1273,45 +1247,32 @@ lzms_init_range_encoder(struct lzms_range_encoder *enc,
 static void
 lzms_init_huffman_encoder(struct lzms_huffman_encoder *enc,
 			  struct lzms_output_bitstream *os,
-			  unsigned num_syms,
-			  unsigned rebuild_freq)
+			  unsigned num_syms, unsigned rebuild_freq)
 {
 	enc->os = os;
-	enc->num_syms_written = 0;
-	enc->rebuild_freq = rebuild_freq;
 	enc->num_syms = num_syms;
+	enc->rebuild_freq = rebuild_freq;
+	enc->num_syms_until_rebuild = rebuild_freq;
 	for (unsigned i = 0; i < num_syms; i++)
-		enc->sym_freqs[i] = 1;
+		enc->freqs[i] = 1;
 
-	make_canonical_huffman_code(enc->num_syms,
-				    LZMS_MAX_CODEWORD_LEN,
-				    enc->sym_freqs,
-				    enc->lens,
-				    enc->codewords);
+	make_canonical_huffman_code(enc->num_syms, LZMS_MAX_CODEWORD_LEN,
+				    enc->freqs, enc->lens, enc->codewords);
 }
 
-/* Prepare the LZMS compressor for compressing a block of data.  */
 static void
-lzms_prepare_compressor(struct lzms_compressor *c, const u8 *udata, u32 ulen,
-			le16 *cdata, u32 clen16)
+lzms_prepare_encoders(struct lzms_compressor *c, void *out,
+		      size_t out_nbytes_avail, unsigned num_offset_slots)
 {
-	unsigned num_offset_slots;
-
-	/* Copy the uncompressed data into the @c->cur_window buffer.  */
-	memcpy(c->cur_window, udata, ulen);
-	c->cur_window_size = ulen;
-
-	/* Initialize the raw range encoder (writing forwards).  */
-	lzms_range_encoder_raw_init(&c->rc, cdata, clen16);
+	/* Initialize the range encoder (writing forwards).  */
+	lzms_range_encoder_init(&c->rc, out, out_nbytes_avail / sizeof(le16));
 
 	/* Initialize the output bitstream for Huffman symbols and verbatim bits
 	 * (writing backwards).  */
-	lzms_output_bitstream_init(&c->os, cdata, clen16);
+	lzms_output_bitstream_init(&c->os, out, out_nbytes_avail / sizeof(le16));
 
-	/* Calculate the number of offset slots required.  */
-	num_offset_slots = lzms_get_offset_slot(ulen - 1) + 1;
+	/* Initialize the Huffman encoders.  */
 
-	/* Initialize a Huffman encoder for each alphabet.  */
 	lzms_init_huffman_encoder(&c->literal_encoder, &c->os,
 				  LZMS_NUM_LITERAL_SYMS,
 				  LZMS_LITERAL_CODE_REBUILD_FREQ);
@@ -1324,38 +1285,20 @@ lzms_prepare_compressor(struct lzms_compressor *c, const u8 *udata, u32 ulen,
 				  LZMS_NUM_LENGTH_SYMS,
 				  LZMS_LENGTH_CODE_REBUILD_FREQ);
 
-	lzms_init_huffman_encoder(&c->delta_offset_encoder, &c->os,
-				  num_offset_slots,
-				  LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ);
+	/* Initialize the bit encoders.  */
 
-	lzms_init_huffman_encoder(&c->delta_power_encoder, &c->os,
-				  LZMS_NUM_DELTA_POWER_SYMS,
-				  LZMS_DELTA_POWER_CODE_REBUILD_FREQ);
+	lzms_init_bit_encoder(&c->main_bit_encoder,
+			      &c->rc, LZMS_NUM_MAIN_STATES);
 
-	/* Initialize range encoders, all of which wrap around the same
-	 * lzms_range_encoder_raw.  */
-	lzms_init_range_encoder(&c->main_range_encoder,
-				&c->rc, LZMS_NUM_MAIN_STATES);
+	lzms_init_bit_encoder(&c->match_bit_encoder,
+			      &c->rc, LZMS_NUM_MATCH_STATES);
 
-	lzms_init_range_encoder(&c->match_range_encoder,
-				&c->rc, LZMS_NUM_MATCH_STATES);
+	lzms_init_bit_encoder(&c->lz_match_bit_encoder,
+			      &c->rc, LZMS_NUM_LZ_MATCH_STATES);
 
-	lzms_init_range_encoder(&c->lz_match_range_encoder,
-				&c->rc, LZMS_NUM_LZ_MATCH_STATES);
-
-	for (unsigned i = 0; i < ARRAY_LEN(c->lz_repeat_match_range_encoders); i++)
-		lzms_init_range_encoder(&c->lz_repeat_match_range_encoders[i],
-					&c->rc, LZMS_NUM_LZ_REPEAT_MATCH_STATES);
-
-	lzms_init_range_encoder(&c->delta_match_range_encoder,
-				&c->rc, LZMS_NUM_DELTA_MATCH_STATES);
-
-	for (unsigned i = 0; i < ARRAY_LEN(c->delta_repeat_match_range_encoders); i++)
-		lzms_init_range_encoder(&c->delta_repeat_match_range_encoders[i],
-					&c->rc, LZMS_NUM_DELTA_REPEAT_MATCH_STATES);
-
-	/* Set initial length costs for lengths < LZMS_NUM_FAST_LENGTHS.  */
-	lzms_update_fast_length_costs(c);
+	for (int i = 0; i < ARRAY_LEN(c->lz_repmatch_bit_encoders); i++)
+		lzms_init_bit_encoder(&c->lz_repmatch_bit_encoders[i],
+				      &c->rc, LZMS_NUM_LZ_REPEAT_MATCH_STATES);
 }
 
 /* Flush the output streams, prepare the final compressed data, and return its
@@ -1364,7 +1307,7 @@ lzms_prepare_compressor(struct lzms_compressor *c, const u8 *udata, u32 ulen,
  * A return value of 0 indicates that the data could not be compressed to fit in
  * the available space.  */
 static size_t
-lzms_finalize(struct lzms_compressor *c, u8 *cdata, size_t csize_avail)
+lzms_finalize(struct lzms_compressor *c, u8 *out, size_t out_nbytes_avail)
 {
 	size_t num_forwards_bytes;
 	size_t num_backwards_bytes;
@@ -1374,7 +1317,7 @@ lzms_finalize(struct lzms_compressor *c, u8 *cdata, size_t csize_avail)
 	if (!lzms_output_bitstream_flush(&c->os))
 		return 0;
 
-	if (!lzms_range_encoder_raw_flush(&c->rc))
+	if (!lzms_range_encoder_flush(&c->rc))
 		return 0;
 
 	if (c->rc.next > c->os.next)
@@ -1385,156 +1328,106 @@ lzms_finalize(struct lzms_compressor *c, u8 *cdata, size_t csize_avail)
 	 * bitstream.  Move the data output by the backwards bitstream to be
 	 * adjacent to the data output by the forward bitstream, and calculate
 	 * the compressed size that this results in.  */
-	num_forwards_bytes = (u8*)c->rc.next - (u8*)cdata;
-	num_backwards_bytes = ((u8*)cdata + csize_avail) - (u8*)c->os.next;
+	num_forwards_bytes = (u8 *)c->rc.next - out;
+	num_backwards_bytes = (out + out_nbytes_avail) - (u8 *)c->os.next;
 
-	memmove(cdata + num_forwards_bytes, c->os.next, num_backwards_bytes);
+	memmove(out + num_forwards_bytes, c->os.next, num_backwards_bytes);
 
 	return num_forwards_bytes + num_backwards_bytes;
 }
 
-/* Set internal compression parameters for the specified compression level and
- * maximum window size.  */
-static void
-lzms_build_params(unsigned int compression_level,
-		  struct lzms_compressor_params *params)
-{
-	/* Allow length 2 matches if the compression level is sufficiently high.
-	 */
-	if (compression_level >= 45)
-		params->min_match_length = 2;
-	else
-		params->min_match_length = 3;
-
-	/* Scale nice_match_length with the compression level.  But to allow an
-	 * optimization on length cost calculations, don't allow
-	 * nice_match_length to exceed LZMS_NUM_FAST_LENGTH.  */
-	params->nice_match_length = ((u64)compression_level * 32) / 50;
-	if (params->nice_match_length < params->min_match_length)
-		params->nice_match_length = params->min_match_length;
-	if (params->nice_match_length > LZMS_NUM_FAST_LENGTHS)
-		params->nice_match_length = LZMS_NUM_FAST_LENGTHS;
-	params->optim_array_length = 1024;
-}
-
-static void
-lzms_free_compressor(void *_c);
-
 static u64
-lzms_get_needed_memory(size_t max_block_size, unsigned int compression_level)
+lzms_get_needed_memory(size_t max_bufsize, unsigned compression_level)
 {
-	struct lzms_compressor_params params;
 	u64 size = 0;
 
-	if (max_block_size > LZMS_MAX_BUFFER_SIZE)
+	if (max_bufsize > LZMS_MAX_BUFFER_SIZE)
 		return 0;
-
-	lzms_build_params(compression_level, &params);
 
 	size += sizeof(struct lzms_compressor);
 
-	/* cur_window */
-	size += max_block_size;
+	/* in_buffer */
+	size += max_bufsize;
 
 	/* mf */
-	size += lcpit_matchfinder_get_needed_memory(max_block_size);
-
-	/* matches */
-	size += (params.nice_match_length - params.min_match_length + 1) *
-		sizeof(struct lz_match);
-
-	/* optimum */
-	size += (params.optim_array_length + params.nice_match_length) *
-		sizeof(struct lzms_mc_pos_data);
+	size += lcpit_matchfinder_get_needed_memory(max_bufsize);
 
 	return size;
 }
 
 static int
-lzms_create_compressor(size_t max_block_size, unsigned int compression_level,
-		       void **ctx_ret)
+lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
+		       void **c_ret)
 {
 	struct lzms_compressor *c;
-	struct lzms_compressor_params params;
+	u32 nice_match_len;
 
-	if (max_block_size > LZMS_MAX_BUFFER_SIZE)
+	if (max_bufsize > LZMS_MAX_BUFFER_SIZE)
 		return WIMLIB_ERR_INVALID_PARAM;
 
-	lzms_build_params(compression_level, &params);
+	/* Scale nice_match_len with the compression level.  But to allow an
+	 * optimization on length cost calculations, don't allow nice_match_len
+	 * to exceed LZMS_MAX_FAST_LENGTH.  */
+	nice_match_len = min(((u64)compression_level * 32) / 50,
+			     LZMS_MAX_FAST_LENGTH);
 
-	c = CALLOC(1, sizeof(struct lzms_compressor));
+	c = MALLOC(sizeof(struct lzms_compressor));
 	if (!c)
-		goto oom;
+		goto oom0;
 
-	c->params = params;
+	c->in_buffer = MALLOC(max_bufsize);
+	if (!c->in_buffer)
+		goto oom1;
 
-	c->cur_window = MALLOC(max_block_size);
-	if (!c->cur_window)
-		goto oom;
-
-	if (!lcpit_matchfinder_init(&c->mf, max_block_size,
-				    c->params.min_match_length,
-				    c->params.nice_match_length))
-		goto oom;
-
-	c->matches = MALLOC((params.nice_match_length - params.min_match_length + 1) *
-			    sizeof(struct lz_match));
-	if (!c->matches)
-		goto oom;
-
-	c->optimum = MALLOC((params.optim_array_length +
-			     params.nice_match_length) *
-			    sizeof(struct lzms_mc_pos_data));
-	if (!c->optimum)
-		goto oom;
-	c->optimum_end = &c->optimum[params.optim_array_length];
-
-	lzms_init_rc_costs();
+	if (!lcpit_matchfinder_init(&c->mf, max_bufsize, 2, nice_match_len))
+		goto oom2;
 
 	lzms_init_fast_slots(c);
 
-	*ctx_ret = c;
+	*c_ret = c;
 	return 0;
 
-oom:
-	lzms_free_compressor(c);
+oom2:
+	FREE(c->in_buffer);
+oom1:
+	FREE(c);
+oom0:
 	return WIMLIB_ERR_NOMEM;
 }
 
 static size_t
-lzms_compress(const void *uncompressed_data, size_t uncompressed_size,
-	      void *compressed_data, size_t compressed_size_avail, void *_c)
+lzms_compress(const void *in, size_t in_nbytes,
+	      void *out, size_t out_nbytes_avail, void *_c)
 {
 	struct lzms_compressor *c = _c;
 
-	/* Don't bother compressing extremely small inputs.  */
-	if (uncompressed_size < 4)
+	/* Don't bother trying to compress extremely small inputs.  */
+	if (in_nbytes < 4)
 		return 0;
 
-	/* Cap the available compressed size to a 32-bit integer and round it
-	 * down to the nearest multiple of 2.  */
-	if (compressed_size_avail > UINT32_MAX)
-		compressed_size_avail = UINT32_MAX;
-	if (compressed_size_avail & 1)
-		compressed_size_avail--;
+	/* Cap the available compressed size to a 32-bit integer and it round
+	 * down to the nearest multiple of 2 so it can be evenly divided into
+	 * 16-bit integers.  */
+	out_nbytes_avail = min(out_nbytes_avail, UINT32_MAX) & ~1;
 
-	/* Initialize the compressor structures.  */
-	lzms_prepare_compressor(c, uncompressed_data, uncompressed_size,
-				compressed_data, compressed_size_avail / 2);
+	/* Copy the input data into the internal buffer and preprocess it.  */
+	memcpy(c->in_buffer, in, in_nbytes);
+	c->in_nbytes = in_nbytes;
+	lzms_x86_filter(c->in_buffer, in_nbytes, c->last_target_usages, false);
 
-	/* Preprocess the uncompressed data.  */
-	lzms_x86_filter(c->cur_window, c->cur_window_size,
-			c->last_target_usages, false);
+	/* Load the buffer into the matchfinder.  */
+	lcpit_matchfinder_load_buffer(&c->mf, c->in_buffer, c->in_nbytes);
 
-	/* Load the window into the match-finder.  */
-	lcpit_matchfinder_load_buffer(&c->mf, c->cur_window, c->cur_window_size);
+	/* Initialize the encoder structures.  */
+	lzms_prepare_encoders(c, out, out_nbytes_avail,
+			      lzms_get_num_offset_slots(c->in_nbytes));
 
 	/* Compute and encode a literal/match sequence that decompresses to the
 	 * preprocessed data.  */
 	lzms_near_optimal_parse(c);
 
 	/* Return the compressed data size or 0.  */
-	return lzms_finalize(c, compressed_data, compressed_size_avail);
+	return lzms_finalize(c, out, out_nbytes_avail);
 }
 
 static void
@@ -1542,13 +1435,9 @@ lzms_free_compressor(void *_c)
 {
 	struct lzms_compressor *c = _c;
 
-	if (c) {
-		FREE(c->cur_window);
-		lcpit_matchfinder_destroy(&c->mf);
-		FREE(c->matches);
-		FREE(c->optimum);
-		FREE(c);
-	}
+	FREE(c->in_buffer);
+	lcpit_matchfinder_destroy(&c->mf);
+	FREE(c);
 }
 
 const struct compressor_ops lzms_compressor_ops = {

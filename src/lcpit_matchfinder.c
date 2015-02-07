@@ -64,7 +64,7 @@ lcpit_matchfinder_get_needed_memory(size_t max_bufsize)
 	size += ((u64)max_bufsize + 1) * sizeof(u32);
 
 	/* intervals or intervals64  */
-	size += max((u64)max_bufsize, DIVSUFSORT_TMP_LEN) *
+	size += (u64)max(max_bufsize, DIVSUFSORT_TMP_LEN) *
 		(max_bufsize <= MAX_NORMAL_BUFSIZE ? sizeof(u32) : sizeof(u64));
 
 	/* SA */
@@ -91,7 +91,7 @@ lcpit_matchfinder_init(struct lcpit_matchfinder *mf, size_t max_bufsize,
 		return false;
 
 	mf->pos_data = MALLOC((max_bufsize + 1) * sizeof(u32));
-	mf->intervals = MALLOC(max((u64)max_bufsize, DIVSUFSORT_TMP_LEN) *
+	mf->intervals = MALLOC(max(max_bufsize, DIVSUFSORT_TMP_LEN) *
 			       (max_bufsize <= MAX_NORMAL_BUFSIZE ?
 				sizeof(u32) : sizeof(u64)));
 	mf->SA = MALLOC(max_bufsize * sizeof(u32));
