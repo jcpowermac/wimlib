@@ -1332,10 +1332,6 @@ begin:
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
 
 		/* Search for LZ-style matches with repeat offsets.  */
-		u32 rep_lens[LZMS_NUM_RECENT_OFFSETS];
-		int best_rep_idx = 0;
-		for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++)
-			rep_lens[rep_idx] = 0;
 		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET &&
 			   in_end - in_next >= 2))
 		{
@@ -1345,85 +1341,73 @@ begin:
 						     
 				if (load_u16_unaligned(in_next) != load_u16_unaligned(matchptr))
 					continue;
-				rep_lens[rep_idx] = lz_extend(in_next, matchptr, 2,
-							      in_end - in_next);
-				if (rep_lens[rep_idx] > rep_lens[best_rep_idx])
-					best_rep_idx = rep_idx;
-			}
-		}
+				u32 len = lz_extend(in_next, matchptr, 2,
+						    in_end - in_next);
+				/* If there's a very long repeat offset LZ
+				 * match, then choose it immediately.  */
+				if (len >= c->mf.nice_match_len) {
+					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
 
-		/* If there's a very long repeat offset LZ match, then choose it
-		 * immediately.  */
-		if (rep_lens[best_rep_idx] >= c->mf.nice_match_len) {
-			u32 len = rep_lens[best_rep_idx];
-			int rep_idx = best_rep_idx;
+					if (cur_node != c->optimum_nodes)
+						lzms_encode_item_list(c, cur_node);
 
-			in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
+					lzms_encode_item(c,
+							 ((u64)rep_idx <<
+							  OPTIMUM_OFFSET_SHIFT) | len);
 
-			if (cur_node != c->optimum_nodes)
-				lzms_encode_item_list(c, cur_node);
+					c->optimum_nodes[0].state = cur_node->state;
 
-			lzms_encode_item(c,
-					 ((u64)rep_idx <<
-					  OPTIMUM_OFFSET_SHIFT) | len);
+					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_match_state(&c->optimum_nodes[0].state, 0);
+					lzms_update_lz_match_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state,
+								       rep_idx);
 
-			c->optimum_nodes[0].state = cur_node->state;
+					c->optimum_nodes[0].state.lru.lz.upcoming_offset =
+						c->optimum_nodes[0].state.lru.lz.recent_offsets[rep_idx];
+				#if LZMS_USE_DELTA_MATCHES
+					c->optimum_nodes[0].state.lru.delta.upcoming_ref = 0;
+				#endif
 
-			lzms_update_main_state(&c->optimum_nodes[0].state, 1);
-			lzms_update_match_state(&c->optimum_nodes[0].state, 0);
-			lzms_update_lz_match_state(&c->optimum_nodes[0].state, 1);
-			lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state,
-						       rep_idx);
+					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
+						c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
+							c->optimum_nodes[
+								0].state.lru.lz.recent_offsets[i + 1];
 
-			c->optimum_nodes[0].state.lru.lz.upcoming_offset =
-				c->optimum_nodes[0].state.lru.lz.recent_offsets[rep_idx];
-		#if LZMS_USE_DELTA_MATCHES
-			c->optimum_nodes[0].state.lru.delta.upcoming_ref = 0;
-		#endif
+					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+					goto begin;
+				}
+				while (end_node < cur_node + len)
+					(++end_node)->cost = INFINITE_COST;
 
-			for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-				c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
-					c->optimum_nodes[
-						0].state.lru.lz.recent_offsets[i + 1];
+				u32 base_cost = cur_node->cost +
+						lzms_bit_cost(1, cur_node->state.main_state,
+							      c->main_prob_entries) +
+						lzms_bit_cost(0, cur_node->state.match_state,
+							      c->match_prob_entries) +
+						lzms_bit_cost(1, cur_node->state.lz_match_state,
+							      c->lz_match_prob_entries);
 
-			lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
-			goto begin;
-		}
+				for (int i = 0; i < rep_idx; i++)
+					base_cost += lzms_bit_cost(1,
+							   cur_node->state.lz_repmatch_states[i],
+							   c->lz_repmatch_prob_entries[i]);
 
-		if (rep_lens[best_rep_idx] >= 2) {
-			u32 len = rep_lens[best_rep_idx];
-			int rep_idx = best_rep_idx;
+				if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+					base_cost += lzms_bit_cost(0,
+							   cur_node->state.lz_repmatch_states[rep_idx],
+							   c->lz_repmatch_prob_entries[rep_idx]);
 
-			while (end_node < cur_node + len)
-				(++end_node)->cost = INFINITE_COST;
-
-			u32 base_cost = cur_node->cost +
-					lzms_bit_cost(1, cur_node->state.main_state,
-						      c->main_prob_entries) +
-					lzms_bit_cost(0, cur_node->state.match_state,
-						      c->match_prob_entries) +
-					lzms_bit_cost(1, cur_node->state.lz_match_state,
-						      c->lz_match_prob_entries);
-
-			for (int i = 0; i < rep_idx; i++)
-				base_cost += lzms_bit_cost(1,
-						   cur_node->state.lz_repmatch_states[i],
-						   c->lz_repmatch_prob_entries[i]);
-
-			if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
-				base_cost += lzms_bit_cost(0,
-						   cur_node->state.lz_repmatch_states[rep_idx],
-						   c->lz_repmatch_prob_entries[rep_idx]);
-
-			/* Considering a repeat offset LZ match  */
-			u32 offset_data = rep_idx;
-			for (u32 l = 2; l <= len; l++) {
-				u32 cost = base_cost + lzms_fast_length_cost(c, l);
-				if (cost < (cur_node + l)->cost) {
-					(cur_node + l)->cost = cost;
-					(cur_node + l)->item =
-						((u64)offset_data <<
-							OPTIMUM_OFFSET_SHIFT) | l;
+				/* Considering a repeat offset LZ match  */
+				u32 offset_data = rep_idx;
+				for (u32 l = 2; l <= len; l++) {
+					u32 cost = base_cost + lzms_fast_length_cost(c, l);
+					if (cost < (cur_node + l)->cost) {
+						(cur_node + l)->cost = cost;
+						(cur_node + l)->item =
+							((u64)offset_data <<
+								OPTIMUM_OFFSET_SHIFT) | l;
+					}
 				}
 			}
 		}
