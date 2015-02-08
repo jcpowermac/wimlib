@@ -190,6 +190,8 @@ struct lzms_optimum_node {
 	u32 cost;
 #define INFINITE_COST UINT32_MAX
 
+	u32 padding1;
+
 	/*
 	 * The match or literal that was taken to reach this position.  This can
 	 * change as progressively lower cost paths are found to reach this
@@ -235,6 +237,8 @@ struct lzms_optimum_node {
 		u8 lz_match_state;
 		u8 lz_repmatch_states[LZMS_NUM_RECENT_OFFSETS - 1];
 	} state;
+
+	u32 padding2[4];
 };
 
 /* The main LZMS compressor structure  */
@@ -1052,6 +1056,10 @@ lzms_near_optimal_parse(struct lzms_compressor *c)
 
 	/* Set up the initial adaptive state.  */
 	lzms_init_adaptive_state(&c->optimum_nodes[0].state);
+
+	/* For best performance the node size should be power-of-2 size.
+	 * Currently we have it padded to 64 bytes.  */
+	BUILD_BUG_ON(sizeof(struct lzms_optimum_node) != 64);
 
 begin:
 	/* Start building a new list of items, which will correspond to the next
