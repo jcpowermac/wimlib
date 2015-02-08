@@ -1031,20 +1031,14 @@ lzms_consider_lz_repeat_offset_match(const struct lzms_compressor *c,
 }
 
 static inline void
-lzms_do_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
-					    struct lzms_optimum_node *cur_node,
-					    const struct lz_match matches[],
-					    u32 num_matches,
-					    bool all_small_offsets)
+lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
+					 struct lzms_optimum_node *cur_node,
+					 const struct lz_match matches[],
+					 u32 num_matches,
+					 bool all_small_offsets,
+					 u32 base_cost)
 {
-	u32 base_cost = cur_node->cost +
-			lzms_bit_cost(1, cur_node->state.main_state,
-				      c->main_prob_entries) +
-			lzms_bit_cost(0, cur_node->state.match_state,
-				      c->match_prob_entries) +
-			lzms_bit_cost(0, cur_node->state.lz_match_state,
-				      c->lz_match_prob_entries);
-	u32 len = 2;
+	u32 l = 2;
 	u32 i = num_matches - 1;
 	do {
 		unsigned slot =
@@ -1053,52 +1047,15 @@ lzms_do_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 				lzms_comp_get_offset_slot(c, matches[i].offset);
 		u32 position_cost = base_cost + lzms_lz_offset_slot_cost(c, slot);
 		do {
-			u32 cost = position_cost + lzms_fast_length_cost(c, len);
-			if (cost < (cur_node + len)->cost) {
-				(cur_node + len)->item =
+			u32 cost = position_cost + lzms_fast_length_cost(c, l);
+			if (cost < (cur_node + l)->cost) {
+				(cur_node + l)->item =
 					((u64)(matches[i].offset + LZMS_OFFSET_ADJUSTMENT)
-						<< ITEM_SOURCE_SHIFT) | len;
-				(cur_node + len)->cost = cost;
+						<< ITEM_SOURCE_SHIFT) | l;
+				(cur_node + l)->cost = cost;
 			}
-		} while (++len <= matches[i].length);
+		} while (++l <= matches[i].length);
 	} while (i--);
-}
-
-/*
- * Consider coding each LZ-style match in @matches as an explicit offset match.
- *
- * @matches must be sorted by strictly decreasing length.  This is guaranteed by
- * the matchfinder.
- *
- * We consider each length from the minimum (2) to the longest
- * (matches[0].length).  For each length, we consider only the smallest offset
- * for which that length is available.  Although this is not guaranteed to be
- * optimal due to the possibility of a larger offset costing less than a smaller
- * offset to code, this is a very useful heuristic.
- */
-static inline void
-lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
-					 struct lzms_optimum_node *cur_node,
-					 const struct lz_match matches[],
-					 u32 num_matches)
-{
-	/* matches[0].offset is the largest offset of the matches to consider.
-	 * If this is < 0xe4a5, then we can do branchless lookups of offset
-	 * slots using offset_slot_tab_1.  Inline the code for both cases.  */
-
-	if (matches[0].offset < 0xe4a5) {
-		lzms_do_consider_lz_explicit_offset_matches(c,
-							    cur_node,
-							    matches,
-							    num_matches,
-							    true);
-	} else {
-		lzms_do_consider_lz_explicit_offset_matches(c,
-							    cur_node,
-							    matches,
-							    num_matches,
-							    false);
-	}
 }
 
 static void
@@ -1438,6 +1395,8 @@ begin:
 
 				const u32 len = lzms_extend_delta_match(in_next, matchptr,
 									span, 2, in_end - in_next);
+				const u64 source_bits = (u64)(LZMS_DELTA_SOURCE_TAG | rep_idx)
+								<< ITEM_SOURCE_SHIFT;
 
 				/* Early out for long repeat offset delta match */
 				if (len >= c->mf.nice_match_len) {
@@ -1447,8 +1406,7 @@ begin:
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_item(c, ((u64)(LZMS_DELTA_SOURCE_TAG | rep_idx)
-							     << ITEM_SOURCE_SHIFT) | len);
+					lzms_encode_item(c, source_bits | len);
 
 					c->optimum_nodes[0].state = cur_node->state;
 
@@ -1487,8 +1445,6 @@ begin:
 					base_cost += lzms_bit_cost(0, cur_node->state.delta_repmatch_states[rep_idx],
 								   c->delta_repmatch_prob_entries[rep_idx]);
 
-				const u64 source_bits = (u64)(LZMS_DELTA_SOURCE_TAG | rep_idx)
-								<< ITEM_SOURCE_SHIFT;
 				for (u32 l = 2; l <= len; l++) {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
@@ -1505,22 +1461,21 @@ begin:
 		if (num_matches) {
 			u32 best_len = c->matches[0].length;
 
-			/* If there's a very long explicit offset match, then
-			 * choose it immediately.  */
+			/* Early out for long explicit offset LZ match  */
 			if (best_len >= c->mf.nice_match_len) {
 
 				u32 offset = c->matches[0].offset;
 
-				/* Extend the match as far as possible.  (The
-				 * LCP-interval tree matchfinder only reports up
-				 * to nice_match_len bytes.)  */
+				/* Extend the match as far as possible.
+				 * This is necessary because the LCP-interval
+				 * tree matchfinder only reports up to
+				 * nice_match_len bytes.  */
 				best_len = lz_extend(in_next,
 						     in_next - offset,
 						     best_len,
 						     in_end - in_next);
 
-				in_next = lzms_skip_bytes(c, best_len - 1,
-							  in_next + 1);
+				in_next = lzms_skip_bytes(c, best_len - 1, in_next + 1);
 
 				if (cur_node != c->optimum_nodes)
 					lzms_encode_item_list(c, cur_node);
@@ -1549,32 +1504,75 @@ begin:
 			while (end_node < cur_node + best_len)
 				(++end_node)->cost = INFINITE_COST;
 
-			/* Consider coding an explicit offset match.  */
-			lzms_consider_lz_explicit_offset_matches(c, cur_node,
-								 c->matches, num_matches);
+
+			u32 base_cost = cur_node->cost +
+					lzms_bit_cost(1, cur_node->state.main_state,
+						      c->main_prob_entries) +
+					lzms_bit_cost(0, cur_node->state.match_state,
+						      c->match_prob_entries) +
+					lzms_bit_cost(0, cur_node->state.lz_match_state,
+						      c->lz_match_prob_entries);
+
+			/*
+			 * matches[0].offset is the largest offset of the
+			 * matches to consider.  If this is < 0xe4a5, then we
+			 * can do branchless lookups of offset slots using
+			 * offset_slot_tab_1.  Inline the code for both cases.
+			 */
+			if (c->matches[0].offset < 0xe4a5) {
+				lzms_consider_lz_explicit_offset_matches(c,
+									 cur_node,
+									 c->matches,
+									 num_matches,
+									 true,
+									 base_cost);
+			} else {
+				lzms_consider_lz_explicit_offset_matches(c,
+									 cur_node,
+									 c->matches,
+									 num_matches,
+									 false,
+									 base_cost);
+			}
 		}
 
 	#if LZMS_USE_DELTA_MATCHES
 		/* Explicit offset delta matches  */
 		if (in_end - in_next >= 2) {
+			/* Consider each possible power (log2 of span)  */
 			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
 				u32 span = (u32)1 << power;
 				if (in_next - c->in_buffer < span)
 					continue;
+
+				/* Insert the current sequence into the hash
+				 * table and get the sequence that was in the
+				 * hash table.  */
 				u32 hash = lzms_delta_hash2(in_next, span);
 				u32 cur_match = c->delta_hash_tables[power][hash];
 				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
+
+				/* If cur_match == 0, then no sequence was in
+				 * the hash table.  */
 				if (cur_match == 0)
 					continue;
+
 				const u8 *matchptr = &c->in_buffer[cur_match];
 				u32 offset = in_next - matchptr;
+
+				/* The offset must be a multiple of span.  */
 				if (offset & (span - 1))
 					continue;
+
+				/* Check the first 2 bytes before entering the
+				 * extension loop.  */
 				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
 				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
 				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
 				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))))
 					continue;
+
+				/* Extend the delta match to its full length. */
 				u32 len = lzms_extend_delta_match(in_next,
 								  matchptr,
 								  span,
@@ -1582,20 +1580,20 @@ begin:
 								  in_end - in_next);
 				u32 raw_offset = offset >> power;
 
-				/* If there's a very long explicit offset delta
-				 * match, then choose it immediately.  */
+				const u32 pair = (power << LZMS_DELTA_SOURCE_POWER_SHIFT) | raw_offset;
+				const u64 source_bits = (u64)(LZMS_DELTA_SOURCE_TAG |
+							      (pair + LZMS_OFFSET_ADJUSTMENT))
+							<< ITEM_SOURCE_SHIFT;
+
+				/* If the match is very long, choose it immediately.  */
 				if (len >= c->mf.nice_match_len) {
-					u32 ref = (power << 28) + raw_offset;
 
 					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
 
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_item(c,
-							 ((u64)(0x80000000 |
-								(ref + LZMS_OFFSET_ADJUSTMENT)) <<
-							  ITEM_SOURCE_SHIFT) | len);
+					lzms_encode_item(c, source_bits | len);
 
 					c->optimum_nodes[0].state = cur_node->state;
 
@@ -1604,7 +1602,7 @@ begin:
 					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 0);
 
 					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
-					c->optimum_nodes[0].state.lru.delta.upcoming_pair = ref;
+					c->optimum_nodes[0].state.lru.delta.upcoming_pair = pair;
 
 					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
@@ -1622,17 +1620,11 @@ begin:
 							      c->delta_match_prob_entries) +
 						lzms_delta_ref_cost(c, power, raw_offset);
 
-				/* Considering an explicit offset delta match  */
-				u32 ref_data = 0x80000000 |
-						((power << 28) + raw_offset +
-						 LZMS_OFFSET_ADJUSTMENT);
 				for (u32 l = 2; l <= len; l++) {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
-						(cur_node + l)->item =
-							 ((u64)ref_data <<
-							  	ITEM_SOURCE_SHIFT) | l;
+						(cur_node + l)->item = source_bits | l;
 					}
 				}
 			}
