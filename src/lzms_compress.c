@@ -70,6 +70,10 @@
  */
 #define LZMS_COST_SHIFT		6
 
+#define LZMS_USE_DELTA_MATCHES	1
+#define LZMS_DELTA_HASH_ORDER	10
+#define LZMS_DELTA_HASH_LENGTH	(1 << LZMS_DELTA_HASH_ORDER)
+
 /* This structure tracks the state of writing bits as a series of 16-bit coding
  * units, starting at the end of the output buffer and proceeding backwards.  */
 struct lzms_output_bitstream {
@@ -210,6 +214,11 @@ struct lzms_compressor {
 	/* The matchfinder for LZ77-style matches  */
 	struct lcpit_matchfinder mf;
 
+#if LZMS_USE_DELTA_MATCHES
+	/* Hash tables for finding delta matches  */
+	u32 delta_hash_tables[LZMS_NUM_DELTA_POWER_SYMS][LZMS_DELTA_HASH_LENGTH];
+#endif
+
 	/* Temporary space to store matches found by the matchfinder  */
 	struct lz_match matches[LZMS_MAX_FAST_LENGTH - LZMS_MIN_MATCH_LEN + 1];
 
@@ -240,11 +249,20 @@ struct lzms_compressor {
 	unsigned match_state;
 	unsigned lz_match_state;
 	unsigned lz_repmatch_states[LZMS_NUM_RECENT_OFFSETS - 1];
+#if LZMS_USE_DELTA_MATCHES
+	unsigned delta_match_state;
+	unsigned delta_repmatch_states[LZMS_NUM_RECENT_OFFSETS - 1];
+#endif
 	struct lzms_probability_entry main_prob_entries[LZMS_NUM_MAIN_STATES];
 	struct lzms_probability_entry match_prob_entries[LZMS_NUM_MATCH_STATES];
 	struct lzms_probability_entry lz_match_prob_entries[LZMS_NUM_LZ_MATCH_STATES];
 	struct lzms_probability_entry lz_repmatch_prob_entries[LZMS_NUM_RECENT_OFFSETS - 1]
 							      [LZMS_NUM_LZ_REPEAT_MATCH_STATES];
+#if LZMS_USE_DELTA_MATCHES
+	struct lzms_probability_entry delta_match_prob_entries[LZMS_NUM_DELTA_MATCH_STATES];
+	struct lzms_probability_entry delta_repmatch_prob_entries[LZMS_NUM_RECENT_OFFSETS - 1]
+								 [LZMS_NUM_DELTA_REPEAT_MATCH_STATES];
+#endif
 
 	/* Huffman codes  */
 
@@ -262,6 +280,18 @@ struct lzms_compressor {
 	u32 length_codewords[LZMS_NUM_LENGTH_SYMS];
 	u8 length_lens[LZMS_NUM_LENGTH_SYMS];
 	u32 length_freqs[LZMS_NUM_LENGTH_SYMS];
+
+#if LZMS_USE_DELTA_MATCHES
+	struct lzms_huffman_rebuild_info delta_offset_rebuild_info;
+	u32 delta_offset_codewords[LZMS_MAX_NUM_OFFSET_SYMS];
+	u8 delta_offset_lens[LZMS_MAX_NUM_OFFSET_SYMS];
+	u32 delta_offset_freqs[LZMS_MAX_NUM_OFFSET_SYMS];
+
+	struct lzms_huffman_rebuild_info delta_power_rebuild_info;
+	u32 delta_power_codewords[LZMS_NUM_DELTA_POWER_SYMS];
+	u8 delta_power_lens[LZMS_NUM_DELTA_POWER_SYMS];
+	u32 delta_power_freqs[LZMS_NUM_DELTA_POWER_SYMS];
+#endif
 
 	/* An array that is needed for preprocessing  */
 	s32 last_target_usages[65536];
@@ -1366,6 +1396,22 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 				       c->length_codewords,
 				       c->length_lens);
 
+#if LZMS_USE_DELTA_MATCHES
+	lzms_init_huffman_rebuild_info(&c->delta_offset_rebuild_info,
+				       LZMS_MAX_NUM_OFFSET_SYMS,
+				       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
+				       c->delta_offset_freqs,
+				       c->delta_offset_codewords,
+				       c->delta_offset_lens);
+
+	lzms_init_huffman_rebuild_info(&c->delta_power_rebuild_info,
+				       LZMS_NUM_DELTA_POWER_SYMS,
+				       LZMS_DELTA_POWER_CODE_REBUILD_FREQ,
+				       c->delta_power_freqs,
+				       c->delta_power_codewords,
+				       c->delta_power_lens);
+#endif
+
 	/* Initialize the states and probability entries.  */
 
 	c->main_state = 0;
@@ -1499,6 +1545,10 @@ lzms_compress(const void *in, size_t in_nbytes,
 
 	/* Load the buffer into the matchfinder.  */
 	lcpit_matchfinder_load_buffer(&c->mf, c->in_buffer, c->in_nbytes);
+
+#if LZMS_USE_DELTA_MATCHES
+	memset(c->delta_hash_tables, 0, sizeof(c->delta_hash_tables));
+#endif
 
 	/* Initialize the encoder structures.  */
 	lzms_prepare_encoders(c, out, out_nbytes_avail,
