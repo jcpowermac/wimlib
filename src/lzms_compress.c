@@ -274,11 +274,11 @@ struct lzms_compressor {
 	struct lzms_probability_entry match_prob_entries[LZMS_NUM_MATCH_STATES];
 	struct lzms_probability_entry lz_match_prob_entries[LZMS_NUM_LZ_MATCH_STATES];
 	struct lzms_probability_entry lz_repmatch_prob_entries[LZMS_NUM_REPMATCH_CONTEXTS]
-							      [LZMS_NUM_LZ_REPEAT_MATCH_STATES];
+							      [LZMS_NUM_LZ_REPMATCH_STATES];
 #if LZMS_USE_DELTA_MATCHES
 	struct lzms_probability_entry delta_match_prob_entries[LZMS_NUM_DELTA_MATCH_STATES];
 	struct lzms_probability_entry delta_repmatch_prob_entries[LZMS_NUM_REPMATCH_CONTEXTS]
-								 [LZMS_NUM_DELTA_REPEAT_MATCH_STATES];
+								 [LZMS_NUM_DELTA_REPMATCH_STATES];
 #endif
 
 	/* Huffman codes  */
@@ -592,7 +592,7 @@ static void
 lzms_encode_lz_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
 {
 	lzms_encode_bit(bit, &c->lz_repmatch_states[idx],
-			LZMS_NUM_LZ_REPEAT_MATCH_STATES,
+			LZMS_NUM_LZ_REPMATCH_STATES,
 			c->lz_repmatch_prob_entries[idx], &c->rc);
 }
 
@@ -608,7 +608,7 @@ static void
 lzms_encode_delta_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
 {
 	lzms_encode_bit(bit, &c->delta_repmatch_states[idx],
-			LZMS_NUM_DELTA_REPEAT_MATCH_STATES,
+			LZMS_NUM_DELTA_REPMATCH_STATES,
 			c->delta_repmatch_prob_entries[idx], &c->rc);
 }
 #endif
@@ -1170,12 +1170,12 @@ lzms_update_lz_repmatch_states(struct lzms_adaptive_state *state, unsigned rep_i
 	for (unsigned i = 0; i < rep_idx; i++)
 		state->lz_repmatch_states[i] =
 			((state->lz_repmatch_states[i] << 1) | 1) %
-				LZMS_NUM_LZ_REPEAT_MATCH_STATES;
+				LZMS_NUM_LZ_REPMATCH_STATES;
 
 	if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
 		state->lz_repmatch_states[rep_idx] =
 			((state->lz_repmatch_states[rep_idx] << 1) | 0) %
-				LZMS_NUM_LZ_REPEAT_MATCH_STATES;
+				LZMS_NUM_LZ_REPMATCH_STATES;
 }
 
 #if LZMS_USE_DELTA_MATCHES
@@ -1193,12 +1193,12 @@ lzms_update_delta_repmatch_states(struct lzms_adaptive_state *state, unsigned re
 	for (unsigned i = 0; i < rep_idx; i++)
 		state->delta_repmatch_states[i] =
 			((state->delta_repmatch_states[i] << 1) | 1) %
-				LZMS_NUM_DELTA_REPEAT_MATCH_STATES;
+				LZMS_NUM_DELTA_REPMATCH_STATES;
 
 	if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
 		state->delta_repmatch_states[rep_idx] =
 			((state->delta_repmatch_states[rep_idx] << 1) | 0) %
-				LZMS_NUM_DELTA_REPEAT_MATCH_STATES;
+				LZMS_NUM_DELTA_REPMATCH_STATES;
 }
 #endif
 
@@ -1842,12 +1842,12 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 	lzms_init_probability_entries(c->lz_match_prob_entries, LZMS_NUM_LZ_MATCH_STATES);
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		lzms_init_probability_entries(c->lz_repmatch_prob_entries[i],
-					      LZMS_NUM_LZ_REPEAT_MATCH_STATES);
+					      LZMS_NUM_LZ_REPMATCH_STATES);
 #if LZMS_USE_DELTA_MATCHES
 	lzms_init_probability_entries(c->delta_match_prob_entries, LZMS_NUM_DELTA_MATCH_STATES);
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		lzms_init_probability_entries(c->delta_repmatch_prob_entries[i],
-					      LZMS_NUM_DELTA_REPEAT_MATCH_STATES);
+					      LZMS_NUM_DELTA_REPMATCH_STATES);
 #endif
 }
 

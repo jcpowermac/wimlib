@@ -350,13 +350,13 @@ struct lzms_decompressor {
 	struct lzms_probability_entry delta_match_prob_entries[
 			LZMS_NUM_DELTA_MATCH_STATES];
 
-	u32 lz_repeat_match_states[LZMS_NUM_REPMATCH_CONTEXTS];
-	struct lzms_probability_entry lz_repeat_match_prob_entries[
-			LZMS_NUM_REPMATCH_CONTEXTS][LZMS_NUM_LZ_REPEAT_MATCH_STATES];
+	u32 lz_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
+	struct lzms_probability_entry lz_repmatch_prob_entries[
+			LZMS_NUM_REPMATCH_CONTEXTS][LZMS_NUM_LZ_REPMATCH_STATES];
 
-	u32 delta_repeat_match_states[LZMS_NUM_REPMATCH_CONTEXTS];
-	struct lzms_probability_entry delta_repeat_match_prob_entries[
-			LZMS_NUM_REPMATCH_CONTEXTS][LZMS_NUM_DELTA_REPEAT_MATCH_STATES];
+	u32 delta_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
+	struct lzms_probability_entry delta_repmatch_prob_entries[
+			LZMS_NUM_REPMATCH_CONTEXTS][LZMS_NUM_DELTA_REPMATCH_STATES];
 
 	/* Huffman decoding  */
 
@@ -574,17 +574,17 @@ lzms_decode_delta_match_bit(struct lzms_decompressor *d)
 static noinline int
 lzms_decode_lz_repeat_match_bit(struct lzms_decompressor *d, int idx)
 {
-	return lzms_range_decode_bit(&d->rd, &d->lz_repeat_match_states[idx],
-				     LZMS_NUM_LZ_REPEAT_MATCH_STATES,
-				     d->lz_repeat_match_prob_entries[idx]);
+	return lzms_range_decode_bit(&d->rd, &d->lz_repmatch_states[idx],
+				     LZMS_NUM_LZ_REPMATCH_STATES,
+				     d->lz_repmatch_prob_entries[idx]);
 }
 
 static noinline int
 lzms_decode_delta_repeat_match_bit(struct lzms_decompressor *d, int idx)
 {
-	return lzms_range_decode_bit(&d->rd, &d->delta_repeat_match_states[idx],
-				     LZMS_NUM_DELTA_REPEAT_MATCH_STATES,
-				     d->delta_repeat_match_prob_entries[idx]);
+	return lzms_range_decode_bit(&d->rd, &d->delta_repmatch_states[idx],
+				     LZMS_NUM_DELTA_REPMATCH_STATES,
+				     d->delta_repmatch_prob_entries[idx]);
 }
 
 static void
@@ -912,13 +912,13 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 	lzms_init_probability_entries(d->delta_match_prob_entries, LZMS_NUM_DELTA_MATCH_STATES);
 
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++) {
-		d->lz_repeat_match_states[i] = 0;
-		lzms_init_probability_entries(d->lz_repeat_match_prob_entries[i],
-					      LZMS_NUM_LZ_REPEAT_MATCH_STATES);
+		d->lz_repmatch_states[i] = 0;
+		lzms_init_probability_entries(d->lz_repmatch_prob_entries[i],
+					      LZMS_NUM_LZ_REPMATCH_STATES);
 
-		d->delta_repeat_match_states[i] = 0;
-		lzms_init_probability_entries(d->delta_repeat_match_prob_entries[i],
-					      LZMS_NUM_DELTA_REPEAT_MATCH_STATES);
+		d->delta_repmatch_states[i] = 0;
+		lzms_init_probability_entries(d->delta_repmatch_prob_entries[i],
+					      LZMS_NUM_DELTA_REPMATCH_STATES);
 	}
 
 	/* Huffman decoding  */
