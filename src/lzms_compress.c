@@ -142,7 +142,7 @@ struct lzms_lz_lru_queue {
 };
 
 #if LZMS_USE_DELTA_MATCHES
-/* The LRU queue for offsets of delta-style matches  */
+/* The LRU queue for (power, raw_offset) references of delta-style matches  */
 struct lzms_delta_lru_queue {
 	u64 recent_refs[LZMS_NUM_RECENT_OFFSETS + 1];
 	u64 prev_ref;
@@ -821,12 +821,10 @@ lzms_encode_item(struct lzms_compressor *c, u64 item)
 				/* Explicit offset delta match  */
 				u32 power = offset_data >> 28;
 				u32 raw_offset = (offset_data & 0x0FFFFFFF) - LZMS_OFFSET_ADJUSTMENT;
-				fprintf(stderr, "encode delta match; power=%u, raw_offset=%u\n",
-					power, raw_offset);
 				lzms_encode_delta_power(c, power);
 				lzms_encode_delta_offset(c, raw_offset);
 			} else {
-				/* Repeat offset LZ match  */
+				/* Repeat offset delta match  */
 				int rep_idx = offset_data;
 				for (int i = 0; i < rep_idx; i++)
 					lzms_encode_delta_repmatch_bit(c, 1, i);
@@ -1470,7 +1468,8 @@ begin:
 					continue;
 				u32 raw_offset = offset >> power;
 				if (len >= c->mf.nice_match_len) {
-					fprintf(stderr, "long delta match; len=%u, power=%u, raw_offset=%u.\n",
+					fprintf(stderr, "%zu: long delta match; len=%u, power=%u, raw_offset=%u.\n",
+						in_next - c->in_buffer,
 						len, power, raw_offset);
 					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
 					in_next += len;
@@ -1630,7 +1629,7 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 
 #if LZMS_USE_DELTA_MATCHES
 	lzms_init_huffman_rebuild_info(&c->delta_offset_rebuild_info,
-				       LZMS_MAX_NUM_OFFSET_SYMS,
+				       num_offset_slots,
 				       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
 				       c->delta_offset_freqs,
 				       c->delta_offset_codewords,
