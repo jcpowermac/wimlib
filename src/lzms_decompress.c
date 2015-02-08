@@ -350,13 +350,13 @@ struct lzms_decompressor {
 	struct lzms_probability_entry delta_match_prob_entries[
 			LZMS_NUM_DELTA_MATCH_STATES];
 
-	u32 lz_repeat_match_states[LZMS_NUM_RECENT_OFFSETS - 1];
+	u32 lz_repeat_match_states[LZMS_NUM_REPMATCH_CONTEXTS];
 	struct lzms_probability_entry lz_repeat_match_prob_entries[
-			LZMS_NUM_RECENT_OFFSETS - 1][LZMS_NUM_LZ_REPEAT_MATCH_STATES];
+			LZMS_NUM_REPMATCH_CONTEXTS][LZMS_NUM_LZ_REPEAT_MATCH_STATES];
 
-	u32 delta_repeat_match_states[LZMS_NUM_RECENT_OFFSETS - 1];
+	u32 delta_repeat_match_states[LZMS_NUM_REPMATCH_CONTEXTS];
 	struct lzms_probability_entry delta_repeat_match_prob_entries[
-			LZMS_NUM_RECENT_OFFSETS - 1][LZMS_NUM_DELTA_REPEAT_MATCH_STATES];
+			LZMS_NUM_REPMATCH_CONTEXTS][LZMS_NUM_DELTA_REPEAT_MATCH_STATES];
 
 	/* Huffman decoding  */
 
@@ -911,7 +911,7 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 	d->delta_match_state = 0;
 	lzms_init_probability_entries(d->delta_match_prob_entries, LZMS_NUM_DELTA_MATCH_STATES);
 
-	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++) {
+	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++) {
 		d->lz_repeat_match_states[i] = 0;
 		lzms_init_probability_entries(d->lz_repeat_match_prob_entries[i],
 					      LZMS_NUM_LZ_REPEAT_MATCH_STATES);
