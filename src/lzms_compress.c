@@ -579,6 +579,23 @@ lzms_encode_lz_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
 			c->lz_repmatch_prob_entries[idx], &c->rc);
 }
 
+#if LZMS_USE_DELTA_MATCHES
+static void
+lzms_encode_delta_match_bit(struct lzms_compressor *c, int bit)
+{
+	lzms_encode_bit(bit, &c->delta_match_state, LZMS_NUM_DELTA_MATCH_STATES,
+			c->delta_match_prob_entries, &c->rc);
+}
+
+static void
+lzms_encode_delta_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
+{
+	lzms_encode_bit(bit, &c->delta_repmatch_states[idx],
+			LZMS_NUM_DELTA_REPEAT_MATCH_STATES,
+			c->delta_repmatch_prob_entries[idx], &c->rc);
+}
+#endif
+
 static void
 lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
 			       unsigned num_syms, unsigned rebuild_freq,
@@ -648,6 +665,24 @@ lzms_encode_length_symbol(struct lzms_compressor *c, unsigned sym)
 					  &c->os, &c->length_rebuild_info);
 }
 
+#if LZMS_USE_DELTA_MATCHES
+static bool
+lzms_encode_delta_offset_symbol(struct lzms_compressor *c, unsigned sym)
+{
+	return lzms_huffman_encode_symbol(sym, c->delta_offset_codewords,
+					  c->delta_offset_lens, c->delta_offset_freqs,
+					  &c->os, &c->delta_offset_rebuild_info);
+}
+
+static bool
+lzms_encode_delta_power_symbol(struct lzms_compressor *c, unsigned sym)
+{
+	return lzms_huffman_encode_symbol(sym, c->delta_power_codewords,
+					  c->delta_power_lens, c->delta_power_freqs,
+					  &c->os, &c->delta_power_rebuild_info);
+}
+#endif
+
 static void
 lzms_update_fast_length_costs(struct lzms_compressor *c);
 
@@ -687,6 +722,30 @@ lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 	lzms_output_bitstream_put_varbits(&c->os, extra_bits, num_extra_bits, 30);
 }
 
+#if LZMS_USE_DELTA_MATCHES
+static void
+lzms_encode_delta_power(struct lzms_compressor *c, u32 power)
+{
+	lzms_encode_delta_power_symbol(c, power);
+}
+
+static void
+lzms_encode_delta_offset(struct lzms_compressor *c, u32 raw_offset)
+{
+	unsigned slot;
+	u32 extra_bits;
+	unsigned num_extra_bits;
+
+	slot = lzms_comp_get_offset_slot(c, raw_offset);
+
+	extra_bits = raw_offset - lzms_offset_slot_base[slot];
+	num_extra_bits = lzms_extra_offset_bits[slot];
+
+	lzms_encode_delta_offset_symbol(c, slot);
+	lzms_output_bitstream_put_varbits(&c->os, extra_bits, num_extra_bits, 30);
+}
+#endif
+
 /* Encode a literal or match item.  */
 static void
 lzms_encode_item(struct lzms_compressor *c, u64 item)
@@ -703,26 +762,60 @@ lzms_encode_item(struct lzms_compressor *c, u64 item)
 		unsigned literal = offset_data;
 		lzms_encode_literal_symbol(c, literal);
 	} else {
-		/* Match (always LZ in this implementation)  */
+		/* Match  */
 
-		/* Match bit: 0 = LZ match, not a delta match  */
-		lzms_encode_match_bit(c, 0);
+		/* Match bit: 0 = LZ match, 1 = delta match  */
+	#if LZMS_USE_DELTA_MATCHES
+		int match_bit = (offset_data >> 31);
+	#else
+		int match_bit = 0;
+	#endif
+		lzms_encode_match_bit(c, match_bit);
 
-		/* LZ match bit: 0 = explicit offset, 1 = repeat offset  */
-		int lz_match_bit = (offset_data < LZMS_NUM_RECENT_OFFSETS);
-		lzms_encode_lz_match_bit(c, lz_match_bit);
-		if (!lz_match_bit) {
-			/* Explicit offset LZ match  */
-			u32 offset = offset_data - LZMS_OFFSET_ADJUSTMENT;
-			lzms_encode_lz_offset(c, offset);
-		} else {
-			/* Repeat offset LZ match  */
-			int rep_idx = offset_data;
-			for (int i = 0; i < rep_idx; i++)
-				lzms_encode_lz_repmatch_bit(c, 1, i);
-			if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
-				lzms_encode_lz_repmatch_bit(c, 0, rep_idx);
+		if (!match_bit) {
+			/* LZ match  */
+
+			/* LZ match bit: 0 = explicit offset, 1 = repeat offset  */
+			int lz_match_bit = (offset_data < LZMS_NUM_RECENT_OFFSETS);
+			lzms_encode_lz_match_bit(c, lz_match_bit);
+			if (!lz_match_bit) {
+				/* Explicit offset LZ match  */
+				u32 offset = offset_data - LZMS_OFFSET_ADJUSTMENT;
+				lzms_encode_lz_offset(c, offset);
+			} else {
+				/* Repeat offset LZ match  */
+				int rep_idx = offset_data;
+				for (int i = 0; i < rep_idx; i++)
+					lzms_encode_lz_repmatch_bit(c, 1, i);
+				if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+					lzms_encode_lz_repmatch_bit(c, 0, rep_idx);
+			}
+		} 
+	#if LZMS_USE_DELTA_MATCHES
+		else {
+			/* Delta match  */
+
+			offset_data &= ~0x80000000;
+
+			/* Delta match bit: 0 = explicit offset, 1 = repeat offset  */
+			int delta_match_bit = (offset_data < LZMS_NUM_RECENT_OFFSETS);
+			lzms_encode_delta_match_bit(c, delta_match_bit);
+			if (!delta_match_bit) {
+				/* Explicit offset delta match  */
+				u32 power = offset_data >> 28;
+				u32 raw_offset = (offset_data & 0x0FFFFFFF) - LZMS_OFFSET_ADJUSTMENT;
+				lzms_encode_delta_power(c, power);
+				lzms_encode_delta_offset(c, raw_offset);
+			} else {
+				/* Repeat offset LZ match  */
+				int rep_idx = offset_data;
+				for (int i = 0; i < rep_idx; i++)
+					lzms_encode_delta_repmatch_bit(c, 1, i);
+				if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+					lzms_encode_delta_repmatch_bit(c, 0, rep_idx);
+			}
 		}
+	#endif
 		/* Match length (same for any match type)  */
 		lzms_encode_length(c, length);
 	}
