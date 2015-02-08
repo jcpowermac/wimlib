@@ -144,9 +144,9 @@ struct lzms_lz_lru_queue {
 #if LZMS_USE_DELTA_MATCHES
 /* The LRU queue for offsets of delta-style matches  */
 struct lzms_delta_lru_queue {
-	u64 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
-	u64 prev_offset;
-	u64 upcoming_offset;
+	u64 recent_refs[LZMS_NUM_RECENT_OFFSETS + 1];
+	u64 prev_ref;
+	u64 upcoming_ref;
 };
 #endif
 
@@ -1093,10 +1093,10 @@ lzms_init_lru_queue(struct lzms_lru_queue *queue)
 
 #if LZMS_USE_DELTA_MATCHES
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
-		queue->delta.recent_offsets[i] = i + 1;
+		queue->delta.recent_refs[i] = i + 1;
 
-	queue->delta.prev_offset = 0;
-	queue->delta.upcoming_offset = 0;
+	queue->delta.prev_ref = 0;
+	queue->delta.upcoming_ref = 0;
 #endif
 }
 
@@ -1128,12 +1128,12 @@ lzms_update_lru_queue(struct lzms_lru_queue *queue)
 	queue->lz.prev_offset = queue->lz.upcoming_offset;
 
 #if LZMS_USE_DELTA_MATCHES
-	if (queue->delta.prev_offset != 0) {
+	if (queue->delta.prev_ref != 0) {
 		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
-			queue->delta.recent_offsets[i + 1] = queue->delta.recent_offsets[i];
-		queue->delta.recent_offsets[0] = queue->delta.prev_offset;
+			queue->delta.recent_refs[i + 1] = queue->delta.recent_refs[i];
+		queue->delta.recent_refs[0] = queue->delta.prev_ref;
 	}
-	queue->delta.prev_offset = queue->delta.upcoming_offset;
+	queue->delta.prev_ref = queue->delta.upcoming_ref;
 #endif
 }
 
@@ -1223,12 +1223,13 @@ lzms_find_longest_repeat_offset_match(const u8 * const in_next,
 }
 
 #if LZMS_USE_DELTA_MATCHES
-static u16
-lzms_load_delta_digram(const u8 *p, u32 span)
+static u32
+lzms_delta_hash2(const u8 *p, u32 span)
 {
 	u8 diff1 = p[0] - p[(s32)(0 - span)];
 	u8 diff2 = p[1] - p[(s32)(1 - span)];
-	return ((u16)diff1 << 8) | diff2;
+	u16 v = ((u16)diff1 << 8) | diff2;
+	return lz_hash(v, LZMS_DELTA_HASH_ORDER);
 }
 
 static u32
@@ -1452,8 +1453,7 @@ begin:
 				u32 span = (u32)1 << power;
 				if (in_next - c->in_buffer < span)
 					continue;
-				u16 delta_digram = lzms_load_delta_digram(in_next, span);
-				u32 hash = lz_hash(delta_digram, LZMS_DELTA_HASH_ORDER);
+				u32 hash = lzms_delta_hash2(in_next, span);
 				u32 cur_match = c->delta_hash_tables[power][hash];
 				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
 				if (cur_match == 0)
@@ -1470,8 +1470,8 @@ begin:
 					continue;
 				u32 raw_offset = offset >> power;
 				if (len >= c->mf.nice_match_len) {
-					fprintf(stderr, "long delta match; power=%u, raw_offset=%u.\n",
-						power, raw_offset);
+					fprintf(stderr, "long delta match; len=%u, power=%u, raw_offset=%u.\n",
+						len, power, raw_offset);
 					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
 					in_next += len;
 
@@ -1491,8 +1491,8 @@ begin:
 					lzms_update_match_state(&c->optimum_nodes[0].state, 1);
 					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 0);
 
-					c->optimum_nodes[0].state.lru.delta.upcoming_offset =
-						((u64)raw_offset << 32) | power;
+					c->optimum_nodes[0].state.lru.delta.upcoming_ref =
+						((u64)power << 32) | raw_offset;
 
 					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
