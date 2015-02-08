@@ -70,7 +70,7 @@
  */
 #define LZMS_COST_SHIFT		6
 
-#define LZMS_USE_DELTA_MATCHES	1
+#define LZMS_USE_DELTA_MATCHES	0
 #define LZMS_DELTA_HASH_ORDER	10
 #define LZMS_DELTA_HASH_LENGTH	(1 << LZMS_DELTA_HASH_ORDER)
 
@@ -140,6 +140,22 @@ struct lzms_lz_lru_queue {
 	u32 upcoming_offset;
 };
 
+#if LZMS_USE_DELTA_MATCHES
+/* The LRU queue for offsets of delta-style matches  */
+struct lzms_delta_lru_queue {
+	u64 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
+	u64 prev_offset;
+	u64 upcoming_offset;
+};
+#endif
+
+struct lzms_lru_queue {
+	struct lzms_lz_lru_queue lz;
+#if LZMS_USE_DELTA_MATCHES
+	struct lzms_delta_lru_queue delta;
+#endif
+};
+
 /*
  * This structure represents a byte position in the input buffer and a node in
  * the graph of possible match/literal choices.
@@ -156,8 +172,6 @@ struct lzms_optimum_node {
 	 * paths are found to reach this position.  */
 	u32 cost;
 #define INFINITE_COST UINT32_MAX
-
-	u32 padding1;
 
 	/*
 	 * The match or literal that was taken to reach this position.  This can
@@ -198,14 +212,16 @@ struct lzms_optimum_node {
 	 * per-position and are only updated occassionally.
 	 */
 	struct lzms_adaptive_state {
-		struct lzms_lz_lru_queue lru;
+		struct lzms_lru_queue lru;
 		u8 main_state;
 		u8 match_state;
 		u8 lz_match_state;
 		u8 lz_repmatch_states[LZMS_NUM_RECENT_OFFSETS - 1];
+	#if LZMS_USE_DELTA_MATCHES
+		u8 delta_match_state;
+		u8 delta_repmatch_states[LZMS_NUM_RECENT_OFFSETS - 1];
+	#endif
 	} state;
-
-	u32 padding2[4];
 };
 
 /* The main LZMS compressor structure  */
@@ -790,12 +806,12 @@ lzms_encode_item(struct lzms_compressor *c, u64 item)
 				if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
 					lzms_encode_lz_repmatch_bit(c, 0, rep_idx);
 			}
-		} 
+		}
 	#if LZMS_USE_DELTA_MATCHES
 		else {
 			/* Delta match  */
 
-			offset_data &= ~0x80000000;
+			offset_data ^= 0x80000000;
 
 			/* Delta match bit: 0 = explicit offset, 1 = repeat offset  */
 			int delta_match_bit = (offset_data < LZMS_NUM_RECENT_OFFSETS);
@@ -1064,19 +1080,27 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 }
 
 static void
-lzms_init_lz_lru_queue(struct lzms_lz_lru_queue *queue)
+lzms_init_lru_queue(struct lzms_lru_queue *queue)
 {
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
-		queue->recent_offsets[i] = i + 1;
+		queue->lz.recent_offsets[i] = i + 1;
 
-	queue->prev_offset = 0;
-	queue->upcoming_offset = 0;
+	queue->lz.prev_offset = 0;
+	queue->lz.upcoming_offset = 0;
+
+#if LZMS_USE_DELTA_MATCHES
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
+		queue->delta.recent_offsets[i] = i + 1;
+
+	queue->delta.prev_offset = 0;
+	queue->delta.upcoming_offset = 0;
+#endif
 }
 
 static void
 lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 {
-	lzms_init_lz_lru_queue(&state->lru);
+	lzms_init_lru_queue(&state->lru);
 	state->main_state = 0;
 	state->match_state = 0;
 	state->lz_match_state = 0;
@@ -1085,14 +1109,23 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 }
 
 static void
-lzms_update_lz_lru_queue(struct lzms_lz_lru_queue *queue)
+lzms_update_lru_queue(struct lzms_lru_queue *queue)
 {
-	if (queue->prev_offset != 0) {
+	if (queue->lz.prev_offset != 0) {
 		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
-			queue->recent_offsets[i + 1] = queue->recent_offsets[i];
-		queue->recent_offsets[0] = queue->prev_offset;
+			queue->lz.recent_offsets[i + 1] = queue->lz.recent_offsets[i];
+		queue->lz.recent_offsets[0] = queue->lz.prev_offset;
 	}
-	queue->prev_offset = queue->upcoming_offset;
+	queue->lz.prev_offset = queue->lz.upcoming_offset;
+
+#if LZMS_USE_DELTA_MATCHES
+	if (queue->delta.prev_offset != 0) {
+		for (int i = LZMS_NUM_RECENT_OFFSETS - 1; i >= 0; i--)
+			queue->delta.recent_offsets[i + 1] = queue->delta.recent_offsets[i];
+		queue->delta.recent_offsets[0] = queue->delta.prev_offset;
+	}
+	queue->delta.prev_offset = queue->delta.upcoming_offset;
+#endif
 }
 
 static inline void
@@ -1196,9 +1229,11 @@ lzms_near_optimal_parse(struct lzms_compressor *c)
 	/* Set up the initial adaptive state.  */
 	lzms_init_adaptive_state(&c->optimum_nodes[0].state);
 
+#if 0 // TODO
 	/* For best performance the node size should be power-of-2 size.
 	 * Currently we have it padded to 64 bytes.  */
 	BUILD_BUG_ON(sizeof(struct lzms_optimum_node) != 64);
+#endif
 
 begin:
 	/* Start building a new list of items, which will correspond to the next
@@ -1249,7 +1284,7 @@ begin:
 				best_rep_len = lzms_find_longest_repeat_offset_match(
 							in_next,
 							in_end - in_next,
-							&cur_node->state.lru,
+							&cur_node->state.lru.lz,
 							&best_rep_idx);
 			} else {
 				best_rep_len = 0;
@@ -1277,14 +1312,14 @@ begin:
 					lzms_update_lz_match_state(&c->optimum_nodes[0].state, 1);
 					lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state, best_rep_idx);
 
-					c->optimum_nodes[0].state.lru.upcoming_offset =
-						c->optimum_nodes[0].state.lru.recent_offsets[best_rep_idx];
+					c->optimum_nodes[0].state.lru.lz.upcoming_offset =
+						c->optimum_nodes[0].state.lru.lz.recent_offsets[best_rep_idx];
 
 					for (unsigned i = best_rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						c->optimum_nodes[0].state.lru.recent_offsets[i] =
-							c->optimum_nodes[0].state.lru.recent_offsets[i + 1];
+						c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
+							c->optimum_nodes[0].state.lru.lz.recent_offsets[i + 1];
 
-					lzms_update_lz_lru_queue(&c->optimum_nodes[0].state.lru);
+					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
 				}
 
@@ -1330,9 +1365,9 @@ begin:
 				lzms_update_match_state(&c->optimum_nodes[0].state, 0);
 				lzms_update_lz_match_state(&c->optimum_nodes[0].state, 0);
 
-				c->optimum_nodes[0].state.lru.upcoming_offset = offset;
+				c->optimum_nodes[0].state.lru.lz.upcoming_offset = offset;
 
-				lzms_update_lz_lru_queue(&c->optimum_nodes[0].state.lru);
+				lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 				goto begin;
 			}
 
@@ -1355,8 +1390,8 @@ begin:
 					lzms_encode_item(c, ((u64)*in_next++ <<
 							     OPTIMUM_OFFSET_SHIFT) | 1);
 					lzms_update_main_state(&cur_node->state, 0);
-					cur_node->state.lru.upcoming_offset = 0;
-					lzms_update_lz_lru_queue(&cur_node->state.lru);
+					cur_node->state.lru.lz.upcoming_offset = 0;
+					lzms_update_lru_queue(&cur_node->state.lru);
 					goto begin;
 				}
 			#endif
@@ -1386,7 +1421,7 @@ begin:
 			cur_node->item = ((u64)literal << OPTIMUM_OFFSET_SHIFT) | 1;
 			cur_node->state = (cur_node - 1)->state;
 			lzms_update_main_state(&cur_node->state, 0);
-			cur_node->state.lru.upcoming_offset = 0;
+			cur_node->state.lru.lz.upcoming_offset = 0;
 		} else {
 			/* LZ match  */
 			u32 len = cur_node->item & OPTIMUM_LEN_MASK;
@@ -1403,7 +1438,7 @@ begin:
 
 				lzms_update_lz_match_state(&cur_node->state, 0);
 
-				cur_node->state.lru.upcoming_offset =
+				cur_node->state.lru.lz.upcoming_offset =
 					offset_data - LZMS_OFFSET_ADJUSTMENT;
 			} else {
 				/* Repeat offset LZ match  */
@@ -1411,16 +1446,16 @@ begin:
 				lzms_update_lz_match_state(&cur_node->state, 1);
 				lzms_update_lz_repmatch_states(&cur_node->state, offset_data);
 
-				cur_node->state.lru.upcoming_offset =
-					cur_node->state.lru.recent_offsets[offset_data];
+				cur_node->state.lru.lz.upcoming_offset =
+					cur_node->state.lru.lz.recent_offsets[offset_data];
 
 				for (u32 i = offset_data; i < LZMS_NUM_RECENT_OFFSETS; i++)
-					cur_node->state.lru.recent_offsets[i] =
-						cur_node->state.lru.recent_offsets[i + 1];
+					cur_node->state.lru.lz.recent_offsets[i] =
+						cur_node->state.lru.lz.recent_offsets[i + 1];
 			}
 		}
 
-		lzms_update_lz_lru_queue(&cur_node->state.lru);
+		lzms_update_lru_queue(&cur_node->state.lru);
 
 		/*
 		 * This loop will terminate when either of the following
