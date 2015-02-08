@@ -1458,8 +1458,59 @@ begin:
 
 		/* Consider delta matches.  */
 	#if LZMS_USE_DELTA_MATCHES
+		if (in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1) {
+			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
+				u32 ref = cur_node->state.lru.delta.recent_refs[rep_idx];
+				u32 power = ref >> 28;
+				u32 span = (u32)1 << power;
+				u32 raw_offset = ref & 0x0FFFFFFF;
+				u32 offset = raw_offset << power;
+				const u8 *matchptr = in_next - offset;
+				u32 len = lzms_extend_delta_match(in_next,
+								  matchptr,
+								  span,
+								  0,
+								  in_end - in_next);
+				if (len < 2)
+					continue;
+
+				/* If there's a very long repeat offset delta
+				 * match, then choose it immediately.  */
+				if (len >= c->mf.nice_match_len) {
+					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
+					in_next += len;
+
+					if (cur_node != c->optimum_nodes)
+						lzms_encode_item_list(c, cur_node);
+
+					lzms_encode_item(c,
+							 ((u64)(0x80000000 | rep_idx)
+							 	<< OPTIMUM_OFFSET_SHIFT)
+								| len);
+
+					c->optimum_nodes[0].state = cur_node->state;
+
+					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_match_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_delta_repmatch_states(&c->optimum_nodes[0].state,
+									  rep_idx);
+
+					c->optimum_nodes[0].state.lru.delta.upcoming_ref = ref;
+					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
+
+					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++) {
+						c->optimum_nodes[0].state.lru.delta.recent_refs[i] =
+							c->optimum_nodes[
+								0].state.lru.delta.recent_refs[i + 1];
+					}
+
+					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+					goto begin;
+				}
+			}
+		}
 		if (in_end - in_next >= 2) {
-			/* Find the longest delta match with the current position  */
 			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
 				u32 span = (u32)1 << power;
 				if (in_next - c->in_buffer < span)
@@ -1481,6 +1532,9 @@ begin:
 				if (len < 2)
 					continue;
 				u32 raw_offset = offset >> power;
+
+				/* If there's a very long explicit offset delta
+				 * match, then choose it immediately.  */
 				if (len >= c->mf.nice_match_len) {
 					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
 					in_next += len;
