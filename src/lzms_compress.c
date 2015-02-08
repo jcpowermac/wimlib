@@ -71,7 +71,7 @@
  */
 #define LZMS_COST_SHIFT		6
 
-#define LZMS_USE_DELTA_MATCHES	0
+#define LZMS_USE_DELTA_MATCHES	1
 #define LZMS_DELTA_HASH_ORDER	10
 #define LZMS_DELTA_HASH_LENGTH	(1 << LZMS_DELTA_HASH_ORDER)
 
@@ -1240,6 +1240,8 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count,
 			continue;
 		for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
 			u32 span = (u32)1 << power;
+			if (span > in_next - c->in_buffer)
+				continue;
 			u32 hash = lzms_delta_hash2(in_next, span);
 			c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
 		}
@@ -1466,6 +1468,8 @@ begin:
 
 		/* Consider delta matches.  */
 	#if LZMS_USE_DELTA_MATCHES
+
+		/* Repeat offset delta matches  */
 		if (in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1 &&
 		    (in_end - in_next >= 2)) {
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
@@ -1543,7 +1547,7 @@ begin:
 
 				/* Considering a repeat offset delta match  */
 				u32 offset_data = 0x80000000 | rep_idx;
-				for (u32 l = 2; l < len; l++) {
+				for (u32 l = 2; l <= len; l++) {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
@@ -1554,6 +1558,8 @@ begin:
 				}
 			}
 		}
+
+		/* Explicit offset delta matches  */
 		if (in_end - in_next >= 2) {
 			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
 				u32 span = (u32)1 << power;
@@ -1624,7 +1630,7 @@ begin:
 				u32 offset_data = 0x80000000 |
 						((power << 28) + raw_offset +
 						 LZMS_OFFSET_ADJUSTMENT);
-				for (u32 l = 2; l < len; l++) {
+				for (u32 l = 2; l <= len; l++) {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
