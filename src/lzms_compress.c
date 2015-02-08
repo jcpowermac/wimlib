@@ -1205,8 +1205,19 @@ begin:
 			/* No matches found.  The only choice at this position
 			 * is to code a literal.  */
 
-			if (end_node == cur_node)
+			if (end_node == cur_node) {
+			#if 1
+				/* Optimization for single literals.  */
+				if (likely(cur_node == c->optimum_nodes)) {
+					lzms_encode_literal(c, *in_next++);
+					lzms_update_main_state(&cur_node->state, 0);
+					cur_node->state.lru.upcoming_offset = 0;
+					lzms_update_lz_lru_queue(&cur_node->state.lru);
+					goto begin;
+				}
+			#endif
 				(++end_node)->cost = INFINITE_COST;
+			}
 		}
 
 		/* Consider coding a literal.
