@@ -967,6 +967,19 @@ lzms_lz_offset_slot_cost(const struct lzms_compressor *c, unsigned slot)
 	return num_bits << LZMS_COST_SHIFT;
 }
 
+#if LZMS_USE_DELTA_MATCHES
+/* Return the cost to encode the specified delta power and raw offset.  */
+static inline u32
+lzms_delta_ref_cost(const struct lzms_compressor *c, u32 power, u32 raw_offset)
+{
+	unsigned slot = lzms_comp_get_offset_slot(c, raw_offset);
+	u32 num_bits = c->delta_power_lens[power] +
+		       c->delta_offset_lens[slot] +
+		       lzms_extra_offset_bits[slot];
+	return num_bits << LZMS_COST_SHIFT;
+}
+#endif
+
 /*
  * Consider coding the LZ-style match at repeat offset index @rep_idx.  Consider
  * each length from the minimum (2) to the full match length (@rep_len).
@@ -1494,6 +1507,28 @@ begin:
 
 					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
+				}
+
+				u32 base_cost = cur_node->cost +
+						lzms_bit_cost(1, cur_node->state.main_state,
+							      c->main_prob_entries) +
+						lzms_bit_cost(1, cur_node->state.match_state,
+							      c->match_prob_entries) +
+						lzms_bit_cost(0, cur_node->state.delta_match_state,
+							      c->delta_match_prob_entries) +
+						lzms_delta_ref_cost(c, power, raw_offset);
+
+				for (u32 l = 2; l < len; l++) {
+					u32 cost = base_cost + lzms_fast_length_cost(c, l);
+					if (cost < (cur_node + len)->cost) {
+						(cur_node + len)->cost = cost;
+						(cur_node + len)->item =
+							 ((u64)(0x80000000 |
+								(power << 28) |
+								(raw_offset +
+								 LZMS_OFFSET_ADJUSTMENT)) <<
+							  OPTIMUM_OFFSET_SHIFT) | l;
+					}
 				}
 			}
 		}
