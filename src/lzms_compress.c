@@ -741,12 +741,6 @@ lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 
 #if LZMS_USE_DELTA_MATCHES
 static void
-lzms_encode_delta_power(struct lzms_compressor *c, u32 power)
-{
-	lzms_encode_delta_power_symbol(c, power);
-}
-
-static void
 lzms_encode_delta_offset(struct lzms_compressor *c, u32 raw_offset)
 {
 	unsigned slot;
@@ -821,7 +815,7 @@ lzms_encode_item(struct lzms_compressor *c, u64 item)
 				/* Explicit offset delta match  */
 				u32 power = offset_data >> 28;
 				u32 raw_offset = (offset_data & 0x0FFFFFFF) - LZMS_OFFSET_ADJUSTMENT;
-				lzms_encode_delta_power(c, power);
+				lzms_encode_delta_power_symbol(c, power);
 				lzms_encode_delta_offset(c, raw_offset);
 			} else {
 				/* Repeat offset delta match  */
@@ -1376,6 +1370,9 @@ begin:
 
 					c->optimum_nodes[0].state.lru.lz.upcoming_offset =
 						c->optimum_nodes[0].state.lru.lz.recent_offsets[best_rep_idx];
+				#if LZMS_USE_DELTA_MATCHES
+					c->optimum_nodes[0].state.lru.delta.upcoming_ref = 0;
+				#endif
 
 					for (unsigned i = best_rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
 						c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
@@ -1428,6 +1425,9 @@ begin:
 				lzms_update_lz_match_state(&c->optimum_nodes[0].state, 0);
 
 				c->optimum_nodes[0].state.lru.lz.upcoming_offset = offset;
+			#if LZMS_USE_DELTA_MATCHES
+				c->optimum_nodes[0].state.lru.delta.upcoming_ref = 0;
+			#endif
 
 				lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 				goto begin;
@@ -1456,11 +1456,12 @@ begin:
 				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
 				if (cur_match == 0)
 					continue;
-				u32 offset = (in_next - c->in_buffer) - cur_match;
+				const u8 *matchptr = &c->in_buffer[cur_match];
+				u32 offset = in_next - matchptr;
 				if (offset & (span - 1))
 					continue;
 				u32 len = lzms_extend_delta_match(in_next,
-								  &c->in_buffer[cur_match],
+								  matchptr,
 								  span,
 								  0,
 								  in_end - in_next);
@@ -1468,9 +1469,6 @@ begin:
 					continue;
 				u32 raw_offset = offset >> power;
 				if (len >= c->mf.nice_match_len) {
-					fprintf(stderr, "%zu: long delta match; len=%u, power=%u, raw_offset=%u.\n",
-						in_next - c->in_buffer,
-						len, power, raw_offset);
 					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
 					in_next += len;
 
@@ -1490,6 +1488,7 @@ begin:
 					lzms_update_match_state(&c->optimum_nodes[0].state, 1);
 					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 0);
 
+					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
 					c->optimum_nodes[0].state.lru.delta.upcoming_ref =
 						((u64)power << 32) | raw_offset;
 
@@ -1557,6 +1556,10 @@ begin:
 						cur_node->state.lru.lz.recent_offsets[i + 1];
 			}
 		}
+
+	#if LZMS_USE_DELTA_MATCHES
+		cur_node->state.lru.delta.upcoming_ref = 0;
+	#endif
 
 		lzms_update_lru_queue(&cur_node->state.lru);
 
