@@ -144,9 +144,9 @@ struct lzms_lz_lru_queue {
 #if LZMS_USE_DELTA_MATCHES
 /* The LRU queue for (power, raw_offset) references of delta-style matches  */
 struct lzms_delta_lru_queue {
-	u64 recent_refs[LZMS_NUM_RECENT_OFFSETS + 1];
-	u64 prev_ref;
-	u64 upcoming_ref;
+	u32 recent_refs[LZMS_NUM_RECENT_OFFSETS + 1];
+	u32 prev_ref;
+	u32 upcoming_ref;
 };
 #endif
 
@@ -1490,7 +1490,7 @@ begin:
 
 					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
 					c->optimum_nodes[0].state.lru.delta.upcoming_ref =
-						((u64)power << 32) | raw_offset;
+						(power << 28) | raw_offset;
 
 					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
@@ -1524,42 +1524,76 @@ begin:
 			cur_node->state = (cur_node - 1)->state;
 			lzms_update_main_state(&cur_node->state, 0);
 			cur_node->state.lru.lz.upcoming_offset = 0;
+		#if LZMS_USE_DELTA_MATCHES
+			cur_node->state.lru.delta.upcoming_ref = 0;
+		#endif
 		} else {
-			/* LZ match  */
+			/* Match  */
 			u32 len = cur_node->item & OPTIMUM_LEN_MASK;
 			u32 offset_data = cur_node->item >> OPTIMUM_OFFSET_SHIFT;
 
 			cur_node->state = (cur_node - len)->state;
-
 			lzms_update_main_state(&cur_node->state, 1);
-			lzms_update_match_state(&cur_node->state, 0);
 
-			if (offset_data >= LZMS_NUM_RECENT_OFFSETS) {
+		#if LZMS_USE_DELTA_MATCHES
+			int is_delta = (offset_data >> 31);
+		#else
+			int is_delta = 0;
+		#endif
+			lzms_update_match_state(&cur_node->state, is_delta);
 
-				/* Explicit offset LZ match  */
+		#if LZMS_USE_DELTA_MATCHES
+			if (is_delta) {
+				/* Delta match  */
+				offset_data ^= 0x80000000;
+				if (offset_data >= LZMS_NUM_RECENT_OFFSETS) {
+					/* Explicit offset delta match  */
+					lzms_update_delta_match_state(&cur_node->state, 0);
+					cur_node->state.lru.delta.upcoming_ref =
+						offset_data - LZMS_OFFSET_ADJUSTMENT;
+				} else {
+					/* Repeat offset delta match  */
+					int rep_idx = offset_data;
 
-				lzms_update_lz_match_state(&cur_node->state, 0);
+					lzms_update_delta_match_state(&cur_node->state, 1);
+					lzms_update_delta_repmatch_states(&cur_node->state, rep_idx);
 
-				cur_node->state.lru.lz.upcoming_offset =
-					offset_data - LZMS_OFFSET_ADJUSTMENT;
-			} else {
-				/* Repeat offset LZ match  */
+					cur_node->state.lru.delta.upcoming_ref =
+						cur_node->state.lru.delta.recent_refs[rep_idx];
 
-				lzms_update_lz_match_state(&cur_node->state, 1);
-				lzms_update_lz_repmatch_states(&cur_node->state, offset_data);
+					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
+						cur_node->state.lru.delta.recent_refs[i] =
+							cur_node->state.lru.delta.recent_refs[i + 1];
+				}
+				cur_node->state.lru.lz.upcoming_offset = 0;
+			} else
+		#endif
+			{
+				if (offset_data >= LZMS_NUM_RECENT_OFFSETS) {
+					/* Explicit offset LZ match  */
+					lzms_update_lz_match_state(&cur_node->state, 0);
+					cur_node->state.lru.lz.upcoming_offset =
+						offset_data - LZMS_OFFSET_ADJUSTMENT;
+				} else {
+					/* Repeat offset LZ match  */
+					int rep_idx = offset_data;
 
-				cur_node->state.lru.lz.upcoming_offset =
-					cur_node->state.lru.lz.recent_offsets[offset_data];
+					lzms_update_lz_match_state(&cur_node->state, 1);
+					lzms_update_lz_repmatch_states(&cur_node->state, rep_idx);
 
-				for (u32 i = offset_data; i < LZMS_NUM_RECENT_OFFSETS; i++)
-					cur_node->state.lru.lz.recent_offsets[i] =
-						cur_node->state.lru.lz.recent_offsets[i + 1];
+					cur_node->state.lru.lz.upcoming_offset =
+						cur_node->state.lru.lz.recent_offsets[rep_idx];
+
+					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
+						cur_node->state.lru.lz.recent_offsets[i] =
+							cur_node->state.lru.lz.recent_offsets[i + 1];
+				}
+			#if LZMS_USE_DELTA_MATCHES
+				cur_node->state.lru.delta.upcoming_ref = 0;
+			#endif
 			}
 		}
 
-	#if LZMS_USE_DELTA_MATCHES
-		cur_node->state.lru.delta.upcoming_ref = 0;
-	#endif
 
 		lzms_update_lru_queue(&cur_node->state.lru);
 
