@@ -34,6 +34,7 @@
 #include "wimlib/error.h"
 #include "wimlib/lcpit_matchfinder.h"
 #include "wimlib/lz_extend.h"
+#include "wimlib/lz_hash.h"
 #include "wimlib/lzms_common.h"
 #include "wimlib/unaligned.h"
 #include "wimlib/util.h"
@@ -70,7 +71,7 @@
  */
 #define LZMS_COST_SHIFT		6
 
-#define LZMS_USE_DELTA_MATCHES	0
+#define LZMS_USE_DELTA_MATCHES	1
 #define LZMS_DELTA_HASH_ORDER	10
 #define LZMS_DELTA_HASH_LENGTH	(1 << LZMS_DELTA_HASH_ORDER)
 
@@ -1189,6 +1190,29 @@ lzms_find_longest_repeat_offset_match(const u8 * const in_next,
 	return best_rep_len;
 }
 
+#if LZMS_USE_DELTA_MATCHES
+static u16
+lzms_load_delta_digram(const u8 *p, u32 span)
+{
+	u8 diff1 = p[0] - p[(s32)(0 - span)];
+	u8 diff2 = p[1] - p[(s32)(1 - span)];
+	return ((u16)diff1 << 8) | diff2;
+}
+
+static u32
+lzms_extend_delta_match(const u8 *in_next, const u8 *matchptr,
+			u32 span, u32 len, u32 max_len)
+{
+	while (len < max_len &&
+	       ((u8)(in_next[len] - in_next[(s32)(len - span)]) ==
+		(u8)(matchptr[len] - matchptr[(s32)(len - span)])))
+	{
+		len++;
+	}
+	return len;
+}
+#endif
+
 /*
  * The main near-optimal parsing routine.
  *
@@ -1260,9 +1284,46 @@ begin:
 		u32 num_matches;
 		unsigned literal;
 		u32 literal_cost;
+	#if LZMS_USE_DELTA_MATCHES
+		u32 best_delta_len;
+		u32 best_delta_span;
+		u32 best_delta_raw_offset;
+	#endif
 
 		/* Find LZ-style matches with the current position.  */
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
+
+	#if LZMS_USE_DELTA_MATCHES
+		best_delta_len = 0;
+		if (in_end - in_next >= 2) {
+			/* Find the longest delta match with the current position  */
+			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
+				u32 span = (u32)1 << power;
+				if (in_next - c->in_buffer < span)
+					continue;
+				u16 delta_digram = lzms_load_delta_digram(in_next, span);
+				u32 hash = lz_hash(delta_digram, LZMS_DELTA_HASH_ORDER);
+				u32 cur_match = c->delta_hash_tables[power][hash];
+				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
+				if (cur_match == 0)
+					continue;
+				u32 offset = (in_next - c->in_buffer) - cur_match;
+				if (offset & (span - 1))
+					continue;
+				u32 len = lzms_extend_delta_match(in_next,
+								  &c->in_buffer[cur_match],
+								  span,
+								  2,
+								  in_end - in_next);
+				if (len > best_delta_len) {
+					best_delta_len = len;
+					best_delta_span = span;
+					best_delta_raw_offset = offset >> power;
+				}
+			}
+		}
+	#endif
+
 		if (num_matches) {
 			u32 best_len;
 			u32 best_rep_len;
@@ -1380,11 +1441,10 @@ begin:
 			lzms_consider_lz_explicit_offset_matches(c, cur_node,
 								 c->matches, num_matches);
 		} else {
-			/* No matches found.  The only choice at this position
-			 * is to code a literal.  */
+			/* No matches found.  */
 
 			if (end_node == cur_node) {
-			#if 1
+			#if !LZMS_USE_DELTA_MATCHES
 				/* Optimization for single literals.  */
 				if (likely(cur_node == c->optimum_nodes)) {
 					lzms_encode_item(c, ((u64)*in_next++ <<
@@ -1398,6 +1458,8 @@ begin:
 				(++end_node)->cost = INFINITE_COST;
 			}
 		}
+
+		/* Consider delta matches.  */
 
 		/* Consider coding a literal.
 
