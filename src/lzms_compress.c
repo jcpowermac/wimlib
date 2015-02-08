@@ -45,21 +45,16 @@
 
 /*
  * LZMS_MAX_FAST_LENGTH is the maximum match length for which the length slot
- * can be looked up directly in the 'length_slot_fast' array.
+ * can be looked up directly in 'fast_length_slot_tab' and the length cost can
+ * be looked up directly in 'fast_length_cost_tab'.
  *
  * We also limit the 'nice_match_len' parameter to this value.  Consequently, if
  * the longest match found is shorter than 'nice_match_len', then it must also
  * be shorter than LZMS_MAX_FAST_LENGTH.  This makes it possible to do fast
- * lookups of length costs using the 'length_cost_fast' array without having to
- * keep checking whether the length exceeds LZMS_MAX_FAST_LENGTH or not.
+ * lookups of length costs using 'fast_length_cost_tab' without having to keep
+ * checking whether the length exceeds LZMS_MAX_FAST_LENGTH or not.
  */
 #define LZMS_MAX_FAST_LENGTH	255
-
-/*
- * LZMS_MAX_FAST_OFFSET is the maximum match offset for which the offset slot
- * can be looked up directly in the 'offset_slot_fast' array.
- */
-#define LZMS_MAX_FAST_OFFSET	32767
 
 /*
  * LZMS_NUM_OPTIM_NODES is the maximum number of bytes the parsing algorithm
@@ -285,56 +280,90 @@ struct lzms_compressor {
 	s32 last_target_usages[65536];
 
 	/* Table: length => length slot for small match lengths  */
-	u8 length_slot_fast[LZMS_MAX_FAST_LENGTH + 1];
+	u8 fast_length_slot_tab[LZMS_MAX_FAST_LENGTH + 1];
 
 	/* Table: length => current cost for small match lengths  */
-	u32 length_cost_fast[LZMS_MAX_FAST_LENGTH + 1];
+	u32 fast_length_cost_tab[LZMS_MAX_FAST_LENGTH + 1];
 
-	/* Table: offset => offset slot for small match offsets  */
-	u8 offset_slot_fast[LZMS_MAX_FAST_OFFSET + 1];
+	/* Tables for mapping offsets to offset slots  */
+
+	/* slots [0, 167); 0 <= num_extra_bits <= 10 */
+	u8 offset_slot_tab_1[0xe4a5];
+
+	/* slots [167, 427); 11 <= num_extra_bits <= 15 */
+	u16 offset_slot_tab_2[0x3d0000 >> 11];
+
+	/* slots [427, 799); 16 <= num_extra_bits  */
+	u16 offset_slot_tab_3[((LZMS_MAX_MATCH_OFFSET + 1) - 0xe4a5) >> 16];
 };
 
 /* Generate a table that maps small lengths to length slots.  */
 static void
-lzms_init_fast_slots(struct lzms_compressor *c)
+lzms_init_fast_length_slot_tab(struct lzms_compressor *c)
 {
 	u32 length;
-	u32 offset;
-	unsigned slot;
+	unsigned slot = 0;
 
-	/* Create a table mapping small lengths to length slots.  */
-	slot = 0;
 	for (length = LZMS_MIN_MATCH_LEN; length <= LZMS_MAX_FAST_LENGTH; length++) {
-		while (length >= lzms_length_slot_base[slot + 1])
+		if (length >= lzms_length_slot_base[slot + 1])
 			slot++;
-		c->length_slot_fast[length] = slot;
+		c->fast_length_slot_tab[length] = slot;
+	}
+}
+
+/* Generate tables for mapping offsets to offset slots.  */
+static void
+lzms_init_offset_slot_tabs(struct lzms_compressor *c)
+{
+	u32 offset;
+	unsigned slot = 0;
+
+	/* slots [0, 167); 0 <= num_extra_bits <= 10 */
+	for (offset = 1; offset < 0xe4a5; offset++) {
+		if (offset >= lzms_offset_slot_base[slot + 1])
+			slot++;
+		c->offset_slot_tab_1[offset] = slot;
 	}
 
-	/* Create a table mapping small offsets to offset slots.  */
-	slot = 0;
-	for (offset = 1; offset <= LZMS_MAX_FAST_OFFSET; offset++) {
-		while (offset >= lzms_offset_slot_base[slot + 1])
+	/* slots [167, 427); 11 <= num_extra_bits <= 15 */
+	for (; offset < 0x3de4a5; offset += (u32)1 << 11) {
+		if (offset >= lzms_offset_slot_base[slot + 1])
 			slot++;
-		c->offset_slot_fast[offset] = slot;
+		c->offset_slot_tab_2[(offset - 0xe4a5) >> 11] = slot;
+	}
+
+	/* slots [427, 799); 16 <= num_extra_bits  */
+	for (; offset < LZMS_MAX_MATCH_OFFSET + 1; offset += (u32)1 << 16) {
+		if (offset >= lzms_offset_slot_base[slot + 1])
+			slot++;
+		c->offset_slot_tab_3[(offset - 0xe4a5) >> 16] = slot;
 	}
 }
 
 static inline unsigned
-lzms_get_length_slot_fast(const struct lzms_compressor *c, u32 length)
+lzms_comp_get_length_slot(const struct lzms_compressor *c, u32 length)
 {
 	if (likely(length <= LZMS_MAX_FAST_LENGTH))
-		return c->length_slot_fast[length];
-	else
-		return lzms_get_length_slot(length);
+		return c->fast_length_slot_tab[length];
+	return lzms_get_length_slot(length);
 }
 
 static inline unsigned
-lzms_get_offset_slot_fast(const struct lzms_compressor *c, u32 offset)
+lzms_comp_get_offset_slot(const struct lzms_compressor *c, u32 offset)
 {
-	if (offset <= LZMS_MAX_FAST_OFFSET)
-		return c->offset_slot_fast[offset];
-	else
-		return lzms_get_offset_slot(offset);
+	if (offset < 0xe4a5)
+		return c->offset_slot_tab_1[offset];
+	offset -= 0xe4a5;
+	if (offset < 0x3d0000)
+		return c->offset_slot_tab_2[offset >> 11];
+	return c->offset_slot_tab_3[offset >> 16];
+}
+
+static inline unsigned
+lzms_comp_get_offset_slot_fast(const struct lzms_compressor *c, u32 offset)
+{
+	LZMS_ASSERT(offset < 0xe4a5);
+	return c->offset_slot_tab_1[offset];
 }
 
 /* Initialize the output bitstream @os to write backwards to the specified
@@ -548,7 +577,7 @@ lzms_encode_length(struct lzms_compressor *c, u32 length)
 	u32 extra_bits;
 	unsigned num_extra_bits;
 
-	slot = lzms_get_length_slot_fast(c, length);
+	slot = lzms_comp_get_length_slot(c, length);
 
 	extra_bits = length - lzms_length_slot_base[slot];
 	num_extra_bits = lzms_extra_length_bits[slot];
@@ -567,7 +596,7 @@ lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 	u32 extra_bits;
 	unsigned num_extra_bits;
 
-	slot = lzms_get_offset_slot_fast(c, offset);
+	slot = lzms_comp_get_offset_slot(c, offset);
 
 	extra_bits = offset - lzms_offset_slot_base[slot];
 	num_extra_bits = lzms_extra_offset_bits[slot];
@@ -756,32 +785,32 @@ lzms_update_fast_length_costs(struct lzms_compressor *c)
 	u32 cost = 0;
 
 	for (len = LZMS_MIN_MATCH_LEN; len <= LZMS_MAX_FAST_LENGTH; len++) {
-		while (len >= lzms_length_slot_base[slot + 1]) {
+		if (len >= lzms_length_slot_base[slot + 1]) {
 			slot++;
 			cost = (u32)(c->length_encoder.lens[slot] +
 				     lzms_extra_length_bits[slot]) << LZMS_COST_SHIFT;
 		}
-		c->length_cost_fast[len] = cost;
+		c->fast_length_cost_tab[len] = cost;
 	}
 }
 
-/* Return the cost to encode the specified match length, which must be less than
- * or equal to LZMS_MAX_FAST_LENGTH.  */
+/* Return the cost to encode the specified match length, which must not exceed
+ * LZMS_MAX_FAST_LENGTH.  */
 static inline u32
 lzms_fast_length_cost(const struct lzms_compressor *c, u32 length)
 {
 	LZMS_ASSERT(length <= LZMS_MAX_FAST_LENGTH);
-	return c->length_cost_fast[length];
+	return c->fast_length_cost_tab[length];
 }
 
-/* Return the cost to encode the specified LZ match offset.  */
+/* Return the cost to encode an LZ match offset belonging to the specified
+ * offset slot.  */
 static inline u32
-lzms_lz_offset_cost(const struct lzms_compressor *c, u32 offset)
+lzms_lz_offset_slot_cost(const struct lzms_compressor *c, unsigned slot)
 {
-	unsigned slot = lzms_get_offset_slot_fast(c, offset);
-
-	return (u32)(c->lz_offset_encoder.lens[slot] +
-		     lzms_extra_offset_bits[slot]) << LZMS_COST_SHIFT;
+	u32 num_bits = c->lz_offset_encoder.lens[slot] +
+		       lzms_extra_offset_bits[slot];
+	return num_bits << LZMS_COST_SHIFT;
 }
 
 /*
@@ -820,23 +849,12 @@ lzms_consider_lz_repeat_offset_match(const struct lzms_compressor *c,
 	} while (++len <= rep_len);
 }
 
-/*
- * Consider coding each LZ-style match in @matches as an explicit offset match.
- *
- * @matches must be sorted by strictly decreasing length.  This is guaranteed by
- * the matchfinder.
- *
- * We consider each length from the minimum (2) to the longest
- * (matches[num_matches - 1].len).  For each length, we consider only the
- * smallest offset for which that length is available.  Although this is not
- * guaranteed to be optimal due to the possibility of a larger offset costing
- * less than a smaller offset to code, this is a very useful heuristic.
- */
 static inline void
-lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
-					 struct lzms_optimum_node *cur_node,
-					 const struct lz_match matches[],
-					 u32 num_matches)
+lzms_do_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
+					    struct lzms_optimum_node *cur_node,
+					    const struct lz_match matches[],
+					    u32 num_matches,
+					    bool all_small_offsets)
 {
 	u32 base_cost = cur_node->cost +
 			lzms_bit_cost(&c->main_bit_encoder,
@@ -848,7 +866,11 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 	u32 len = 2;
 	u32 i = num_matches - 1;
 	do {
-		u32 position_cost = base_cost + lzms_lz_offset_cost(c, matches[i].offset);
+		unsigned slot =
+			all_small_offsets ?
+				lzms_comp_get_offset_slot_fast(c, matches[i].offset) :
+				lzms_comp_get_offset_slot(c, matches[i].offset);
+		u32 position_cost = base_cost + lzms_lz_offset_slot_cost(c, slot);
 		do {
 			u32 cost = position_cost + lzms_fast_length_cost(c, len);
 			if (cost < (cur_node + len)->cost) {
@@ -859,6 +881,43 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 			}
 		} while (++len <= matches[i].length);
 	} while (i--);
+}
+
+/*
+ * Consider coding each LZ-style match in @matches as an explicit offset match.
+ *
+ * @matches must be sorted by strictly decreasing length.  This is guaranteed by
+ * the matchfinder.
+ *
+ * We consider each length from the minimum (2) to the longest
+ * (matches[0].length).  For each length, we consider only the smallest offset
+ * for which that length is available.  Although this is not guaranteed to be
+ * optimal due to the possibility of a larger offset costing less than a smaller
+ * offset to code, this is a very useful heuristic.
+ */
+static inline void
+lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
+					 struct lzms_optimum_node *cur_node,
+					 const struct lz_match matches[],
+					 u32 num_matches)
+{
+	/* matches[0].offset is the largest offset of the matches to consider.
+	 * If this is < 0xe4a5, then we can do branchless lookups of offset
+	 * slots using offset_slot_tab_1.  Inline the code for both cases.  */
+
+	if (matches[0].offset < 0xe4a5) {
+		lzms_do_consider_lz_explicit_offset_matches(c,
+							    cur_node,
+							    matches,
+							    num_matches,
+							    true);
+	} else {
+		lzms_do_consider_lz_explicit_offset_matches(c,
+							    cur_node,
+							    matches,
+							    num_matches,
+							    false);
+	}
 }
 
 static void
@@ -1382,7 +1441,8 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	if (!lcpit_matchfinder_init(&c->mf, max_bufsize, 2, nice_match_len))
 		goto oom2;
 
-	lzms_init_fast_slots(c);
+	lzms_init_fast_length_slot_tab(c);
+	lzms_init_offset_slot_tabs(c);
 
 	*c_ret = c;
 	return 0;
