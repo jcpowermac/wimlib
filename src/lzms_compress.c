@@ -821,6 +821,8 @@ lzms_encode_item(struct lzms_compressor *c, u64 item)
 				/* Explicit offset delta match  */
 				u32 power = offset_data >> 28;
 				u32 raw_offset = (offset_data & 0x0FFFFFFF) - LZMS_OFFSET_ADJUSTMENT;
+				fprintf(stderr, "encode delta match; power=%u, raw_offset=%u\n",
+					power, raw_offset);
 				lzms_encode_delta_power(c, power);
 				lzms_encode_delta_offset(c, raw_offset);
 			} else {
@@ -1107,6 +1109,12 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 	state->lz_match_state = 0;
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
 		state->lz_repmatch_states[i] = 0;
+
+#if LZMS_USE_DELTA_MATCHES
+	state->delta_match_state = 0;
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+		state->delta_repmatch_states[i] = 0;
+#endif
 }
 
 static void
@@ -1298,6 +1306,12 @@ begin:
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
 		LZMS_ASSERT(cur_node->state.lz_repmatch_states[i] ==
 			    c->lz_repmatch_states[i]);
+#if LZMS_USE_DELTA_MATCHES
+	LZMS_ASSERT(cur_node->state.delta_match_state == c->delta_match_state);
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+		LZMS_ASSERT(cur_node->state.delta_repmatch_states[i] ==
+			    c->delta_repmatch_states[i]);
+#endif
 
 	if (in_next == in_end)
 		return;
@@ -1450,11 +1464,14 @@ begin:
 				u32 len = lzms_extend_delta_match(in_next,
 								  &c->in_buffer[cur_match],
 								  span,
-								  2,
+								  0,
 								  in_end - in_next);
+				if (len < 2)
+					continue;
 				u32 raw_offset = offset >> power;
 				if (len >= c->mf.nice_match_len) {
-					fprintf(stderr, "long delta match.\n");
+					fprintf(stderr, "long delta match; power=%u, raw_offset=%u.\n",
+						power, raw_offset);
 					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
 					in_next += len;
 
@@ -1462,9 +1479,10 @@ begin:
 						lzms_encode_item_list(c, cur_node);
 
 					lzms_encode_item(c,
-							 ((u64)(0x80000000 +
-								raw_offset +
-								LZMS_OFFSET_ADJUSTMENT) <<
+							 ((u64)(0x80000000 |
+								(power << 28) |
+								(raw_offset +
+								 LZMS_OFFSET_ADJUSTMENT)) <<
 							  OPTIMUM_OFFSET_SHIFT) | len);
 
 					c->optimum_nodes[0].state = cur_node->state;
