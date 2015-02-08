@@ -224,6 +224,9 @@ struct lzms_compressor {
 	struct lzms_optimum_node optimum_nodes[LZMS_NUM_OPTIM_NODES +
 					       LZMS_MAX_FAST_LENGTH];
 
+	/* Table: length => current cost for small match lengths  */
+	u32 fast_length_cost_tab[LZMS_MAX_FAST_LENGTH + 1];
+
 	/* Range encoder which outputs to the beginning of the compressed data
 	 * buffer, proceeding forwards  */
 	struct lzms_range_encoder rc;
@@ -265,9 +268,6 @@ struct lzms_compressor {
 
 	/* Table: length => length slot for small match lengths  */
 	u8 fast_length_slot_tab[LZMS_MAX_FAST_LENGTH + 1];
-
-	/* Table: length => current cost for small match lengths  */
-	u32 fast_length_cost_tab[LZMS_MAX_FAST_LENGTH + 1];
 
 	/* Tables for mapping offsets to offset slots  */
 
