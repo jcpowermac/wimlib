@@ -119,31 +119,14 @@ struct lzms_range_encoder {
 	le16 *end;
 };
 
-/* This structure manages Huffman encoding of symbols from an alphabet.  */
-struct lzms_huffman_encoder {
-
-	/* Bitstream to which the Huffman encoded symbols are written  */
-	struct lzms_output_bitstream *os;
-
-	/* Number of symbols in the alphabet  */
-	unsigned num_syms;
-
-	/* Each time this number of symbols have been encoded, the code is
-	 * rebuilt.  */
-	unsigned rebuild_freq;
-
-	/* Symbol count until the next rebuild  */
+/* Bookkeeping information for an adaptive Huffman code  */
+struct lzms_huffman_rebuild_info {
 	unsigned num_syms_until_rebuild;
-
-	/* Running totals of symbol frequencies.  These are diluted slightly
-	 * whenever the code is rebuilt.  */
-	u32 freqs[LZMS_MAX_NUM_SYMS];
-
-	/* The length, in bits, of each codeword in the current code  */
-	u8 lens[LZMS_MAX_NUM_SYMS];
-
-	/* The codewords in the current code  */
-	u32 codewords[LZMS_MAX_NUM_SYMS];
+	unsigned num_syms;
+	unsigned rebuild_freq;
+	u32 *codewords;
+	u8 *lens;
+	u32 *freqs;
 };
 
 /* The LRU queue for offsets of LZ-style matches  */
@@ -260,10 +243,22 @@ struct lzms_compressor {
 	struct lzms_probability_entry lz_repmatch_prob_entries[LZMS_NUM_RECENT_OFFSETS - 1]
 							      [LZMS_NUM_LZ_REPEAT_MATCH_STATES];
 
-	/* Huffman encoders, one per alphabet  */
-	struct lzms_huffman_encoder literal_encoder;
-	struct lzms_huffman_encoder lz_offset_encoder;
-	struct lzms_huffman_encoder length_encoder;
+	/* Huffman codes  */
+
+	struct lzms_huffman_rebuild_info literal_rebuild_info;
+	u32 literal_codewords[LZMS_NUM_LITERAL_SYMS];
+	u8 literal_lens[LZMS_NUM_LITERAL_SYMS];
+	u32 literal_freqs[LZMS_NUM_LITERAL_SYMS];
+
+	struct lzms_huffman_rebuild_info lz_offset_rebuild_info;
+	u32 lz_offset_codewords[LZMS_MAX_NUM_OFFSET_SYMS];
+	u8 lz_offset_lens[LZMS_MAX_NUM_OFFSET_SYMS];
+	u32 lz_offset_freqs[LZMS_MAX_NUM_OFFSET_SYMS];
+
+	struct lzms_huffman_rebuild_info length_rebuild_info;
+	u32 length_codewords[LZMS_NUM_LENGTH_SYMS];
+	u8 length_lens[LZMS_NUM_LENGTH_SYMS];
+	u32 length_freqs[LZMS_NUM_LENGTH_SYMS];
 
 	/* An array that is needed for preprocessing  */
 	s32 last_target_usages[65536];
@@ -554,34 +549,73 @@ lzms_encode_lz_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
 			c->lz_repmatch_prob_entries[idx], &c->rc);
 }
 
-static noinline void
-lzms_rebuild_huffman_code(struct lzms_huffman_encoder *enc)
+static void
+lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
+			       unsigned num_syms, unsigned rebuild_freq,
+			       u32 *freqs, u32 *codewords, u8 *lens)
 {
-	make_canonical_huffman_code(enc->num_syms, LZMS_MAX_CODEWORD_LEN,
-				    enc->freqs, enc->lens, enc->codewords);
-
-	for (unsigned sym = 0; sym < enc->num_syms; sym++)
-		enc->freqs[sym] = (enc->freqs[sym] >> 1) + 1;
-
-	enc->num_syms_until_rebuild = enc->rebuild_freq;
+	info->num_syms_until_rebuild = rebuild_freq;
+	info->num_syms = num_syms;
+	info->rebuild_freq = rebuild_freq;
+	info->codewords = codewords;
+	info->lens = lens;
+	info->freqs = freqs;
+	lzms_init_symbol_frequencies(freqs, num_syms);
+	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
+				    info->freqs, info->lens, info->codewords);
 }
 
-/* Encode a symbol using the specified Huffman encoder.  If needed, the Huffman
+static noinline void
+lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
+{
+	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
+				    info->freqs, info->lens, info->codewords);
+	for (unsigned i = 0; i < info->num_syms; i++)
+		info->freqs[i] = (info->freqs[i] >> 1) + 1;
+	info->num_syms_until_rebuild = info->rebuild_freq;
+}
+
+/* Encode a symbol using the specified Huffman code.  If needed, the Huffman
  * code will be rebuilt.  Returns a boolean that indicates whether the Huffman
  * code was rebuilt or not.  */
 static inline bool
-lzms_huffman_encode_symbol(struct lzms_huffman_encoder *enc, unsigned sym)
+lzms_huffman_encode_symbol(unsigned sym,
+			   const u32 *codewords, const u8 *lens, u32 *freqs,
+			   struct lzms_output_bitstream *os,
+			   struct lzms_huffman_rebuild_info *rebuild_info)
 {
-	lzms_output_bitstream_put_varbits(enc->os,
-					  enc->codewords[sym],
-					  enc->lens[sym],
+	lzms_output_bitstream_put_varbits(os, codewords[sym], lens[sym],
 					  LZMS_MAX_CODEWORD_LEN);
-	++enc->freqs[sym];
-	if (--enc->num_syms_until_rebuild == 0) {
-		lzms_rebuild_huffman_code(enc);
+	++freqs[sym];
+	if (unlikely(--rebuild_info->num_syms_until_rebuild == 0)) {
+		lzms_rebuild_huffman_code(rebuild_info);
 		return true;
 	}
 	return false;
+}
+
+static bool
+lzms_encode_literal_symbol(struct lzms_compressor *c, unsigned sym)
+{
+	return lzms_huffman_encode_symbol(sym, c->literal_codewords,
+					  c->literal_lens, c->literal_freqs,
+					  &c->os, &c->literal_rebuild_info);
+}
+
+static bool
+lzms_encode_lz_offset_symbol(struct lzms_compressor *c, unsigned sym)
+{
+	return lzms_huffman_encode_symbol(sym, c->lz_offset_codewords,
+					  c->lz_offset_lens, c->lz_offset_freqs,
+					  &c->os, &c->lz_offset_rebuild_info);
+}
+
+static bool
+lzms_encode_length_symbol(struct lzms_compressor *c, unsigned sym)
+{
+	return lzms_huffman_encode_symbol(sym, c->length_codewords,
+					  c->length_lens, c->length_freqs,
+					  &c->os, &c->length_rebuild_info);
 }
 
 static void
@@ -601,11 +635,10 @@ lzms_encode_length(struct lzms_compressor *c, u32 length)
 	extra_bits = length - lzms_length_slot_base[slot];
 	num_extra_bits = lzms_extra_length_bits[slot];
 
-	if (lzms_huffman_encode_symbol(&c->length_encoder, slot))
+	if (lzms_encode_length_symbol(c, slot))
 		lzms_update_fast_length_costs(c);
 
-	lzms_output_bitstream_put_varbits(c->length_encoder.os,
-					  extra_bits, num_extra_bits, 30);
+	lzms_output_bitstream_put_varbits(&c->os, extra_bits, num_extra_bits, 30);
 }
 
 static void
@@ -620,9 +653,8 @@ lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 	extra_bits = offset - lzms_offset_slot_base[slot];
 	num_extra_bits = lzms_extra_offset_bits[slot];
 
-	lzms_huffman_encode_symbol(&c->lz_offset_encoder, slot);
-	lzms_output_bitstream_put_varbits(c->lz_offset_encoder.os,
-					  extra_bits, num_extra_bits, 30);
+	lzms_encode_lz_offset_symbol(c, slot);
+	lzms_output_bitstream_put_varbits(&c->os, extra_bits, num_extra_bits, 30);
 }
 
 /* Encode a literal or match item.  */
@@ -639,7 +671,7 @@ lzms_encode_item(struct lzms_compressor *c, u64 item)
 	if (!main_bit) {
 		/* Literal  */
 		unsigned literal = offset_data;
-		lzms_huffman_encode_symbol(&c->literal_encoder, literal);
+		lzms_encode_literal_symbol(c, literal);
 	} else {
 		/* Match (always LZ in this implementation)  */
 
@@ -762,7 +794,7 @@ lzms_literal_cost(const struct lzms_compressor *c, unsigned literal,
 		  const struct lzms_adaptive_state *state)
 {
 	return lzms_bit_cost(0, state->main_state, c->main_prob_entries) +
-	       ((u32)c->literal_encoder.lens[literal] << LZMS_COST_SHIFT);
+	       ((u32)c->literal_lens[literal] << LZMS_COST_SHIFT);
 }
 
 /* Update the table that directly provides the costs for small lengths.  */
@@ -776,7 +808,7 @@ lzms_update_fast_length_costs(struct lzms_compressor *c)
 	for (len = LZMS_MIN_MATCH_LEN; len <= LZMS_MAX_FAST_LENGTH; len++) {
 		if (len >= lzms_length_slot_base[slot + 1]) {
 			slot++;
-			cost = (u32)(c->length_encoder.lens[slot] +
+			cost = (u32)(c->length_lens[slot] +
 				     lzms_extra_length_bits[slot]) << LZMS_COST_SHIFT;
 		}
 		c->fast_length_cost_tab[len] = cost;
@@ -797,8 +829,7 @@ lzms_fast_length_cost(const struct lzms_compressor *c, u32 length)
 static inline u32
 lzms_lz_offset_slot_cost(const struct lzms_compressor *c, unsigned slot)
 {
-	u32 num_bits = c->lz_offset_encoder.lens[slot] +
-		       lzms_extra_offset_bits[slot];
+	u32 num_bits = c->lz_offset_lens[slot] + lzms_extra_offset_bits[slot];
 	return num_bits << LZMS_COST_SHIFT;
 }
 
@@ -1302,22 +1333,6 @@ begin:
 }
 
 static void
-lzms_init_huffman_encoder(struct lzms_huffman_encoder *enc,
-			  struct lzms_output_bitstream *os,
-			  unsigned num_syms, unsigned rebuild_freq)
-{
-	enc->os = os;
-	enc->num_syms = num_syms;
-	enc->rebuild_freq = rebuild_freq;
-	enc->num_syms_until_rebuild = rebuild_freq;
-	for (unsigned i = 0; i < num_syms; i++)
-		enc->freqs[i] = 1;
-
-	make_canonical_huffman_code(enc->num_syms, LZMS_MAX_CODEWORD_LEN,
-				    enc->freqs, enc->lens, enc->codewords);
-}
-
-static void
 lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 		      size_t out_nbytes_avail, unsigned num_offset_slots)
 {
@@ -1328,19 +1343,28 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 	 * (writing backwards).  */
 	lzms_output_bitstream_init(&c->os, out, out_nbytes_avail / sizeof(le16));
 
-	/* Initialize the Huffman encoders.  */
+	/* Initialize the Huffman codes.  */
 
-	lzms_init_huffman_encoder(&c->literal_encoder, &c->os,
-				  LZMS_NUM_LITERAL_SYMS,
-				  LZMS_LITERAL_CODE_REBUILD_FREQ);
+	lzms_init_huffman_rebuild_info(&c->literal_rebuild_info,
+				       LZMS_NUM_LITERAL_SYMS,
+				       LZMS_LITERAL_CODE_REBUILD_FREQ,
+				       c->literal_freqs,
+				       c->literal_codewords,
+				       c->literal_lens);
 
-	lzms_init_huffman_encoder(&c->lz_offset_encoder, &c->os,
-				  num_offset_slots,
-				  LZMS_LZ_OFFSET_CODE_REBUILD_FREQ);
+	lzms_init_huffman_rebuild_info(&c->lz_offset_rebuild_info,
+				       num_offset_slots,
+				       LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
+				       c->lz_offset_freqs,
+				       c->lz_offset_codewords,
+				       c->lz_offset_lens);
 
-	lzms_init_huffman_encoder(&c->length_encoder, &c->os,
-				  LZMS_NUM_LENGTH_SYMS,
-				  LZMS_LENGTH_CODE_REBUILD_FREQ);
+	lzms_init_huffman_rebuild_info(&c->length_rebuild_info,
+				       LZMS_NUM_LENGTH_SYMS,
+				       LZMS_LENGTH_CODE_REBUILD_FREQ,
+				       c->length_freqs,
+				       c->length_codewords,
+				       c->length_lens);
 
 	/* Initialize the states and probability entries.  */
 
