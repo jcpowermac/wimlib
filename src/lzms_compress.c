@@ -63,7 +63,7 @@
  * value is increased, then there will be fewer forced flushes, but the
  * probability entries and Huffman codes will be more likely to become outdated.
  */
-#define LZMS_NUM_OPTIM_NODES	1024
+#define LZMS_NUM_OPTIM_NODES	2048
 
 /*
  * LZMS_COST_SHIFT is a scaling factor that makes it possible to consider
@@ -1298,8 +1298,6 @@ begin:
 	 * except in a couple shortcut cases.  */
 	for (;;) {
 		u32 num_matches;
-		unsigned literal;
-		u32 literal_cost;
 
 		/* Repeat offset LZ matches  */
 		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET &&
@@ -1629,30 +1627,32 @@ begin:
 				}
 			}
 		}
-	#endif
+	#endif /* LZMS_USE_DELTA_MATCHES */
 
-		/* Consider coding a literal.
-
-		 * To avoid an extra unpredictable brench, actually checking the
-		 * preferability of coding a literal is integrated into the
-		 * adaptive state update code below.  */
-		if (end_node < cur_node + 1)
-			(++end_node)->cost = INFINITE_COST;
-		literal = *in_next++;
-		literal_cost = cur_node->cost +
-			       lzms_literal_cost(c, literal, &cur_node->state);
+		/* Literal  */
+		{
+			if (end_node < cur_node + 1)
+				(++end_node)->cost = INFINITE_COST;
+			u32 literal_cost = cur_node->cost +
+					   lzms_literal_cost(c, *in_next, &cur_node->state);
+			if (literal_cost < (cur_node + 1)->cost) {
+				(cur_node + 1)->cost = literal_cost;
+				(cur_node + 1)->item = ((u64)*in_next << ITEM_SOURCE_SHIFT) | 1;
+			}
+		}
 
 		/* Advance to the next position.  */
+		in_next++;
 		cur_node++;
 
 		/* The lowest-cost path to the current position is now known.
 		 * Finalize the adaptive state that results from taking this
 		 * lowest-cost path.  */
 
-		if (literal_cost < cur_node->cost) {
+		u32 length = cur_node->item & ITEM_LENGTH_MASK;
+		u32 source = cur_node->item >> ITEM_SOURCE_SHIFT;
+		if (length == 1) {
 			/* Literal  */
-			cur_node->cost = literal_cost;
-			cur_node->item = ((u64)literal << ITEM_SOURCE_SHIFT) | 1;
 			cur_node->state = (cur_node - 1)->state;
 			lzms_update_main_state(&cur_node->state, 0);
 			cur_node->state.lru.lz.upcoming_offset = 0;
@@ -1661,14 +1661,11 @@ begin:
 		#endif
 		} else {
 			/* Match  */
-			u32 len = cur_node->item & ITEM_LENGTH_MASK;
-			u32 ref_data = cur_node->item >> ITEM_SOURCE_SHIFT;
-
-			cur_node->state = (cur_node - len)->state;
+			cur_node->state = (cur_node - length)->state;
 			lzms_update_main_state(&cur_node->state, 1);
 
 		#if LZMS_USE_DELTA_MATCHES
-			int is_delta = (ref_data >> 31);
+			int is_delta = (source & LZMS_DELTA_SOURCE_TAG) != 0;
 		#else
 			int is_delta = 0;
 		#endif
@@ -1677,15 +1674,15 @@ begin:
 		#if LZMS_USE_DELTA_MATCHES
 			if (is_delta) {
 				/* Delta match  */
-				ref_data ^= 0x80000000;
-				if (ref_data >= LZMS_NUM_RECENT_OFFSETS) {
-					u32 ref = ref_data - LZMS_OFFSET_ADJUSTMENT;
+				source &= ~LZMS_DELTA_SOURCE_TAG;
+				if (source >= LZMS_NUM_RECENT_OFFSETS) {
+					u32 pair = source - LZMS_OFFSET_ADJUSTMENT;
 					/* Explicit offset delta match  */
 					lzms_update_delta_match_state(&cur_node->state, 0);
-					cur_node->state.lru.delta.upcoming_pair = ref;
+					cur_node->state.lru.delta.upcoming_pair = pair;
 				} else {
 					/* Repeat offset delta match  */
-					int rep_idx = ref_data;
+					int rep_idx = source;
 
 					lzms_update_delta_match_state(&cur_node->state, 1);
 					lzms_update_delta_repmatch_states(&cur_node->state, rep_idx);
@@ -1701,14 +1698,14 @@ begin:
 			} else
 		#endif
 			{
-				if (ref_data >= LZMS_NUM_RECENT_OFFSETS) {
+				if (source >= LZMS_NUM_RECENT_OFFSETS) {
 					/* Explicit offset LZ match  */
 					lzms_update_lz_match_state(&cur_node->state, 0);
 					cur_node->state.lru.lz.upcoming_offset =
-						ref_data - LZMS_OFFSET_ADJUSTMENT;
+						source - LZMS_OFFSET_ADJUSTMENT;
 				} else {
 					/* Repeat offset LZ match  */
-					int rep_idx = ref_data;
+					int rep_idx = source;
 
 					lzms_update_lz_match_state(&cur_node->state, 1);
 					lzms_update_lz_repmatch_states(&cur_node->state, rep_idx);
