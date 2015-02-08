@@ -1165,6 +1165,30 @@ lzms_update_lz_repmatch_states(struct lzms_adaptive_state *state, unsigned rep_i
 				LZMS_NUM_LZ_REPEAT_MATCH_STATES;
 }
 
+#if LZMS_USE_DELTA_MATCHES
+static inline void
+lzms_update_delta_match_state(struct lzms_adaptive_state *state, int is_repeat_offset)
+{
+	state->delta_match_state =
+		((state->delta_match_state << 1) | is_repeat_offset) %
+			LZMS_NUM_DELTA_MATCH_STATES;
+}
+
+static inline void
+lzms_update_delta_repmatch_states(struct lzms_adaptive_state *state, unsigned rep_idx)
+{
+	for (unsigned i = 0; i < rep_idx; i++)
+		state->delta_repmatch_states[i] =
+			((state->delta_repmatch_states[i] << 1) | 1) %
+				LZMS_NUM_DELTA_REPEAT_MATCH_STATES;
+
+	if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+		state->delta_repmatch_states[rep_idx] =
+			((state->delta_repmatch_states[rep_idx] << 1) | 0) %
+				LZMS_NUM_DELTA_REPEAT_MATCH_STATES;
+}
+#endif
+
 /*
  * Find the longest LZ-style repeat offset match with the current sequence.  If
  * none is found, return 0; otherwise return its length and set
@@ -1284,45 +1308,9 @@ begin:
 		u32 num_matches;
 		unsigned literal;
 		u32 literal_cost;
-	#if LZMS_USE_DELTA_MATCHES
-		u32 best_delta_len;
-		u32 best_delta_span;
-		u32 best_delta_raw_offset;
-	#endif
 
 		/* Find LZ-style matches with the current position.  */
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
-
-	#if LZMS_USE_DELTA_MATCHES
-		best_delta_len = 0;
-		if (in_end - in_next >= 2) {
-			/* Find the longest delta match with the current position  */
-			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
-				u32 span = (u32)1 << power;
-				if (in_next - c->in_buffer < span)
-					continue;
-				u16 delta_digram = lzms_load_delta_digram(in_next, span);
-				u32 hash = lz_hash(delta_digram, LZMS_DELTA_HASH_ORDER);
-				u32 cur_match = c->delta_hash_tables[power][hash];
-				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
-				if (cur_match == 0)
-					continue;
-				u32 offset = (in_next - c->in_buffer) - cur_match;
-				if (offset & (span - 1))
-					continue;
-				u32 len = lzms_extend_delta_match(in_next,
-								  &c->in_buffer[cur_match],
-								  span,
-								  2,
-								  in_end - in_next);
-				if (len > best_delta_len) {
-					best_delta_len = len;
-					best_delta_span = span;
-					best_delta_raw_offset = offset >> power;
-				}
-			}
-		}
-	#endif
 
 		if (num_matches) {
 			u32 best_len;
@@ -1440,32 +1428,68 @@ begin:
 			/* Consider coding an explicit offset match.  */
 			lzms_consider_lz_explicit_offset_matches(c, cur_node,
 								 c->matches, num_matches);
-		} else {
-			/* No matches found.  */
-
-			if (end_node == cur_node) {
-			#if !LZMS_USE_DELTA_MATCHES
-				/* Optimization for single literals.  */
-				if (likely(cur_node == c->optimum_nodes)) {
-					lzms_encode_item(c, ((u64)*in_next++ <<
-							     OPTIMUM_OFFSET_SHIFT) | 1);
-					lzms_update_main_state(&cur_node->state, 0);
-					cur_node->state.lru.lz.upcoming_offset = 0;
-					lzms_update_lru_queue(&cur_node->state.lru);
-					goto begin;
-				}
-			#endif
-				(++end_node)->cost = INFINITE_COST;
-			}
 		}
 
 		/* Consider delta matches.  */
+	#if LZMS_USE_DELTA_MATCHES
+		if (in_end - in_next >= 2) {
+			/* Find the longest delta match with the current position  */
+			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
+				u32 span = (u32)1 << power;
+				if (in_next - c->in_buffer < span)
+					continue;
+				u16 delta_digram = lzms_load_delta_digram(in_next, span);
+				u32 hash = lz_hash(delta_digram, LZMS_DELTA_HASH_ORDER);
+				u32 cur_match = c->delta_hash_tables[power][hash];
+				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
+				if (cur_match == 0)
+					continue;
+				u32 offset = (in_next - c->in_buffer) - cur_match;
+				if (offset & (span - 1))
+					continue;
+				u32 len = lzms_extend_delta_match(in_next,
+								  &c->in_buffer[cur_match],
+								  span,
+								  2,
+								  in_end - in_next);
+				u32 raw_offset = offset >> power;
+				if (len >= c->mf.nice_match_len) {
+					fprintf(stderr, "long delta match.\n");
+					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
+					in_next += len;
+
+					if (cur_node != c->optimum_nodes)
+						lzms_encode_item_list(c, cur_node);
+
+					lzms_encode_item(c,
+							 ((u64)(0x80000000 +
+								raw_offset +
+								LZMS_OFFSET_ADJUSTMENT) <<
+							  OPTIMUM_OFFSET_SHIFT) | len);
+
+					c->optimum_nodes[0].state = cur_node->state;
+
+					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_match_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 0);
+
+					c->optimum_nodes[0].state.lru.delta.upcoming_offset =
+						((u64)raw_offset << 32) | power;
+
+					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+					goto begin;
+				}
+			}
+		}
+	#endif /* LZMS_USE_DELTA_MATCHES */
 
 		/* Consider coding a literal.
 
 		 * To avoid an extra unpredictable brench, actually checking the
 		 * preferability of coding a literal is integrated into the
 		 * adaptive state update code below.  */
+		if (end_node < cur_node + 1)
+			(++end_node)->cost = INFINITE_COST;
 		literal = *in_next++;
 		literal_cost = cur_node->cost +
 			       lzms_literal_cost(c, literal, &cur_node->state);
