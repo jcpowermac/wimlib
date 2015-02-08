@@ -11,7 +11,7 @@
 #include "wimlib/lzms_constants.h"
 #include "wimlib/types.h"
 
-#define ENABLE_LZMS_DEBUG
+//#define ENABLE_LZMS_DEBUG
 #ifdef ENABLE_LZMS_DEBUG
 #	define LZMS_DEBUG DEBUG
 #       define LZMS_ASSERT wimlib_assert

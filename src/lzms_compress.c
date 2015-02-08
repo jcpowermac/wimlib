@@ -1233,7 +1233,8 @@ lzms_delta_hash2(const u8 *p, u32 span)
 {
 	u8 diff1 = p[0] - p[(s32)(0 - span)];
 	u8 diff2 = p[1] - p[(s32)(1 - span)];
-	u16 v = ((u16)diff1 << 8) | diff2;
+	u8 alignment = ((uintptr_t)p & (span - 1));
+	u32 v = ((u32)alignment << 16) | ((u32)diff1 << 8) | diff2;
 	return lz_hash(v, LZMS_DELTA_HASH_ORDER);
 }
 
@@ -1555,8 +1556,11 @@ begin:
 					continue;
 				const u8 *matchptr = &c->in_buffer[cur_match];
 				u32 offset = in_next - matchptr;
-				if (offset & (span - 1))
+				if (offset & (span - 1)) {
+					/*fprintf(stderr, "misaligned\n");*/
 					continue;
+				}
+				/*fprintf(stderr, "aligned\n");*/
 				u32 len = lzms_extend_delta_match(in_next,
 								  matchptr,
 								  span,
