@@ -134,19 +134,19 @@ struct lzms_huffman_rebuild_info {
 	u32 *freqs;
 };
 
-/* The LRU queue for offsets of LZ-style matches  */
+/* LRU queue for offsets of LZ-style matches  */
 struct lzms_lz_lru_queue {
 	u32 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
 	u32 prev_offset;
 	u32 upcoming_offset;
 };
 
-#define LZMS_DELTA_SOURCE_TAG		((u32)1 << 31)
-#define LZMS_DELTA_SOURCE_POWER_SHIFT	28
+#define LZMS_DELTA_SOURCE_TAG			((u32)1 << 31)
+#define LZMS_DELTA_SOURCE_POWER_SHIFT		28
 #define LZMS_DELTA_SOURCE_RAW_OFFSET_MASK	(((u32)1 << LZMS_DELTA_SOURCE_POWER_SHIFT) - 1)
 
 #if LZMS_USE_DELTA_MATCHES
-/* The LRU queue for (power, raw_offset) references of delta-style matches  */
+/* LRU queue for (power, raw_offset) references of delta-style matches  */
 struct lzms_delta_lru_queue {
 	u32 recent_pairs[LZMS_NUM_RECENT_OFFSETS + 1];
 	u32 prev_pair;
@@ -197,11 +197,13 @@ struct lzms_optimum_node {
 	 * - For repeat offset LZ matches, the index of the offset in the
 	 *   recent offsets queue
 	 *
-	 * - For explicit offset delta matches, the match offset plus
+	 * - For explicit offset delta matches, the high bit is set, the next 3
+	 *   bits are the power, and the remainder is the raw offset plus
 	 *   LZMS_OFFSET_ADJUSTMENT
 	 *
-	 * - For repeat offset delta matches, LZMS_DELTA_SOURCE_TAG the index of
-	 *   the (power, raw_offset) pair in the recent offsets queue
+	 * - For repeat offset delta matches, the high bit is set and the
+	 *   remainder is the index of the (power, raw_offset) pair in the
+	 *   queue of recent (power, raw offset) pairs
 	 */
 	u64 item;
 #define ITEM_SOURCE_SHIFT 32
@@ -244,20 +246,26 @@ struct lzms_compressor {
 	/* The matchfinder for LZ77-style matches  */
 	struct lcpit_matchfinder mf;
 
-#if LZMS_USE_DELTA_MATCHES
-	/* Hash tables for finding delta matches  */
-	u32 delta_hash_tables[LZMS_NUM_DELTA_POWER_SYMS][LZMS_DELTA_HASH_LENGTH];
-#endif
-
-	/* Temporary space to store matches found by the matchfinder  */
-	struct lz_match matches[LZMS_MAX_FAST_LENGTH - LZMS_MIN_MATCH_LEN + 1];
-
 	/* The preprocessed buffer of data being compressed  */
 	u8 *in_buffer;
 
 	/* The number of bytes of data to be compressed, which is the number of
 	 * bytes of data in @in_buffer that are actually valid  */
 	size_t in_nbytes;
+
+	/* 'last_target_usages' a large array that is only needed for
+	 * preprocessing, so it is in union with fields that don't need to be
+	 * initialized until after preprocessing.  */
+	union {
+	struct {
+
+	/* Temporary space to store matches found by the matchfinder  */
+	struct lz_match matches[LZMS_MAX_FAST_LENGTH - LZMS_MIN_MATCH_LEN + 1];
+
+#if LZMS_USE_DELTA_MATCHES
+	/* Hash tables for finding delta matches  */
+	u32 delta_hash_tables[LZMS_NUM_DELTA_POWER_SYMS][LZMS_DELTA_HASH_LENGTH];
+#endif
 
 	/* The per-byte graph nodes for near-optimal parsing  */
 	struct lzms_optimum_node optimum_nodes[LZMS_NUM_OPTIM_NODES +
@@ -322,9 +330,11 @@ struct lzms_compressor {
 	u8 delta_power_lens[LZMS_NUM_DELTA_POWER_SYMS];
 	u32 delta_power_freqs[LZMS_NUM_DELTA_POWER_SYMS];
 #endif
+	}; /* struct */
 
-	/* An array that is needed for preprocessing  */
 	s32 last_target_usages[65536];
+
+	}; /* union */
 
 	/* Table: length => length slot for small match lengths  */
 	u8 fast_length_slot_tab[LZMS_MAX_FAST_LENGTH + 1];
@@ -1306,7 +1316,7 @@ begin:
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
 				const u32 offset = cur_node->state.lru.lz.recent_offsets[rep_idx];
 				const u8 * const matchptr = in_next - offset;
-						     
+
 				if (load_u16_unaligned(in_next) != load_u16_unaligned(matchptr))
 					continue;
 
