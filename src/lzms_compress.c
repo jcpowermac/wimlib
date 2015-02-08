@@ -1547,6 +1547,11 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 	c->lz_match_state = 0;
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
 		c->lz_repmatch_states[i] = 0;
+#if LZMS_USE_DELTA_MATCHES
+	c->delta_match_state = 0;
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+		c->delta_repmatch_states[i] = 0;
+#endif
 
 	lzms_init_probability_entries(c->main_prob_entries, LZMS_NUM_MAIN_STATES);
 	lzms_init_probability_entries(c->match_prob_entries, LZMS_NUM_MATCH_STATES);
@@ -1554,6 +1559,12 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
 		lzms_init_probability_entries(c->lz_repmatch_prob_entries[i],
 					      LZMS_NUM_LZ_REPEAT_MATCH_STATES);
+#if LZMS_USE_DELTA_MATCHES
+	lzms_init_probability_entries(c->delta_match_prob_entries, LZMS_NUM_DELTA_MATCH_STATES);
+	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS - 1; i++)
+		lzms_init_probability_entries(c->delta_repmatch_prob_entries[i],
+					      LZMS_NUM_DELTA_REPEAT_MATCH_STATES);
+#endif
 }
 
 /* Flush the output streams, prepare the final compressed data, and return its
