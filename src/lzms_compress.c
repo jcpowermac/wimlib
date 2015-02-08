@@ -1918,7 +1918,7 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	/* Scale nice_match_len with the compression level.  But to allow an
 	 * optimization on length cost calculations, don't allow nice_match_len
 	 * to exceed LZMS_MAX_FAST_LENGTH.  */
-	nice_match_len = min(((u64)compression_level * 32) / 50,
+	nice_match_len = min(((u64)compression_level * 64) / 50,
 			     LZMS_MAX_FAST_LENGTH);
 
 	c = MALLOC(sizeof(struct lzms_compressor));
