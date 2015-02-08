@@ -71,7 +71,7 @@
  */
 #define LZMS_COST_SHIFT		6
 
-#define LZMS_USE_DELTA_MATCHES	1
+#define LZMS_USE_DELTA_MATCHES	0
 #define LZMS_DELTA_HASH_ORDER	10
 #define LZMS_DELTA_HASH_LENGTH	(1 << LZMS_DELTA_HASH_ORDER)
 
@@ -1202,31 +1202,6 @@ lzms_update_delta_repmatch_states(struct lzms_adaptive_state *state, unsigned re
 }
 #endif
 
-/*
- * Find the longest LZ-style repeat offset match with the current sequence.  If
- * none is found, return 0; otherwise return its length and set
- * *best_rep_idx_ret to the index of its offset in the queue.
- */
-static u32
-lzms_find_longest_repeat_offset_match(const u8 * const in_next,
-				      const u32 max_len,
-				      const struct lzms_lz_lru_queue *queue,
-				      unsigned *best_rep_idx_ret)
-{
-	u32 best_rep_len = 0;
-	for (unsigned rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
-		const u8 *matchptr = in_next - queue->recent_offsets[rep_idx];
-		if (load_u16_unaligned(in_next) == load_u16_unaligned(matchptr)) {
-			u32 rep_len = lz_extend(in_next, matchptr, 2, max_len);
-			if (rep_len > best_rep_len) {
-				best_rep_len = rep_len;
-				*best_rep_idx_ret = rep_idx;
-			}
-		}
-	}
-	return best_rep_len;
-}
-
 #if LZMS_USE_DELTA_MATCHES
 static inline u32
 lzms_delta_hash2(const u8 *p, u32 span)
@@ -1356,80 +1331,105 @@ begin:
 		/* Find LZ-style matches with the current position.  */
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
 
-		if (num_matches) {
-			u32 best_len;
-			u32 best_rep_len;
-			unsigned best_rep_idx;
-
-			/*
-			 * Heuristics for repeat offset matches:
-			 *
-			 * - Only search for repeat offset matches if the
-			 *   matchfinder already found at least one match.
-			 *
-			 * - Only consider the longest repeat offset match.  It
-			 *   seems to be rare for the optimal parse to include a
-			 *   repeat offset match that doesn't have the longest
-			 *   length (allowing for the possibility that not all
-			 *   of that length is actually used).
-			 */
-			if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET)) {
-				best_rep_len = lzms_find_longest_repeat_offset_match(
-							in_next,
-							in_end - in_next,
-							&cur_node->state.lru.lz,
-							&best_rep_idx);
-			} else {
-				best_rep_len = 0;
+		/* Search for LZ-style matches with repeat offsets.  */
+		u32 rep_lens[LZMS_NUM_RECENT_OFFSETS];
+		int best_rep_idx = 0;
+		for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++)
+			rep_lens[rep_idx] = 0;
+		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET &&
+			   in_end - in_next >= 2))
+		{
+			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
+				u32 offset = cur_node->state.lru.lz.recent_offsets[rep_idx];
+				const u8 *matchptr = in_next - offset;
+						     
+				if (load_u16_unaligned(in_next) != load_u16_unaligned(matchptr))
+					continue;
+				rep_lens[rep_idx] = lz_extend(in_next, matchptr, 2,
+							      in_end - in_next);
+				if (rep_lens[rep_idx] > rep_lens[best_rep_idx])
+					best_rep_idx = rep_idx;
 			}
+		}
 
-			if (best_rep_len) {
-				/* If there's a very long repeat offset match,
-				 * then choose it immediately.  */
-				if (best_rep_len >= c->mf.nice_match_len) {
+		/* If there's a very long repeat offset LZ match, then choose it
+		 * immediately.  */
+		if (rep_lens[best_rep_idx] >= c->mf.nice_match_len) {
+			u32 len = rep_lens[best_rep_idx];
+			int rep_idx = best_rep_idx;
 
-					in_next = lzms_skip_bytes(c, best_rep_len - 1,
-								  in_next + 1);
+			in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
 
-					if (cur_node != c->optimum_nodes)
-						lzms_encode_item_list(c, cur_node);
+			if (cur_node != c->optimum_nodes)
+				lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_item(c,
-							 ((u64)best_rep_idx <<
-							  OPTIMUM_OFFSET_SHIFT) | best_rep_len);
+			lzms_encode_item(c,
+					 ((u64)rep_idx <<
+					  OPTIMUM_OFFSET_SHIFT) | len);
 
-					c->optimum_nodes[0].state = cur_node->state;
+			c->optimum_nodes[0].state = cur_node->state;
 
-					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
-					lzms_update_match_state(&c->optimum_nodes[0].state, 0);
-					lzms_update_lz_match_state(&c->optimum_nodes[0].state, 1);
-					lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state, best_rep_idx);
+			lzms_update_main_state(&c->optimum_nodes[0].state, 1);
+			lzms_update_match_state(&c->optimum_nodes[0].state, 0);
+			lzms_update_lz_match_state(&c->optimum_nodes[0].state, 1);
+			lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state,
+						       rep_idx);
 
-					c->optimum_nodes[0].state.lru.lz.upcoming_offset =
-						c->optimum_nodes[0].state.lru.lz.recent_offsets[best_rep_idx];
-				#if LZMS_USE_DELTA_MATCHES
-					c->optimum_nodes[0].state.lru.delta.upcoming_ref = 0;
-				#endif
+			c->optimum_nodes[0].state.lru.lz.upcoming_offset =
+				c->optimum_nodes[0].state.lru.lz.recent_offsets[rep_idx];
+		#if LZMS_USE_DELTA_MATCHES
+			c->optimum_nodes[0].state.lru.delta.upcoming_ref = 0;
+		#endif
 
-					for (unsigned i = best_rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
-							c->optimum_nodes[0].state.lru.lz.recent_offsets[i + 1];
+			for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
+				c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
+					c->optimum_nodes[
+						0].state.lru.lz.recent_offsets[i + 1];
 
-					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
-					goto begin;
+			lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+			goto begin;
+		}
+
+		if (rep_lens[best_rep_idx] >= 2) {
+			u32 len = rep_lens[best_rep_idx];
+			int rep_idx = best_rep_idx;
+
+			while (end_node < cur_node + len)
+				(++end_node)->cost = INFINITE_COST;
+
+			u32 base_cost = cur_node->cost +
+					lzms_bit_cost(1, cur_node->state.main_state,
+						      c->main_prob_entries) +
+					lzms_bit_cost(0, cur_node->state.match_state,
+						      c->match_prob_entries) +
+					lzms_bit_cost(1, cur_node->state.lz_match_state,
+						      c->lz_match_prob_entries);
+
+			for (int i = 0; i < rep_idx; i++)
+				base_cost += lzms_bit_cost(1,
+						   cur_node->state.lz_repmatch_states[i],
+						   c->lz_repmatch_prob_entries[i]);
+
+			if (rep_idx < LZMS_NUM_RECENT_OFFSETS - 1)
+				base_cost += lzms_bit_cost(0,
+						   cur_node->state.lz_repmatch_states[rep_idx],
+						   c->lz_repmatch_prob_entries[rep_idx]);
+
+			/* Considering a repeat offset LZ match  */
+			u32 offset_data = rep_idx;
+			for (u32 l = 2; l <= len; l++) {
+				u32 cost = base_cost + lzms_fast_length_cost(c, l);
+				if (cost < (cur_node + l)->cost) {
+					(cur_node + l)->cost = cost;
+					(cur_node + l)->item =
+						((u64)offset_data <<
+							OPTIMUM_OFFSET_SHIFT) | l;
 				}
-
-				/* If reaching any positions for the first time,
-				 * initialize their costs to "infinity".  */
-				while (end_node < cur_node + best_rep_len)
-					(++end_node)->cost = INFINITE_COST;
-
-				/* Consider coding a repeat offset match.  */
-				lzms_consider_lz_repeat_offset_match(c, cur_node,
-								     best_rep_len, best_rep_idx);
 			}
+		}
 
-			best_len = c->matches[0].length;
+		if (num_matches) {
+			u32 best_len = c->matches[0].length;
 
 			/* If there's a very long explicit offset match, then
 			 * choose it immediately.  */
