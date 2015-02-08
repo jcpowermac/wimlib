@@ -1228,7 +1228,7 @@ lzms_find_longest_repeat_offset_match(const u8 * const in_next,
 }
 
 #if LZMS_USE_DELTA_MATCHES
-static u32
+static inline u32
 lzms_delta_hash2(const u8 *p, u32 span)
 {
 	u8 diff1 = p[0] - p[(s32)(0 - span)];
@@ -1238,7 +1238,7 @@ lzms_delta_hash2(const u8 *p, u32 span)
 	return lz_hash(v, LZMS_DELTA_HASH_ORDER);
 }
 
-static u32
+static inline u32
 lzms_extend_delta_match(const u8 *in_next, const u8 *matchptr,
 			u32 span, u32 len, u32 max_len)
 {
@@ -1459,7 +1459,8 @@ begin:
 
 		/* Consider delta matches.  */
 	#if LZMS_USE_DELTA_MATCHES
-		if (in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1) {
+		if (in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1 &&
+		    (in_end - in_next >= 2)) {
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
 				u32 ref = cur_node->state.lru.delta.recent_refs[rep_idx];
 				u32 power = ref >> 28;
@@ -1467,13 +1468,16 @@ begin:
 				u32 raw_offset = ref & 0x0FFFFFFF;
 				u32 offset = raw_offset << power;
 				const u8 *matchptr = in_next - offset;
+				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
+				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
+				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
+				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))))
+					continue;
 				u32 len = lzms_extend_delta_match(in_next,
 								  matchptr,
 								  span,
-								  0,
+								  2,
 								  in_end - in_next);
-				if (len < 2)
-					continue;
 
 				/* If there's a very long repeat offset delta
 				 * match, then choose it immediately.  */
@@ -1556,18 +1560,18 @@ begin:
 					continue;
 				const u8 *matchptr = &c->in_buffer[cur_match];
 				u32 offset = in_next - matchptr;
-				if (offset & (span - 1)) {
-					/*fprintf(stderr, "misaligned\n");*/
+				if (offset & (span - 1))
 					continue;
-				}
-				/*fprintf(stderr, "aligned\n");*/
+				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
+				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
+				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
+				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))))
+					continue;
 				u32 len = lzms_extend_delta_match(in_next,
 								  matchptr,
 								  span,
-								  0,
+								  2,
 								  in_end - in_next);
-				if (len < 2)
-					continue;
 				u32 raw_offset = offset >> power;
 
 				/* If there's a very long explicit offset delta
@@ -1613,7 +1617,8 @@ begin:
 
 				/* Considering an explicit offset delta match  */
 				u32 offset_data = 0x80000000 |
-						((power << 28) + raw_offset + LZMS_OFFSET_ADJUSTMENT);
+						((power << 28) + raw_offset +
+						 LZMS_OFFSET_ADJUSTMENT);
 				for (u32 l = 2; l < len; l++) {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
