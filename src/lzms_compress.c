@@ -1252,6 +1252,29 @@ lzms_extend_delta_match(const u8 *in_next, const u8 *matchptr,
 }
 #endif
 
+static const u8 *
+lzms_skip_bytes(struct lzms_compressor *c, u32 count,
+		const u8 *in_next)
+{
+	lcpit_matchfinder_skip_bytes(&c->mf, count);
+
+#if LZMS_USE_DELTA_MATCHES
+	const u8 *in_end = &c->in_buffer[c->in_nbytes];
+	do {
+		if (in_end - in_next < 2)
+			continue;
+		for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
+			u32 span = (u32)1 << power;
+			u32 hash = lzms_delta_hash2(in_next, span);
+			c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
+		}
+	} while (in_next++, --count);
+	return in_next;
+#else
+	return in_next + count;
+#endif
+}
+
 /*
  * The main near-optimal parsing routine.
  *
@@ -1365,8 +1388,8 @@ begin:
 				 * then choose it immediately.  */
 				if (best_rep_len >= c->mf.nice_match_len) {
 
-					lcpit_matchfinder_skip_bytes(&c->mf, best_rep_len - 1);
-					in_next += best_rep_len;
+					in_next = lzms_skip_bytes(c, best_rep_len - 1,
+								  in_next + 1);
 
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
@@ -1422,8 +1445,8 @@ begin:
 						     best_len,
 						     in_end - in_next);
 
-				lcpit_matchfinder_skip_bytes(&c->mf, best_len - 1);
-				in_next += best_len;
+				in_next = lzms_skip_bytes(c, best_len - 1,
+							  in_next + 1);
 
 				if (cur_node != c->optimum_nodes)
 					lzms_encode_item_list(c, cur_node);
@@ -1482,8 +1505,7 @@ begin:
 				/* If there's a very long repeat offset delta
 				 * match, then choose it immediately.  */
 				if (len >= c->mf.nice_match_len) {
-					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
-					in_next += len;
+					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
 
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
@@ -1579,8 +1601,7 @@ begin:
 				if (len >= c->mf.nice_match_len) {
 					u32 ref = (power << 28) + raw_offset;
 
-					lcpit_matchfinder_skip_bytes(&c->mf, len - 1);
-					in_next += len;
+					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
 
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
