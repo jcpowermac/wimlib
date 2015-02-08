@@ -148,9 +148,9 @@ struct lzms_lz_lru_queue {
 #if LZMS_USE_DELTA_MATCHES
 /* The LRU queue for (power, raw_offset) references of delta-style matches  */
 struct lzms_delta_lru_queue {
-	u32 recent_sources[LZMS_NUM_RECENT_OFFSETS + 1];
-	u32 prev_source;
-	u32 upcoming_source;
+	u32 recent_pairs[LZMS_NUM_RECENT_OFFSETS + 1];
+	u32 prev_pair;
+	u32 upcoming_pair;
 };
 #endif
 
@@ -1112,10 +1112,10 @@ lzms_init_lru_queue(struct lzms_lru_queue *queue)
 
 #if LZMS_USE_DELTA_MATCHES
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
-		queue->delta.recent_sources[i] = i + 1;
+		queue->delta.recent_pairs[i] = i + 1;
 
-	queue->delta.prev_source = 0;
-	queue->delta.upcoming_source = 0;
+	queue->delta.prev_pair = 0;
+	queue->delta.upcoming_pair = 0;
 #endif
 }
 
@@ -1147,12 +1147,12 @@ lzms_update_lru_queue(struct lzms_lru_queue *queue)
 	queue->lz.prev_offset = queue->lz.upcoming_offset;
 
 #if LZMS_USE_DELTA_MATCHES
-	if (queue->delta.prev_source != 0) {
+	if (queue->delta.prev_pair != 0) {
 		for (int i = LZMS_NUM_REPMATCH_CONTEXTS; i >= 0; i--)
-			queue->delta.recent_sources[i + 1] = queue->delta.recent_sources[i];
-		queue->delta.recent_sources[0] = queue->delta.prev_source;
+			queue->delta.recent_pairs[i + 1] = queue->delta.recent_pairs[i];
+		queue->delta.recent_pairs[0] = queue->delta.prev_pair;
 	}
-	queue->delta.prev_source = queue->delta.upcoming_source;
+	queue->delta.prev_pair = queue->delta.upcoming_pair;
 #endif
 }
 
@@ -1344,51 +1344,45 @@ begin:
 		unsigned literal;
 		u32 literal_cost;
 
-		/* Explicit offset LZ matches  */
-		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
-
 		/* Repeat offset LZ matches  */
 		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET &&
 			   in_end - in_next >= 2))
 		{
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
-				u32 offset = cur_node->state.lru.lz.recent_offsets[rep_idx];
-				const u8 *matchptr = in_next - offset;
+				const u32 offset = cur_node->state.lru.lz.recent_offsets[rep_idx];
+				const u8 * const matchptr = in_next - offset;
 						     
 				if (load_u16_unaligned(in_next) != load_u16_unaligned(matchptr))
 					continue;
-				u32 len = lz_extend(in_next, matchptr, 2,
-						    in_end - in_next);
-				/* If there's a very long repeat offset LZ
-				 * match, then choose it immediately.  */
+
+				const u32 len = lz_extend(in_next, matchptr, 2, in_end - in_next);
+
+				/* Early out for long repeat offset LZ match */
 				if (len >= c->mf.nice_match_len) {
-					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
+
+					in_next = lzms_skip_bytes(c, len, in_next);
 
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_item(c,
-							 ((u64)rep_idx <<
-							  ITEM_SOURCE_SHIFT) | len);
+					lzms_encode_item(c, ((u64)rep_idx << ITEM_SOURCE_SHIFT) | len);
 
 					c->optimum_nodes[0].state = cur_node->state;
 
 					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
 					lzms_update_match_state(&c->optimum_nodes[0].state, 0);
 					lzms_update_lz_match_state(&c->optimum_nodes[0].state, 1);
-					lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state,
-								       rep_idx);
+					lzms_update_lz_repmatch_states(&c->optimum_nodes[0].state, rep_idx);
 
 					c->optimum_nodes[0].state.lru.lz.upcoming_offset =
 						c->optimum_nodes[0].state.lru.lz.recent_offsets[rep_idx];
 				#if LZMS_USE_DELTA_MATCHES
-					c->optimum_nodes[0].state.lru.delta.upcoming_source = 0;
+					c->optimum_nodes[0].state.lru.delta.upcoming_pair = 0;
 				#endif
 
 					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
 						c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
-							c->optimum_nodes[
-								0].state.lru.lz.recent_offsets[i + 1];
+							c->optimum_nodes[0].state.lru.lz.recent_offsets[i + 1];
 
 					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
@@ -1405,29 +1399,109 @@ begin:
 							      c->lz_match_prob_entries);
 
 				for (int i = 0; i < rep_idx; i++)
-					base_cost += lzms_bit_cost(1,
-							   cur_node->state.lz_repmatch_states[i],
-							   c->lz_repmatch_prob_entries[i]);
+					base_cost += lzms_bit_cost(1, cur_node->state.lz_repmatch_states[i],
+								   c->lz_repmatch_prob_entries[i]);
 
 				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
-					base_cost += lzms_bit_cost(0,
-							   cur_node->state.lz_repmatch_states[rep_idx],
-							   c->lz_repmatch_prob_entries[rep_idx]);
+					base_cost += lzms_bit_cost(0, cur_node->state.lz_repmatch_states[rep_idx],
+								   c->lz_repmatch_prob_entries[rep_idx]);
 
-				/* Considering a repeat offset LZ match  */
-				u32 ref_data = rep_idx;
 				for (u32 l = 2; l <= len; l++) {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
 						(cur_node + l)->item =
-							((u64)ref_data <<
-								ITEM_SOURCE_SHIFT) | l;
+							((u64)rep_idx << ITEM_SOURCE_SHIFT) | l;
 					}
 				}
 			}
 		}
 
+	#if LZMS_USE_DELTA_MATCHES
+		/* Repeat offset delta matches  */
+		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1 &&
+			   (in_end - in_next >= 2)))
+		{
+			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
+				const u32 pair = cur_node->state.lru.delta.recent_pairs[rep_idx];
+				const u32 power = pair >> LZMS_DELTA_SOURCE_POWER_SHIFT;
+				const u32 raw_offset = pair & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK;
+				const u32 span = (u32)1 << power;
+				const u32 offset = raw_offset << power;
+				const u8 * const matchptr = in_next - offset;
+
+				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
+				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
+				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
+				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))))
+					continue;
+
+				const u32 len = lzms_extend_delta_match(in_next, matchptr,
+									span, 2, in_end - in_next);
+
+				/* Early out for long repeat offset delta match */
+				if (len >= c->mf.nice_match_len) {
+
+					in_next = lzms_skip_bytes(c, len, in_next);
+
+					if (cur_node != c->optimum_nodes)
+						lzms_encode_item_list(c, cur_node);
+
+					lzms_encode_item(c, ((u64)(LZMS_DELTA_SOURCE_TAG | rep_idx)
+							     << ITEM_SOURCE_SHIFT) | len);
+
+					c->optimum_nodes[0].state = cur_node->state;
+
+					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_match_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 1);
+					lzms_update_delta_repmatch_states(&c->optimum_nodes[0].state, rep_idx);
+
+					c->optimum_nodes[0].state.lru.delta.upcoming_pair = pair;
+					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
+
+					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
+						c->optimum_nodes[0].state.lru.delta.recent_pairs[i] =
+							c->optimum_nodes[0].state.lru.delta.recent_pairs[i + 1];
+
+					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+					goto begin;
+				}
+
+				while (end_node < cur_node + len)
+					(++end_node)->cost = INFINITE_COST;
+
+				u32 base_cost = cur_node->cost +
+						lzms_bit_cost(1, cur_node->state.main_state,
+							      c->main_prob_entries) +
+						lzms_bit_cost(1, cur_node->state.match_state,
+							      c->match_prob_entries) +
+						lzms_bit_cost(1, cur_node->state.delta_match_state,
+							      c->delta_match_prob_entries);
+
+				for (int i = 0; i < rep_idx; i++)
+					base_cost += lzms_bit_cost(1, cur_node->state.delta_repmatch_states[i],
+								   c->delta_repmatch_prob_entries[i]);
+
+				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
+					base_cost += lzms_bit_cost(0, cur_node->state.delta_repmatch_states[rep_idx],
+								   c->delta_repmatch_prob_entries[rep_idx]);
+
+				const u64 source_bits = (u64)(LZMS_DELTA_SOURCE_TAG | rep_idx)
+								<< ITEM_SOURCE_SHIFT;
+				for (u32 l = 2; l <= len; l++) {
+					u32 cost = base_cost + lzms_fast_length_cost(c, l);
+					if (cost < (cur_node + l)->cost) {
+						(cur_node + l)->cost = cost;
+						(cur_node + l)->item = source_bits | l;
+					}
+				}
+			}
+		}
+	#endif /* LZMS_USE_DELTA_MATCHES */
+
+		/* Explicit offset LZ matches  */
+		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
 		if (num_matches) {
 			u32 best_len = c->matches[0].length;
 
@@ -1463,7 +1537,7 @@ begin:
 
 				c->optimum_nodes[0].state.lru.lz.upcoming_offset = offset;
 			#if LZMS_USE_DELTA_MATCHES
-				c->optimum_nodes[0].state.lru.delta.upcoming_source = 0;
+				c->optimum_nodes[0].state.lru.delta.upcoming_pair = 0;
 			#endif
 
 				lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
@@ -1480,99 +1554,7 @@ begin:
 								 c->matches, num_matches);
 		}
 
-		/* Consider delta matches.  */
 	#if LZMS_USE_DELTA_MATCHES
-
-		/* Repeat offset delta matches  */
-		if (in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1 &&
-		    (in_end - in_next >= 2)) {
-			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
-				u32 source = cur_node->state.lru.delta.recent_sources[rep_idx];
-				u32 power = source >> LZMS_DELTA_SOURCE_POWER_SHIFT;
-				u32 span = (u32)1 << power;
-				u32 raw_offset = source & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK;
-				u32 offset = raw_offset << power;
-				const u8 *matchptr = in_next - offset;
-				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
-				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
-				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
-				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))))
-					continue;
-				u32 len = lzms_extend_delta_match(in_next,
-								  matchptr,
-								  span,
-								  2,
-								  in_end - in_next);
-
-				/* If there's a very long repeat offset delta
-				 * match, then choose it immediately.  */
-				if (len >= c->mf.nice_match_len) {
-					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
-
-					if (cur_node != c->optimum_nodes)
-						lzms_encode_item_list(c, cur_node);
-
-					lzms_encode_item(c,
-							 ((u64)(0x80000000 | rep_idx)
-							 	<< ITEM_SOURCE_SHIFT)
-								| len);
-
-					c->optimum_nodes[0].state = cur_node->state;
-
-					lzms_update_main_state(&c->optimum_nodes[0].state, 1);
-					lzms_update_match_state(&c->optimum_nodes[0].state, 1);
-					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 1);
-					lzms_update_delta_repmatch_states(&c->optimum_nodes[0].state,
-									  rep_idx);
-
-					c->optimum_nodes[0].state.lru.delta.upcoming_source = source;
-					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
-
-					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++) {
-						c->optimum_nodes[0].state.lru.delta.recent_sources[i] =
-							c->optimum_nodes[
-								0].state.lru.delta.recent_sources[i + 1];
-					}
-
-					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
-					goto begin;
-				}
-
-				while (end_node < cur_node + len)
-					(++end_node)->cost = INFINITE_COST;
-
-				u32 base_cost = cur_node->cost +
-						lzms_bit_cost(1, cur_node->state.main_state,
-							      c->main_prob_entries) +
-						lzms_bit_cost(1, cur_node->state.match_state,
-							      c->match_prob_entries) +
-						lzms_bit_cost(1, cur_node->state.delta_match_state,
-							      c->delta_match_prob_entries);
-
-				for (int i = 0; i < rep_idx; i++)
-					base_cost += lzms_bit_cost(1,
-							   cur_node->state.delta_repmatch_states[i],
-							   c->delta_repmatch_prob_entries[i]);
-
-				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
-					base_cost += lzms_bit_cost(0,
-							   cur_node->state.delta_repmatch_states[rep_idx],
-							   c->delta_repmatch_prob_entries[rep_idx]);
-
-				/* Considering a repeat offset delta match  */
-				u32 ref_data = 0x80000000 | rep_idx;
-				for (u32 l = 2; l <= len; l++) {
-					u32 cost = base_cost + lzms_fast_length_cost(c, l);
-					if (cost < (cur_node + l)->cost) {
-						(cur_node + l)->cost = cost;
-						(cur_node + l)->item =
-							((u64)ref_data <<
-							 	ITEM_SOURCE_SHIFT) | l;
-					}
-				}
-			}
-		}
-
 		/* Explicit offset delta matches  */
 		if (in_end - in_next >= 2) {
 			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
@@ -1622,7 +1604,7 @@ begin:
 					lzms_update_delta_match_state(&c->optimum_nodes[0].state, 0);
 
 					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
-					c->optimum_nodes[0].state.lru.delta.upcoming_source = ref;
+					c->optimum_nodes[0].state.lru.delta.upcoming_pair = ref;
 
 					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
@@ -1655,7 +1637,7 @@ begin:
 				}
 			}
 		}
-	#endif /* LZMS_USE_DELTA_MATCHES */
+	#endif
 
 		/* Consider coding a literal.
 
@@ -1683,7 +1665,7 @@ begin:
 			lzms_update_main_state(&cur_node->state, 0);
 			cur_node->state.lru.lz.upcoming_offset = 0;
 		#if LZMS_USE_DELTA_MATCHES
-			cur_node->state.lru.delta.upcoming_source = 0;
+			cur_node->state.lru.delta.upcoming_pair = 0;
 		#endif
 		} else {
 			/* Match  */
@@ -1708,7 +1690,7 @@ begin:
 					u32 ref = ref_data - LZMS_OFFSET_ADJUSTMENT;
 					/* Explicit offset delta match  */
 					lzms_update_delta_match_state(&cur_node->state, 0);
-					cur_node->state.lru.delta.upcoming_source = ref;
+					cur_node->state.lru.delta.upcoming_pair = ref;
 				} else {
 					/* Repeat offset delta match  */
 					int rep_idx = ref_data;
@@ -1716,12 +1698,12 @@ begin:
 					lzms_update_delta_match_state(&cur_node->state, 1);
 					lzms_update_delta_repmatch_states(&cur_node->state, rep_idx);
 
-					cur_node->state.lru.delta.upcoming_source =
-						cur_node->state.lru.delta.recent_sources[rep_idx];
+					cur_node->state.lru.delta.upcoming_pair =
+						cur_node->state.lru.delta.recent_pairs[rep_idx];
 
 					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						cur_node->state.lru.delta.recent_sources[i] =
-							cur_node->state.lru.delta.recent_sources[i + 1];
+						cur_node->state.lru.delta.recent_pairs[i] =
+							cur_node->state.lru.delta.recent_pairs[i + 1];
 				}
 				cur_node->state.lru.lz.upcoming_offset = 0;
 			} else
@@ -1747,7 +1729,7 @@ begin:
 							cur_node->state.lru.lz.recent_offsets[i + 1];
 				}
 			#if LZMS_USE_DELTA_MATCHES
-				cur_node->state.lru.delta.upcoming_source = 0;
+				cur_node->state.lru.delta.upcoming_pair = 0;
 			#endif
 			}
 		}
