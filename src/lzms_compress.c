@@ -1160,12 +1160,12 @@ lzms_update_delta_repmatch_states(struct lzms_adaptive_state *state, int rep_idx
 
 #if LZMS_USE_DELTA_MATCHES
 static inline u32
-lzms_delta_hash2(const u8 *p, u32 span)
+lzms_delta_hash3(const u8 *p, u32 span)
 {
 	u8 diff1 = *(p + 0) - *(p + 0 - span);
 	u8 diff2 = *(p + 1) - *(p + 1 - span);
-	u8 alignment = ((uintptr_t)p & (span - 1));
-	u32 v = ((u32)alignment << 16) | ((u32)diff1 << 8) | diff2;
+	u8 diff3 = *(p + 2) - *(p + 2 - span);
+	u32 v = ((u32)diff1 << 0) | ((u32)diff2 << 8) | ((u32)diff3 << 16);
 	return lz_hash(v, LZMS_DELTA_HASH_ORDER);
 }
 
@@ -1193,16 +1193,16 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 	/* Skip delta matches  */
 #if LZMS_USE_DELTA_MATCHES
 	const u8 * const in_end = &c->in_buffer[c->in_nbytes];
-	if (unlikely(in_end - in_next - count <= 2))
+	if (unlikely(in_end - in_next - count <= 3))
 		return in_next + count;
 	const u32 pos = in_next - c->in_buffer;
 	do {
 		/* Update the hash table for each power.  */
-		for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
+		for (u32 power = 0; power < 8; power++) {
 			u32 span = (u32)1 << power;
 			if (unlikely(span > pos))
 				continue;
-			u32 hash = lzms_delta_hash2(in_next, span);
+			u32 hash = lzms_delta_hash3(in_next, span);
 			c->delta_hash_tables[power][hash] = pos;
 		}
 	} while (in_next++, --count);
@@ -1630,9 +1630,9 @@ begin:
 
 	#if LZMS_USE_DELTA_MATCHES
 		/* Explicit offset delta matches  */
-		if (in_end - in_next >= 2) {
+		if (in_end - in_next >= 3) {
 			/* Consider each possible power (log2 of span)  */
-			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
+			for (u32 power = 0; power < 8; power++) {
 				const u32 span = (u32)1 << power;
 				if (in_next - c->in_buffer < span)
 					continue;
@@ -1640,7 +1640,7 @@ begin:
 				/* Insert the current sequence into the hash
 				 * table for 'span' and get the sequence that
 				 * was in the hash table.  */
-				const u32 hash = lzms_delta_hash2(in_next, span);
+				const u32 hash = lzms_delta_hash3(in_next, span);
 				const u32 cur_match = c->delta_hash_tables[power][hash];
 				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
 
@@ -1661,13 +1661,15 @@ begin:
 				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
 				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
 				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
-				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))))
+				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))) ||
+				    ((u8)(*(in_next + 2) - *(in_next + 2 - span)) !=
+				     (u8)(*(matchptr + 2) - *(matchptr + 2 - span))))
 					continue;
 
 				/* Extend the delta match to its full length. */
 				const u32 len = lzms_extend_delta_match(in_next,
 									matchptr,
-									2,
+									3,
 									in_end - in_next,
 									span);
 
