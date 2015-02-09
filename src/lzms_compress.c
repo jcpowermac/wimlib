@@ -1564,6 +1564,68 @@ begin:
 									 false,
 									 base_cost);
 			}
+
+
+			/* try match + lit + rep0  */
+			if (in_end - in_next >= c->matches[0].length + 1 + 2)
+			for (u32 i = 0; i < num_matches; i++) {
+				u32 len = c->matches[i].length;
+				u32 offset = c->matches[i].offset;
+				const u8 *matchptr = in_next - offset;
+
+				u32 next_len = lz_extend(in_next + len + 1,
+							 matchptr + len + 1,
+							 0,
+							 min(c->mf.nice_match_len,
+							     in_end - (in_next + len + 1)));
+				if (next_len < 2)
+					continue;
+
+				unsigned main_state = cur_node->state.main_state;
+				unsigned match_state = cur_node->state.match_state;
+				unsigned lz_match_state = cur_node->state.lz_match_state;
+				u32 offset_slot = lzms_comp_get_offset_slot(c, offset);
+
+				u32 cost = cur_node->cost;
+
+				cost += lzms_bit_cost(1, main_state, c->main_prob_entries);
+				cost += lzms_bit_cost(0, match_state, c->match_prob_entries);
+				cost += lzms_bit_cost(0, lz_match_state, c->lz_match_prob_entries);
+
+				cost += lzms_lz_offset_slot_cost(c, offset_slot);
+				cost += lzms_fast_length_cost(c, len);
+
+				main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_STATES;
+				match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_STATES;
+				lz_match_state = ((lz_match_state << 1) | 0) % LZMS_NUM_LZ_MATCH_STATES;
+
+				cost += lzms_bit_cost(0, main_state, c->main_prob_entries);
+				cost += (u32)c->literal_lens[*(in_next + len)] << LZMS_COST_SHIFT;
+
+				main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
+
+				cost += lzms_bit_cost(1, main_state, c->main_prob_entries);
+				cost += lzms_bit_cost(0, match_state, c->match_prob_entries);
+				cost += lzms_bit_cost(1, lz_match_state, c->lz_match_prob_entries);
+				cost += lzms_bit_cost(0, cur_node->state.lz_repmatch_states[0], c->lz_repmatch_prob_entries[0]);
+				cost += lzms_fast_length_cost(c, next_len);
+
+				u32 total_len = len + 1 + next_len;
+
+				while (end_node < cur_node + total_len)
+					(++end_node)->cost = INFINITE_COST;
+
+				if (cost < (cur_node + total_len)->cost) {
+					(cur_node + total_len)->cost = cost;
+					(cur_node + total_len)->item =
+						((u64)0 << ITEM_SOURCE_SHIFT) | next_len;
+					(cur_node + total_len)->extra_items[0] =
+						((u64)*(in_next + len) << ITEM_SOURCE_SHIFT) | 1;
+					(cur_node + total_len)->extra_items[1] =
+						((u64)(offset + LZMS_OFFSET_ADJUSTMENT) << ITEM_SOURCE_SHIFT) | len;
+					(cur_node + total_len)->num_extra_items = 2;
+				}
+			}
 		}
 
 	#if LZMS_USE_DELTA_MATCHES
