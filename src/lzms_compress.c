@@ -1262,7 +1262,6 @@ begin:
 	 * except in a few shortcut cases.  */
 	for (;;) {
 		u32 num_matches;
-		u32 best_rep_len = 0;
 
 		/* Repeat offset LZ matches  */
 		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET &&
@@ -1305,9 +1304,6 @@ begin:
 					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
 					goto begin;
 				}
-
-				if (len > best_rep_len)
-					best_rep_len = len;
 
 				while (end_node < cur_node + len)
 					(++end_node)->cost = INFINITE_COST;
@@ -1393,11 +1389,6 @@ begin:
 					goto begin;
 				}
 
-				if (len < best_rep_len)
-					continue;
-
-				best_rep_len = len;
-
 				while (end_node < cur_node + len)
 					(++end_node)->cost = INFINITE_COST;
 
@@ -1431,7 +1422,7 @@ begin:
 
 		/* Explicit offset LZ matches  */
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
-		if (num_matches && c->matches[0].length > best_rep_len) {
+		if (num_matches) {
 
 			u32 best_len = c->matches[0].length;
 
@@ -1542,9 +1533,6 @@ begin:
 									2,
 									in_end - in_next,
 									span);
-
-				if (len < best_rep_len)
-					continue;
 
 				const u32 raw_offset = offset >> power;
 				const u32 pair = (power << LZMS_DELTA_SOURCE_POWER_SHIFT) |
