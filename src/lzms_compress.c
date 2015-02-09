@@ -71,7 +71,7 @@
  */
 #define LZMS_COST_SHIFT		6
 
-#define LZMS_USE_DELTA_MATCHES	0
+#define LZMS_USE_DELTA_MATCHES	1
 #define LZMS_DELTA_HASH_ORDER	10
 #define LZMS_DELTA_HASH_LENGTH	(1 << LZMS_DELTA_HASH_ORDER)
 
@@ -1262,6 +1262,7 @@ begin:
 	 * except in a few shortcut cases.  */
 	for (;;) {
 		u32 num_matches;
+		u32 best_rep_len = 0;
 
 		/* Repeat offset LZ matches  */
 		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET &&
@@ -1305,6 +1306,9 @@ begin:
 					goto begin;
 				}
 
+				if (len > best_rep_len)
+					best_rep_len = len;
+
 				while (end_node < cur_node + len)
 					(++end_node)->cost = INFINITE_COST;
 
@@ -1324,14 +1328,15 @@ begin:
 					base_cost += lzms_bit_cost(0, cur_node->state.lz_repmatch_states[rep_idx],
 								   c->lz_repmatch_prob_entries[rep_idx]);
 
-				for (u32 l = 2; l <= len; l++) {
+				u32 l = 2;
+				do {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
 						(cur_node + l)->item =
 							((u64)rep_idx << ITEM_SOURCE_SHIFT) | l;
 					}
-				}
+				} while (++l <= len);
 			}
 		}
 
@@ -1388,6 +1393,11 @@ begin:
 					goto begin;
 				}
 
+				if (len < best_rep_len)
+					continue;
+
+				best_rep_len = len;
+
 				while (end_node < cur_node + len)
 					(++end_node)->cost = INFINITE_COST;
 
@@ -1407,20 +1417,21 @@ begin:
 					base_cost += lzms_bit_cost(0, cur_node->state.delta_repmatch_states[rep_idx],
 								   c->delta_repmatch_prob_entries[rep_idx]);
 
-				for (u32 l = 2; l <= len; l++) {
+				u32 l = 2;
+				do {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
 						(cur_node + l)->item = source_bits | l;
 					}
-				}
+				} while (++l <= len);
 			}
 		}
 	#endif /* LZMS_USE_DELTA_MATCHES */
 
 		/* Explicit offset LZ matches  */
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
-		if (num_matches) {
+		if (num_matches && c->matches[0].length > best_rep_len) {
 
 			u32 best_len = c->matches[0].length;
 
@@ -1532,6 +1543,9 @@ begin:
 									in_end - in_next,
 									span);
 
+				if (len < best_rep_len)
+					continue;
+
 				const u32 raw_offset = offset >> power;
 				const u32 pair = (power << LZMS_DELTA_SOURCE_POWER_SHIFT) |
 						 raw_offset;
@@ -1568,13 +1582,14 @@ begin:
 							      c->delta_match_prob_entries) +
 						lzms_delta_source_cost(c, power, raw_offset);
 
-				for (u32 l = 2; l <= len; l++) {
+				u32 l = 2;
+				do {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
 						(cur_node + l)->item = source_bits | l;
 					}
-				}
+				} while (++l <= len);
 			}
 		}
 	#endif /* LZMS_USE_DELTA_MATCHES */
