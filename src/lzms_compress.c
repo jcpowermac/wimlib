@@ -55,7 +55,7 @@
  * of length costs using 'fast_length_cost_tab' without having to keep checking
  * whether the length exceeds MAX_FAST_LENGTH or not.
  */
-#define MAX_FAST_LENGTH	255
+#define MAX_FAST_LENGTH		255
 
 /*
  * NUM_OPTIM_NODES is the maximum number of bytes the parsing algorithm will
@@ -63,7 +63,7 @@
  * is increased, then there will be fewer forced flushes, but the probability
  * entries and Huffman codes will be more likely to become outdated.
  */
-#define NUM_OPTIM_NODES	2048
+#define NUM_OPTIM_NODES		2048
 
 /*
  * COST_SHIFT is a scaling factor that makes it possible to consider fractional
@@ -1315,14 +1315,16 @@ begin:
 	end_node = cur_node;
 
 	/* States should currently be consistent with the encoders.  */
-	cur_node->state.main_state = c->main_state;
-	cur_node->state.match_state = c->match_state;
-	cur_node->state.lz_match_state = c->lz_match_state;
+	LZMS_ASSERT(cur_node->state.main_state == c->main_state);
+	LZMS_ASSERT(cur_node->state.match_state == c->match_state);
+	LZMS_ASSERT(cur_node->state.lz_match_state == c->lz_match_state);
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
-		cur_node->state.lz_repmatch_states[i] = c->lz_repmatch_states[i];
-	cur_node->state.delta_match_state = c->delta_match_state;
+		LZMS_ASSERT(cur_node->state.lz_repmatch_states[i] ==
+			    c->lz_repmatch_states[i]);
+	LZMS_ASSERT(cur_node->state.delta_match_state == c->delta_match_state);
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
-		cur_node->state.delta_repmatch_states[i] = c->delta_repmatch_states[i];
+		LZMS_ASSERT(cur_node->state.delta_repmatch_states[i] ==
+			    c->delta_repmatch_states[i]);
 
 	if (in_next == in_end)
 		return;
@@ -1369,6 +1371,10 @@ begin:
 						cur_node->state.recent_offsets[i] =
 							cur_node->state.recent_offsets[i + 1];
 					lzms_update_lru_queues(&cur_node->state);
+					lzms_update_main_state(&cur_node->state, 1);
+					lzms_update_match_state(&cur_node->state, 0);
+					lzms_update_lz_match_state(&cur_node->state, 1);
+					lzms_update_lz_repmatch_states(&cur_node->state, rep_idx);
 					goto begin;
 				}
 
@@ -1521,6 +1527,10 @@ begin:
 						cur_node->state.recent_pairs[i] =
 							cur_node->state.recent_pairs[i + 1];
 					lzms_update_lru_queues(&cur_node->state);
+					lzms_update_main_state(&cur_node->state, 1);
+					lzms_update_match_state(&cur_node->state, 1);
+					lzms_update_delta_match_state(&cur_node->state, 1);
+					lzms_update_delta_repmatch_states(&cur_node->state, rep_idx);
 					goto begin;
 				}
 
@@ -1589,6 +1599,9 @@ begin:
 				cur_node->state.upcoming_offset = offset;
 				cur_node->state.upcoming_pair = 0;
 				lzms_update_lru_queues(&cur_node->state);
+				lzms_update_main_state(&cur_node->state, 1);
+				lzms_update_match_state(&cur_node->state, 0);
+				lzms_update_lz_match_state(&cur_node->state, 0);
 				goto begin;
 			}
 
@@ -1769,6 +1782,9 @@ begin:
 					cur_node->state.upcoming_offset = 0;
 					cur_node->state.upcoming_pair = pair;
 					lzms_update_lru_queues(&cur_node->state);
+					lzms_update_main_state(&cur_node->state, 1);
+					lzms_update_match_state(&cur_node->state, 1);
+					lzms_update_delta_match_state(&cur_node->state, 0);
 					goto begin;
 				}
 
