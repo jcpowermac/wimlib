@@ -182,7 +182,7 @@ struct lzms_adaptive_state {
 	u8 lz_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
 	u8 delta_match_state;
 	u8 delta_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
-};
+} _aligned_attribute(64);
 
 /*
  * This structure represents a byte position in the preprocessed input data and
@@ -235,7 +235,7 @@ struct lzms_optimum_node {
 	 * maintained per-position and are only updated occassionally.
 	 */
 	struct lzms_adaptive_state state;
-};
+} _aligned_attribute(64);
 
 /* The main LZMS compressor structure  */
 struct lzms_compressor {
@@ -1875,23 +1875,23 @@ begin:
 		 * lowest-cost path.  */
 		struct lzms_item item_to_take = cur_node->item;
 		struct lzms_optimum_node *source_node = cur_node - (item_to_take.length);
-		for (int i = 0; i < cur_node->num_extra_items; i++) {
+		int next_item_idx = -1;
+		for (unsigned i = 0; i < cur_node->num_extra_items; i++) {
 			item_to_take = cur_node->extra_items[i];
 			source_node -= item_to_take.length;
+			next_item_idx++;
 		}
-		int next_item_idx = (int)cur_node->num_extra_items - 1;
-		struct lzms_adaptive_state pending_state = source_node->state;
-
+		cur_node->state = source_node->state;
 		for (;;) {
 			const u32 length = item_to_take.length;
 			int is_match = (length > 1);
-			lzms_update_main_state(&pending_state, is_match);
-			pending_state.upcoming_offset = 0;
-			pending_state.upcoming_pair = 0;
+			lzms_update_main_state(&cur_node->state, is_match);
+			cur_node->state.upcoming_offset = 0;
+			cur_node->state.upcoming_pair = 0;
 			if (is_match) {
 				u32 source = item_to_take.source;
 				int is_delta = (source & LZMS_DELTA_SOURCE_TAG) != 0;
-				lzms_update_match_state(&pending_state, is_delta);
+				lzms_update_match_state(&cur_node->state, is_delta);
 
 				if (is_delta) {
 					/* Delta match  */
@@ -1899,46 +1899,46 @@ begin:
 					if (source >= LZMS_NUM_RECENT_OFFSETS) {
 						u32 pair = source - LZMS_OFFSET_ADJUSTMENT;
 						/* Explicit offset delta match  */
-						lzms_update_delta_match_state(&pending_state, 0);
-						pending_state.upcoming_pair = pair;
+						lzms_update_delta_match_state(&cur_node->state, 0);
+						cur_node->state.upcoming_pair = pair;
 					} else {
 						/* Repeat offset delta match  */
 						int rep_idx = source;
 
-						lzms_update_delta_match_state(&pending_state, 1);
-						lzms_update_delta_repmatch_states(&pending_state, rep_idx);
+						lzms_update_delta_match_state(&cur_node->state, 1);
+						lzms_update_delta_repmatch_states(&cur_node->state, rep_idx);
 
-						pending_state.upcoming_pair =
-							pending_state.recent_pairs[rep_idx];
+						cur_node->state.upcoming_pair =
+							cur_node->state.recent_pairs[rep_idx];
 
 						for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-							pending_state.recent_pairs[i] =
-								pending_state.recent_pairs[i + 1];
+							cur_node->state.recent_pairs[i] =
+								cur_node->state.recent_pairs[i + 1];
 					}
 				} else {
 					if (source >= LZMS_NUM_RECENT_OFFSETS) {
 						/* Explicit offset LZ match  */
-						lzms_update_lz_match_state(&pending_state, 0);
-						pending_state.upcoming_offset =
+						lzms_update_lz_match_state(&cur_node->state, 0);
+						cur_node->state.upcoming_offset =
 							source - LZMS_OFFSET_ADJUSTMENT;
 					} else {
 						/* Repeat offset LZ match  */
 						int rep_idx = source;
 
-						lzms_update_lz_match_state(&pending_state, 1);
-						lzms_update_lz_repmatch_states(&pending_state, rep_idx);
+						lzms_update_lz_match_state(&cur_node->state, 1);
+						lzms_update_lz_repmatch_states(&cur_node->state, rep_idx);
 
-						pending_state.upcoming_offset =
-							pending_state.recent_offsets[rep_idx];
+						cur_node->state.upcoming_offset =
+							cur_node->state.recent_offsets[rep_idx];
 
 						for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-							pending_state.recent_offsets[i] =
-								pending_state.recent_offsets[i + 1];
+							cur_node->state.recent_offsets[i] =
+								cur_node->state.recent_offsets[i + 1];
 					}
 				}
 			}
 
-			lzms_update_lru_queues(&pending_state);
+			lzms_update_lru_queues(&cur_node->state);
 
 			if (next_item_idx < 0)
 				break;
@@ -1949,8 +1949,6 @@ begin:
 			--next_item_idx;
 			source_node = source_node + length;
 		}
-
-		cur_node->state = pending_state;
 
 		/*
 		 * This loop will terminate when either of the following
@@ -2125,7 +2123,7 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	 * to exceed MAX_FAST_LENGTH.  */
 	nice_match_len = min(((u64)compression_level * 63) / 50, MAX_FAST_LENGTH);
 
-	c = MALLOC(sizeof(struct lzms_compressor));
+	c = ALIGNED_MALLOC(sizeof(struct lzms_compressor), 64);
 	if (!c)
 		goto oom0;
 
@@ -2148,7 +2146,7 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 oom2:
 	FREE(c->in_buffer);
 oom1:
-	FREE(c);
+	ALIGNED_FREE(c);
 oom0:
 	return WIMLIB_ERR_NOMEM;
 }
@@ -2197,7 +2195,7 @@ lzms_free_compressor(void *_c)
 
 	FREE(c->in_buffer);
 	lcpit_matchfinder_destroy(&c->mf);
-	FREE(c);
+	ALIGNED_FREE(c);
 }
 
 const struct compressor_ops lzms_compressor_ops = {
