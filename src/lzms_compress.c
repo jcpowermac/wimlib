@@ -1459,7 +1459,7 @@ begin:
 				} while (++len <= rep_len);
 
 
-				/* try rep + lit + rep0  */
+				/* try LZ-rep + lit + LZ-rep0  */
 				if (c->try_multistep_ops &&
 				    in_end - (in_next + rep_len) >= 3 &&
 				    load_u16_unaligned(in_next + rep_len + 1) ==
@@ -1489,25 +1489,21 @@ begin:
 					/* rep cost  */
 					u32 cost = base_cost + lzms_fast_length_cost(c, rep_len);
 
-					/* add cost of literal  */
+					/* add literal cost  */
 					cost += lzms_bit_0_cost(main_state, c->main_probs) +
 					        ((u32)c->literal_lens[*(in_next + rep_len)] << LZMS_COST_SHIFT);
 
 					/* update state for literal  */
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
 
-					/* add cost of rep0  */
-					cost += lzms_bit_1_cost(main_state,
-							      c->main_probs) +
-						lzms_bit_0_cost(match_state,
-							      c->match_probs) +
-						lzms_bit_1_cost(lz_match_state,
-							      c->lz_match_probs) +
-						lzms_bit_0_cost(lz_repmatch0_state,
-							      c->lz_repmatch_probs[0]) +
+					/* add rep0 cost  */
+					cost += lzms_bit_1_cost(main_state, c->main_probs) +
+						lzms_bit_0_cost(match_state, c->match_probs) +
+						lzms_bit_1_cost(lz_match_state, c->lz_match_probs) +
+						lzms_bit_0_cost(lz_repmatch0_state, c->lz_repmatch_probs[0]) +
 						lzms_fast_length_cost(c, rep0_len);
 
-					u32 total_len = rep_len + 1 + rep0_len;
+					const u32 total_len = rep_len + 1 + rep0_len;
 
 					while (end_node < cur_node + total_len)
 						(++end_node)->cost = INFINITE_COST;
@@ -1535,7 +1531,7 @@ begin:
 	#if LZMS_USE_DELTA_MATCHES
 		/* Repeat offset delta matches  */
 		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1 &&
-			   (in_end - in_next >= 2)))
+			   (in_end - in_next >= 3)))
 		{
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
 
