@@ -823,11 +823,8 @@ lzms_encode_delta_offset(struct lzms_compressor *c, u32 raw_offset)
 
 /* Encode the specified item, which may be a literal or any type of match.  */
 static void
-lzms_encode_item(struct lzms_compressor *c, struct lzms_item item)
+lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 {
-	u32 length = item.length;
-	u32 source = item.source;
-
 	/* Main bit: 0 = literal, 1 = match  */
 	int main_bit = (length > 1);
 	lzms_encode_main_bit(c, main_bit);
@@ -902,8 +899,8 @@ lzms_encode_item(struct lzms_compressor *c, struct lzms_item item)
 
 /* Encode a list of matches and literals chosen by the parsing algorithm.  */
 static void
-lzms_encode_item_list(struct lzms_compressor *c,
-		      struct lzms_optimum_node *end_node)
+lzms_encode_nonempty_item_list(struct lzms_compressor *c,
+			       struct lzms_optimum_node *end_node)
 {
 	struct lzms_optimum_node *cur_node;
 	struct lzms_item saved_item;
@@ -936,9 +933,17 @@ lzms_encode_item_list(struct lzms_compressor *c,
 
 	/* Now trace the chosen path in forwards order, encoding each item.  */
 	do {
-		lzms_encode_item(c, cur_node->item);
+		lzms_encode_item(c, cur_node->item.length, cur_node->item.source);
 		cur_node += cur_node->item.length;
 	} while (cur_node != end_node);
+}
+
+static inline void
+lzms_encode_item_list(struct lzms_compressor *c,
+		      struct lzms_optimum_node *end_node)
+{
+	if (end_node != c->optimum_nodes)
+		lzms_encode_nonempty_item_list(c, end_node);
 }
 
 /******************************************************************************
@@ -1203,7 +1208,7 @@ lzms_delta_hash3(const u8 *p, u32 span)
 	u8 d1 = *(p + 0) - *(p + 0 - span);
 	u8 d2 = *(p + 1) - *(p + 1 - span);
 	u8 d3 = *(p + 2) - *(p + 2 - span);
-	u32 v = ((u32)d1 << 16) | ((u32)d2 << 8) | d3;
+	u32 v = ((u32)d3 << 16) | ((u32)d2 << 8) | d1;
 	return lz_hash(v, LZMS_DELTA_HASH_ORDER);
 }
 
@@ -1383,13 +1388,8 @@ begin:
 
 					in_next = lzms_skip_bytes(c, len, in_next);
 
-					if (cur_node != c->optimum_nodes)
-						lzms_encode_item_list(c, cur_node);
-
-					lzms_encode_item(c, (struct lzms_item) {
-								.source = rep_idx,
-								.length = len,
-							    });
+					lzms_encode_item_list(c, cur_node);
+					lzms_encode_item(c, len, rep_idx);
 
 					c->optimum_nodes[0].state = cur_node->state;
 					c->optimum_nodes[0].state.upcoming_offset =
@@ -1539,13 +1539,8 @@ begin:
 
 					in_next = lzms_skip_bytes(c, len, in_next);
 
-					if (cur_node != c->optimum_nodes)
-						lzms_encode_item_list(c, cur_node);
-
-					lzms_encode_item(c, (struct lzms_item) {
-						.length = len,
-						.source = LZMS_DELTA_SOURCE_TAG | rep_idx,
-					});
+					lzms_encode_item_list(c, cur_node);
+					lzms_encode_item(c, len, LZMS_DELTA_SOURCE_TAG | rep_idx);
 
 					c->optimum_nodes[0].state = cur_node->state;
 					c->optimum_nodes[0].state.upcoming_pair = pair;
@@ -1614,13 +1609,8 @@ begin:
 
 				in_next = lzms_skip_bytes(c, best_len - 1, in_next + 1);
 
-				if (cur_node != c->optimum_nodes)
-					lzms_encode_item_list(c, cur_node);
-
-				lzms_encode_item(c, (struct lzms_item) {
-					.length = best_len,
-					.source = offset + LZMS_OFFSET_ADJUSTMENT,
-				});
+				lzms_encode_item_list(c, cur_node);
+				lzms_encode_item(c, best_len, offset + LZMS_OFFSET_ADJUSTMENT);
 
 				c->optimum_nodes[0].state = cur_node->state;
 				c->optimum_nodes[0].state.upcoming_offset = offset;
@@ -1788,13 +1778,8 @@ begin:
 
 					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
 
-					if (cur_node != c->optimum_nodes)
-						lzms_encode_item_list(c, cur_node);
-
-					lzms_encode_item(c, (struct lzms_item) {
-						.length = len,
-						.source = source,
-					});
+					lzms_encode_item_list(c, cur_node);
+					lzms_encode_item(c, len, source);
 
 					c->optimum_nodes[0].state = cur_node->state;
 					c->optimum_nodes[0].state.upcoming_offset = 0;
@@ -2009,7 +1994,7 @@ begin:
 		if (cur_node == end_node ||
 		    cur_node == &c->optimum_nodes[LZMS_NUM_OPTIM_NODES])
 		{
-			lzms_encode_item_list(c, cur_node);
+			lzms_encode_nonempty_item_list(c, cur_node);
 			c->optimum_nodes[0].state = cur_node->state;
 			goto begin;
 		}
