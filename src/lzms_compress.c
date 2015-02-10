@@ -1401,15 +1401,15 @@ begin:
 					continue;
 
 				/* Extend the match to its full length.  */
-				const u32 len = lz_extend(in_next, matchptr, 2, in_end - in_next);
+				const u32 rep_len = lz_extend(in_next, matchptr, 2, in_end - in_next);
 
 				/* Early out for long repeat offset LZ match */
-				if (len >= c->mf.nice_match_len) {
+				if (rep_len >= c->mf.nice_match_len) {
 
-					in_next = lzms_skip_bytes(c, len, in_next);
+					in_next = lzms_skip_bytes(c, rep_len, in_next);
 
 					lzms_encode_item_list(c, cur_node);
-					lzms_encode_item(c, len, rep_idx);
+					lzms_encode_item(c, rep_len, rep_idx);
 
 					c->optimum_nodes[0].state = cur_node->state;
 					cur_node = &c->optimum_nodes[0];
@@ -1426,7 +1426,7 @@ begin:
 					goto begin;
 				}
 
-				while (end_node < cur_node + len)
+				while (end_node < cur_node + rep_len)
 					(++end_node)->cost = INFINITE_COST;
 
 				u32 base_cost = cur_node->cost +
@@ -1445,53 +1445,58 @@ begin:
 					base_cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[rep_idx],
 								     c->lz_repmatch_probs[rep_idx]);
 
-				u32 l = 2;
+				u32 len = 2;
 				do {
-					u32 cost = base_cost + lzms_fast_length_cost(c, l);
-					if (cost < (cur_node + l)->cost) {
-						(cur_node + l)->cost = cost;
-						(cur_node + l)->item = (struct lzms_item) {
-							.length = l,
+					u32 cost = base_cost + lzms_fast_length_cost(c, len);
+					if (cost < (cur_node + len)->cost) {
+						(cur_node + len)->cost = cost;
+						(cur_node + len)->item = (struct lzms_item) {
+							.length = len,
 							.source = rep_idx,
 						};
-						(cur_node + l)->num_extra_items = 0;
+						(cur_node + len)->num_extra_items = 0;
 					}
-				} while (++l <= len);
+				} while (++len <= rep_len);
 
 
 				/* try rep + lit + rep0  */
 				if (c->try_multistep_ops &&
-				    in_end - (in_next + len + 1) >= 2 &&
-				    load_u16_unaligned(in_next + len + 1) ==
-				    load_u16_unaligned(matchptr + len + 1))
+				    in_end - (in_next + rep_len) >= 3 &&
+				    load_u16_unaligned(in_next + rep_len + 1) ==
+				    load_u16_unaligned(matchptr + rep_len + 1))
 				{
-					u32 next_len = lz_extend(in_next + len + 1,
-								 matchptr + len + 1,
-								 2,
-								 min(c->mf.nice_match_len,
-								     in_end - (in_next + len + 1)));
+					const u32 rep0_len = lz_extend(in_next + rep_len + 1,
+								       matchptr + rep_len + 1,
+								       2,
+								       min(c->mf.nice_match_len,
+									   in_end - (in_next + rep_len + 1)));
 
 					unsigned main_state = cur_node->state.main_state;
 					unsigned match_state = cur_node->state.match_state;
 					unsigned lz_match_state = cur_node->state.lz_match_state;
 					unsigned lz_repmatch0_state = cur_node->state.lz_repmatch_states[0];
 
-					main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_STATES;
-					match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_STATES;
-					lz_match_state = ((lz_match_state << 1) | 1) % LZMS_NUM_LZ_MATCH_STATES;
+					/* update states for rep match  */
+					main_state = ((main_state << 1) | 1) %
+								LZMS_NUM_MAIN_STATES;
+					match_state = ((match_state << 1) | 0) %
+								LZMS_NUM_MATCH_STATES;
+					lz_match_state = ((lz_match_state << 1) | 1) %
+								LZMS_NUM_LZ_MATCH_STATES;
+					lz_repmatch0_state = ((lz_repmatch0_state << 1) | (rep_idx > 0)) %
+								LZMS_NUM_LZ_REPMATCH_STATES;
 
-					lz_repmatch0_state <<= 1;
-					if (rep_idx > 0)
-						lz_repmatch0_state |= 1;
-					lz_repmatch0_state %= LZMS_NUM_LZ_REPMATCH_STATES;
+					/* rep cost  */
+					u32 cost = base_cost + lzms_fast_length_cost(c, rep_len);
 
-					u32 cost = base_cost +
-						   lzms_fast_length_cost(c, len) +
-						   lzms_bit_0_cost(main_state, c->main_probs) +
-						   ((u32)c->literal_lens[*(in_next + len)] << LZMS_COST_SHIFT);
+					/* add cost of literal  */
+					cost += lzms_bit_0_cost(main_state, c->main_probs) +
+					        ((u32)c->literal_lens[*(in_next + rep_len)] << LZMS_COST_SHIFT);
 
+					/* update state for literal  */
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
 
+					/* add cost of rep0  */
 					cost += lzms_bit_1_cost(main_state,
 							      c->main_probs) +
 						lzms_bit_0_cost(match_state,
@@ -1500,9 +1505,9 @@ begin:
 							      c->lz_match_probs) +
 						lzms_bit_0_cost(lz_repmatch0_state,
 							      c->lz_repmatch_probs[0]) +
-						lzms_fast_length_cost(c, next_len);
+						lzms_fast_length_cost(c, rep0_len);
 
-					u32 total_len = len + 1 + next_len;
+					u32 total_len = rep_len + 1 + rep0_len;
 
 					while (end_node < cur_node + total_len)
 						(++end_node)->cost = INFINITE_COST;
@@ -1510,15 +1515,15 @@ begin:
 					if (cost < (cur_node + total_len)->cost) {
 						(cur_node + total_len)->cost = cost;
 						(cur_node + total_len)->item = (struct lzms_item) {
-							.length = next_len,
+							.length = rep0_len,
 							.source = 0,
 						};
 						(cur_node + total_len)->extra_items[0] = (struct lzms_item) {
 							.length = 1,
-							.source = *(in_next + len),
+							.source = *(in_next + rep_len),
 						};
 						(cur_node + total_len)->extra_items[1] = (struct lzms_item) {
-							.length = len,
+							.length = rep_len,
 							.source = rep_idx,
 						};
 						(cur_node + total_len)->num_extra_items = 2;
@@ -1690,12 +1695,12 @@ begin:
 				u32 offset = c->matches[i].offset;
 				const u8 *matchptr = in_next - offset;
 
-				u32 next_len = lz_extend(in_next + len + 1,
+				u32 rep0_len = lz_extend(in_next + len + 1,
 							 matchptr + len + 1,
 							 0,
 							 min(c->mf.nice_match_len,
 							     in_end - (in_next + len + 1)));
-				if (next_len < 2)
+				if (rep0_len < 2)
 					continue;
 
 				unsigned main_state = cur_node->state.main_state;
@@ -1725,9 +1730,9 @@ begin:
 				cost += lzms_bit_0_cost(match_state, c->match_probs);
 				cost += lzms_bit_1_cost(lz_match_state, c->lz_match_probs);
 				cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0], c->lz_repmatch_probs[0]);
-				cost += lzms_fast_length_cost(c, next_len);
+				cost += lzms_fast_length_cost(c, rep0_len);
 
-				u32 total_len = len + 1 + next_len;
+				u32 total_len = len + 1 + rep0_len;
 
 				while (end_node < cur_node + total_len)
 					(++end_node)->cost = INFINITE_COST;
@@ -1735,7 +1740,7 @@ begin:
 				if (cost < (cur_node + total_len)->cost) {
 					(cur_node + total_len)->cost = cost;
 					(cur_node + total_len)->item = (struct lzms_item) {
-						.length = next_len,
+						.length = rep0_len,
 						.source = 0,
 					};
 					(cur_node + total_len)->extra_items[0] = (struct lzms_item) {
