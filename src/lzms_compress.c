@@ -1001,15 +1001,18 @@ lzms_init_bit_costs(void)
 }
 #endif
 
-/* Return the cost to encode the specified bit when in the specified state.  */
+/* Return the cost to encode a 0 bit when in the specified state.  */
 static inline u32
-lzms_bit_cost(int bit, unsigned state, const struct lzms_probability_entry *probs)
+lzms_bit_0_cost(unsigned state, const struct lzms_probability_entry *probs)
 {
-	u32 prob = probs[state].num_recent_zero_bits;
-	if (bit == 0)
-		return lzms_bit_costs[prob];
-	else
-		return lzms_bit_costs[LZMS_PROBABILITY_MAX - prob];
+	return lzms_bit_costs[probs[state].num_recent_zero_bits];
+}
+
+/* Return the cost to encode a 1 bit when in the specified state.  */
+static inline u32
+lzms_bit_1_cost(unsigned state, const struct lzms_probability_entry *probs)
+{
+	return lzms_bit_costs[LZMS_PROBABILITY_MAX - probs[state].num_recent_zero_bits];
 }
 
 /* Return the cost to encode the specified literal byte.  */
@@ -1017,7 +1020,7 @@ static inline u32
 lzms_literal_cost(const struct lzms_compressor *c, unsigned literal,
 		  const struct lzms_adaptive_state *state)
 {
-	return lzms_bit_cost(0, state->main_state, c->main_probs) +
+	return lzms_bit_0_cost(state->main_state, c->main_probs) +
 	       ((u32)c->literal_lens[literal] << LZMS_COST_SHIFT);
 }
 
@@ -1408,19 +1411,19 @@ begin:
 					(++end_node)->cost = INFINITE_COST;
 
 				u32 base_cost = cur_node->cost +
-						lzms_bit_cost(1, cur_node->state.main_state,
+						lzms_bit_1_cost(cur_node->state.main_state,
 							      c->main_probs) +
-						lzms_bit_cost(0, cur_node->state.match_state,
+						lzms_bit_0_cost(cur_node->state.match_state,
 							      c->match_probs) +
-						lzms_bit_cost(1, cur_node->state.lz_match_state,
+						lzms_bit_1_cost(cur_node->state.lz_match_state,
 							      c->lz_match_probs);
 
 				for (int i = 0; i < rep_idx; i++)
-					base_cost += lzms_bit_cost(1, cur_node->state.lz_repmatch_states[i],
+					base_cost += lzms_bit_1_cost(cur_node->state.lz_repmatch_states[i],
 								   c->lz_repmatch_probs[i]);
 
 				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
-					base_cost += lzms_bit_cost(0, cur_node->state.lz_repmatch_states[rep_idx],
+					base_cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[rep_idx],
 								   c->lz_repmatch_probs[rep_idx]);
 
 				u32 l = 2;
@@ -1464,18 +1467,18 @@ begin:
 
 					u32 cost = base_cost +
 						   lzms_fast_length_cost(c, len) +
-						   lzms_bit_cost(0, main_state, c->main_probs) +
+						   lzms_bit_0_cost(main_state, c->main_probs) +
 						   ((u32)c->literal_lens[*(in_next + len)] << LZMS_COST_SHIFT);
 
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
 
-					cost += lzms_bit_cost(1, main_state,
+					cost += lzms_bit_1_cost(main_state,
 							      c->main_probs) +
-						lzms_bit_cost(0, match_state,
+						lzms_bit_0_cost(match_state,
 							      c->match_probs) +
-						lzms_bit_cost(1, lz_match_state,
+						lzms_bit_1_cost(lz_match_state,
 							      c->lz_match_probs) +
-						lzms_bit_cost(0, lz_repmatch0_state,
+						lzms_bit_0_cost(lz_repmatch0_state,
 							      c->lz_repmatch_probs[0]) +
 						lzms_fast_length_cost(c, next_len);
 
@@ -1556,19 +1559,19 @@ begin:
 					(++end_node)->cost = INFINITE_COST;
 
 				u32 base_cost = cur_node->cost +
-						lzms_bit_cost(1, cur_node->state.main_state,
+						lzms_bit_1_cost(cur_node->state.main_state,
 							      c->main_probs) +
-						lzms_bit_cost(1, cur_node->state.match_state,
+						lzms_bit_1_cost(cur_node->state.match_state,
 							      c->match_probs) +
-						lzms_bit_cost(1, cur_node->state.delta_match_state,
+						lzms_bit_1_cost(cur_node->state.delta_match_state,
 							      c->delta_match_probs);
 
 				for (int i = 0; i < rep_idx; i++)
-					base_cost += lzms_bit_cost(1, cur_node->state.delta_repmatch_states[i],
+					base_cost += lzms_bit_1_cost(cur_node->state.delta_repmatch_states[i],
 								   c->delta_repmatch_probs[i]);
 
 				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
-					base_cost += lzms_bit_cost(0, cur_node->state.delta_repmatch_states[rep_idx],
+					base_cost += lzms_bit_0_cost(cur_node->state.delta_repmatch_states[rep_idx],
 								   c->delta_repmatch_probs[rep_idx]);
 
 				u32 l = 2;
@@ -1625,11 +1628,11 @@ begin:
 				(++end_node)->cost = INFINITE_COST;
 
 			u32 base_cost = cur_node->cost +
-					lzms_bit_cost(1, cur_node->state.main_state,
+					lzms_bit_1_cost(cur_node->state.main_state,
 						      c->main_probs) +
-					lzms_bit_cost(0, cur_node->state.match_state,
+					lzms_bit_0_cost(cur_node->state.match_state,
 						      c->match_probs) +
-					lzms_bit_cost(0, cur_node->state.lz_match_state,
+					lzms_bit_0_cost(cur_node->state.lz_match_state,
 						      c->lz_match_probs);
 
 			/*
@@ -1677,9 +1680,9 @@ begin:
 
 				u32 cost = cur_node->cost;
 
-				cost += lzms_bit_cost(1, main_state, c->main_probs);
-				cost += lzms_bit_cost(0, match_state, c->match_probs);
-				cost += lzms_bit_cost(0, lz_match_state, c->lz_match_probs);
+				cost += lzms_bit_1_cost(main_state, c->main_probs);
+				cost += lzms_bit_0_cost(match_state, c->match_probs);
+				cost += lzms_bit_0_cost(lz_match_state, c->lz_match_probs);
 
 				cost += lzms_lz_offset_slot_cost(c, offset_slot);
 				cost += lzms_fast_length_cost(c, len);
@@ -1688,15 +1691,15 @@ begin:
 				match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_STATES;
 				lz_match_state = ((lz_match_state << 1) | 0) % LZMS_NUM_LZ_MATCH_STATES;
 
-				cost += lzms_bit_cost(0, main_state, c->main_probs);
+				cost += lzms_bit_0_cost(main_state, c->main_probs);
 				cost += (u32)c->literal_lens[*(in_next + len)] << LZMS_COST_SHIFT;
 
 				main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
 
-				cost += lzms_bit_cost(1, main_state, c->main_probs);
-				cost += lzms_bit_cost(0, match_state, c->match_probs);
-				cost += lzms_bit_cost(1, lz_match_state, c->lz_match_probs);
-				cost += lzms_bit_cost(0, cur_node->state.lz_repmatch_states[0], c->lz_repmatch_probs[0]);
+				cost += lzms_bit_1_cost(main_state, c->main_probs);
+				cost += lzms_bit_0_cost(match_state, c->match_probs);
+				cost += lzms_bit_1_cost(lz_match_state, c->lz_match_probs);
+				cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0], c->lz_repmatch_probs[0]);
 				cost += lzms_fast_length_cost(c, next_len);
 
 				u32 total_len = len + 1 + next_len;
@@ -1792,11 +1795,11 @@ begin:
 					(++end_node)->cost = INFINITE_COST;
 
 				u32 base_cost = cur_node->cost +
-						lzms_bit_cost(1, cur_node->state.main_state,
+						lzms_bit_1_cost(cur_node->state.main_state,
 							      c->main_probs) +
-						lzms_bit_cost(1, cur_node->state.match_state,
+						lzms_bit_1_cost(cur_node->state.match_state,
 							      c->match_probs) +
-						lzms_bit_cost(0, cur_node->state.delta_match_state,
+						lzms_bit_0_cost(cur_node->state.delta_match_state,
 							      c->delta_match_probs) +
 						lzms_delta_source_cost(c, power, raw_offset);
 
@@ -1848,13 +1851,13 @@ begin:
 				unsigned main_state = ((cur_node->state.main_state << 1) | 0) %
 							LZMS_NUM_MAIN_STATES;
 				u32 base_cost = literal_cost +
-						lzms_bit_cost(1, main_state,
+						lzms_bit_1_cost(main_state,
 							      c->main_probs) +
-						lzms_bit_cost(0, cur_node->state.match_state,
+						lzms_bit_0_cost(cur_node->state.match_state,
 							      c->match_probs) +
-						lzms_bit_cost(1, cur_node->state.lz_match_state,
+						lzms_bit_1_cost(cur_node->state.lz_match_state,
 							      c->lz_match_probs);
-				base_cost += lzms_bit_cost(0, cur_node->state.lz_repmatch_states[0],
+				base_cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0],
 							   c->lz_repmatch_probs[0]);
 
 				u32 cost = base_cost + lzms_fast_length_cost(c, len);
