@@ -144,36 +144,38 @@ struct lzms_huffman_rebuild_info {
 	u32 *freqs;
 };
 
-/* LRU queue for offsets of LZ-style matches  */
-struct lzms_lz_lru_queue {
-	u32 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
-	u32 prev_offset;
-	u32 upcoming_offset;
+struct lzms_item {
+	u32 length;
+	u32 source;
 };
 
 #define LZMS_DELTA_SOURCE_TAG			((u32)1 << 31)
 #define LZMS_DELTA_SOURCE_POWER_SHIFT		28
 #define LZMS_DELTA_SOURCE_RAW_OFFSET_MASK	(((u32)1 << LZMS_DELTA_SOURCE_POWER_SHIFT) - 1)
 
+struct lzms_adaptive_state {
+
+	/* LRU queue for offsets of LZ-style matches  */
+	u32 recent_offsets[LZMS_NUM_RECENT_OFFSETS + 1];
+	u32 prev_offset;
+	u32 upcoming_offset;
+
 #if LZMS_USE_DELTA_MATCHES
-/* LRU queue for (power, raw_offset) references of delta-style matches  */
-struct lzms_delta_lru_queue {
+	/* LRU queue for (power, raw_offset) references of delta-style matches  */
 	u32 recent_pairs[LZMS_NUM_RECENT_OFFSETS + 1];
 	u32 prev_pair;
 	u32 upcoming_pair;
-};
 #endif
 
-struct lzms_lru_queue {
-	struct lzms_lz_lru_queue lz;
+	/* States for range coding item type decisions  */
+	u8 main_state;
+	u8 match_state;
+	u8 lz_match_state;
+	u8 lz_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
 #if LZMS_USE_DELTA_MATCHES
-	struct lzms_delta_lru_queue delta;
+	u8 delta_match_state;
+	u8 delta_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
 #endif
-};
-
-struct lzms_item {
-	u32 length;
-	u32 source;
 };
 
 /*
@@ -242,17 +244,7 @@ struct lzms_optimum_node {
 	 * entries or current Huffman codewords.  Those aren't maintained
 	 * per-position and are only updated occassionally.
 	 */
-	struct lzms_adaptive_state {
-		struct lzms_lru_queue lru;
-		u8 main_state;
-		u8 match_state;
-		u8 lz_match_state;
-		u8 lz_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
-	#if LZMS_USE_DELTA_MATCHES
-		u8 delta_match_state;
-		u8 delta_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
-	#endif
-	} state;
+	struct lzms_adaptive_state state;
 };
 
 /* The main LZMS compressor structure  */
@@ -1061,25 +1053,19 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 }
 
 static void
-lzms_init_lru_queue(struct lzms_lru_queue *queue)
+lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 {
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
-		queue->lz.recent_offsets[i] = i + 1;
-	queue->lz.prev_offset = 0;
-	queue->lz.upcoming_offset = 0;
+		state->recent_offsets[i] = i + 1;
+	state->prev_offset = 0;
+	state->upcoming_offset = 0;
 
 #if LZMS_USE_DELTA_MATCHES
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
-		queue->delta.recent_pairs[i] = i + 1;
-	queue->delta.prev_pair = 0;
-	queue->delta.upcoming_pair = 0;
+		state->recent_pairs[i] = i + 1;
+	state->prev_pair = 0;
+	state->upcoming_pair = 0;
 #endif
-}
-
-static void
-lzms_init_adaptive_state(struct lzms_adaptive_state *state)
-{
-	lzms_init_lru_queue(&state->lru);
 	state->main_state = 0;
 	state->match_state = 0;
 	state->lz_match_state = 0;
@@ -1093,22 +1079,22 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 }
 
 static void
-lzms_update_lru_queue(struct lzms_lru_queue *queue)
+lzms_update_lru_queues(struct lzms_adaptive_state *state)
 {
-	if (queue->lz.prev_offset != 0) {
+	if (state->prev_offset != 0) {
 		for (int i = LZMS_NUM_REPMATCH_CONTEXTS; i >= 0; i--)
-			queue->lz.recent_offsets[i + 1] = queue->lz.recent_offsets[i];
-		queue->lz.recent_offsets[0] = queue->lz.prev_offset;
+			state->recent_offsets[i + 1] = state->recent_offsets[i];
+		state->recent_offsets[0] = state->prev_offset;
 	}
-	queue->lz.prev_offset = queue->lz.upcoming_offset;
+	state->prev_offset = state->upcoming_offset;
 
 #if LZMS_USE_DELTA_MATCHES
-	if (queue->delta.prev_pair != 0) {
+	if (state->prev_pair != 0) {
 		for (int i = LZMS_NUM_REPMATCH_CONTEXTS; i >= 0; i--)
-			queue->delta.recent_pairs[i + 1] = queue->delta.recent_pairs[i];
-		queue->delta.recent_pairs[0] = queue->delta.prev_pair;
+			state->recent_pairs[i + 1] = state->recent_pairs[i];
+		state->recent_pairs[0] = state->prev_pair;
 	}
-	queue->delta.prev_pair = queue->delta.upcoming_pair;
+	state->prev_pair = state->upcoming_pair;
 #endif
 }
 
@@ -1299,7 +1285,7 @@ begin:
 				/* Looking for a repeat offset LZ match at
 				 * repeat offset index @rep_idx  */
 
-				const u32 offset = cur_node->state.lru.lz.recent_offsets[rep_idx];
+				const u32 offset = cur_node->state.recent_offsets[rep_idx];
 				const u8 * const matchptr = in_next - offset;
 
 				/* Check the first 2 bytes before entering the extension loop.  */
@@ -1322,16 +1308,16 @@ begin:
 								.length = len,
 							    });
 
-					c->optimum_nodes[0].state.lru = cur_node->state.lru;
-					c->optimum_nodes[0].state.lru.lz.upcoming_offset =
-						c->optimum_nodes[0].state.lru.lz.recent_offsets[rep_idx];
+					c->optimum_nodes[0].state = cur_node->state;
+					c->optimum_nodes[0].state.upcoming_offset =
+						c->optimum_nodes[0].state.recent_offsets[rep_idx];
 				#if LZMS_USE_DELTA_MATCHES
-					c->optimum_nodes[0].state.lru.delta.upcoming_pair = 0;
+					c->optimum_nodes[0].state.upcoming_pair = 0;
 				#endif
 					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						c->optimum_nodes[0].state.lru.lz.recent_offsets[i] =
-							c->optimum_nodes[0].state.lru.lz.recent_offsets[i + 1];
-					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+						c->optimum_nodes[0].state.recent_offsets[i] =
+							c->optimum_nodes[0].state.recent_offsets[i + 1];
+					lzms_update_lru_queues(&c->optimum_nodes[0].state);
 					goto begin;
 				}
 
@@ -1445,7 +1431,7 @@ begin:
 				/* Looking for a repeat offset delta match at
 				 * repeat offset index @rep_idx  */
 
-				const u32 pair = cur_node->state.lru.delta.recent_pairs[rep_idx];
+				const u32 pair = cur_node->state.recent_pairs[rep_idx];
 				const u32 power = pair >> LZMS_DELTA_SOURCE_POWER_SHIFT;
 				const u32 raw_offset = pair & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK;
 				const u32 span = (u32)1 << power;
@@ -1478,13 +1464,13 @@ begin:
 						.source = LZMS_DELTA_SOURCE_TAG | rep_idx,
 					});
 
-					c->optimum_nodes[0].state.lru = cur_node->state.lru;
-					c->optimum_nodes[0].state.lru.delta.upcoming_pair = pair;
-					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
+					c->optimum_nodes[0].state = cur_node->state;
+					c->optimum_nodes[0].state.upcoming_pair = pair;
+					c->optimum_nodes[0].state.upcoming_offset = 0;
 					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						c->optimum_nodes[0].state.lru.delta.recent_pairs[i] =
-							c->optimum_nodes[0].state.lru.delta.recent_pairs[i + 1];
-					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+						c->optimum_nodes[0].state.recent_pairs[i] =
+							c->optimum_nodes[0].state.recent_pairs[i + 1];
+					lzms_update_lru_queues(&c->optimum_nodes[0].state);
 					goto begin;
 				}
 
@@ -1553,12 +1539,12 @@ begin:
 					.source = offset + LZMS_OFFSET_ADJUSTMENT,
 				});
 
-				c->optimum_nodes[0].state.lru = cur_node->state.lru;
-				c->optimum_nodes[0].state.lru.lz.upcoming_offset = offset;
+				c->optimum_nodes[0].state = cur_node->state;
+				c->optimum_nodes[0].state.upcoming_offset = offset;
 			#if LZMS_USE_DELTA_MATCHES
-				c->optimum_nodes[0].state.lru.delta.upcoming_pair = 0;
+				c->optimum_nodes[0].state.upcoming_pair = 0;
 			#endif
-				lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+				lzms_update_lru_queues(&c->optimum_nodes[0].state);
 				goto begin;
 			}
 
@@ -1727,10 +1713,10 @@ begin:
 						.source = source,
 					});
 
-					c->optimum_nodes[0].state.lru = cur_node->state.lru;
-					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
-					c->optimum_nodes[0].state.lru.delta.upcoming_pair = pair;
-					lzms_update_lru_queue(&c->optimum_nodes[0].state.lru);
+					c->optimum_nodes[0].state = cur_node->state;
+					c->optimum_nodes[0].state.upcoming_offset = 0;
+					c->optimum_nodes[0].state.upcoming_pair = pair;
+					lzms_update_lru_queues(&c->optimum_nodes[0].state);
 					goto begin;
 				}
 
@@ -1777,10 +1763,10 @@ begin:
 		} else if (in_end - (in_next + 1) >= 2) {
 			/* try lit + rep0  */
 			u32 offset;
-			if (cur_node->state.lru.lz.prev_offset)
-				offset = cur_node->state.lru.lz.prev_offset;
+			if (cur_node->state.prev_offset)
+				offset = cur_node->state.prev_offset;
 			else
-				offset = cur_node->state.lru.lz.recent_offsets[0];
+				offset = cur_node->state.recent_offsets[0];
 			const u8 *strptr = in_next + 1;
 			const u8 *matchptr = strptr - offset;
 
@@ -1839,9 +1825,9 @@ begin:
 			const u32 length = item_to_take.length;
 			int is_match = (length > 1);
 			lzms_update_main_state(&pending_state, is_match);
-			pending_state.lru.lz.upcoming_offset = 0;
+			pending_state.upcoming_offset = 0;
 		#if LZMS_USE_DELTA_MATCHES
-			pending_state.lru.delta.upcoming_pair = 0;
+			pending_state.upcoming_pair = 0;
 		#endif
 			if (is_match) {
 				u32 source = item_to_take.source;
@@ -1860,7 +1846,7 @@ begin:
 						u32 pair = source - LZMS_OFFSET_ADJUSTMENT;
 						/* Explicit offset delta match  */
 						lzms_update_delta_match_state(&pending_state, 0);
-						pending_state.lru.delta.upcoming_pair = pair;
+						pending_state.upcoming_pair = pair;
 					} else {
 						/* Repeat offset delta match  */
 						int rep_idx = source;
@@ -1868,12 +1854,12 @@ begin:
 						lzms_update_delta_match_state(&pending_state, 1);
 						lzms_update_delta_repmatch_states(&pending_state, rep_idx);
 
-						pending_state.lru.delta.upcoming_pair =
-							pending_state.lru.delta.recent_pairs[rep_idx];
+						pending_state.upcoming_pair =
+							pending_state.recent_pairs[rep_idx];
 
 						for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-							pending_state.lru.delta.recent_pairs[i] =
-								pending_state.lru.delta.recent_pairs[i + 1];
+							pending_state.recent_pairs[i] =
+								pending_state.recent_pairs[i + 1];
 					}
 				} else
 			#endif
@@ -1881,7 +1867,7 @@ begin:
 					if (source >= LZMS_NUM_RECENT_OFFSETS) {
 						/* Explicit offset LZ match  */
 						lzms_update_lz_match_state(&pending_state, 0);
-						pending_state.lru.lz.upcoming_offset =
+						pending_state.upcoming_offset =
 							source - LZMS_OFFSET_ADJUSTMENT;
 					} else {
 						/* Repeat offset LZ match  */
@@ -1890,17 +1876,17 @@ begin:
 						lzms_update_lz_match_state(&pending_state, 1);
 						lzms_update_lz_repmatch_states(&pending_state, rep_idx);
 
-						pending_state.lru.lz.upcoming_offset =
-							pending_state.lru.lz.recent_offsets[rep_idx];
+						pending_state.upcoming_offset =
+							pending_state.recent_offsets[rep_idx];
 
 						for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-							pending_state.lru.lz.recent_offsets[i] =
-								pending_state.lru.lz.recent_offsets[i + 1];
+							pending_state.recent_offsets[i] =
+								pending_state.recent_offsets[i + 1];
 					}
 				}
 			}
 
-			lzms_update_lru_queue(&pending_state.lru);
+			lzms_update_lru_queues(&pending_state);
 
 			if (next_item_idx < 0)
 				break;
