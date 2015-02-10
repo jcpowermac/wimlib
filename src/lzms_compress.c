@@ -1395,15 +1395,17 @@ begin:
 					lzms_encode_item(c, len, rep_idx);
 
 					c->optimum_nodes[0].state = cur_node->state;
-					c->optimum_nodes[0].state.upcoming_offset =
-						c->optimum_nodes[0].state.recent_offsets[rep_idx];
+					cur_node = &c->optimum_nodes[0];
+
+					cur_node->state.upcoming_offset =
+						cur_node->state.recent_offsets[rep_idx];
 				#if LZMS_USE_DELTA_MATCHES
-					c->optimum_nodes[0].state.upcoming_pair = 0;
+					cur_node->state.upcoming_pair = 0;
 				#endif
 					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						c->optimum_nodes[0].state.recent_offsets[i] =
-							c->optimum_nodes[0].state.recent_offsets[i + 1];
-					lzms_update_lru_queues(&c->optimum_nodes[0].state);
+						cur_node->state.recent_offsets[i] =
+							cur_node->state.recent_offsets[i + 1];
+					lzms_update_lru_queues(&cur_node->state);
 					goto begin;
 				}
 
@@ -1546,12 +1548,14 @@ begin:
 					lzms_encode_item(c, len, LZMS_DELTA_SOURCE_TAG | rep_idx);
 
 					c->optimum_nodes[0].state = cur_node->state;
-					c->optimum_nodes[0].state.upcoming_pair = pair;
-					c->optimum_nodes[0].state.upcoming_offset = 0;
+					cur_node = &c->optimum_nodes[0];
+
+					cur_node->state.upcoming_pair = pair;
+					cur_node->state.upcoming_offset = 0;
 					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
-						c->optimum_nodes[0].state.recent_pairs[i] =
-							c->optimum_nodes[0].state.recent_pairs[i + 1];
-					lzms_update_lru_queues(&c->optimum_nodes[0].state);
+						cur_node->state.recent_pairs[i] =
+							cur_node->state.recent_pairs[i + 1];
+					lzms_update_lru_queues(&cur_node->state);
 					goto begin;
 				}
 
@@ -1616,11 +1620,13 @@ begin:
 				lzms_encode_item(c, best_len, offset + LZMS_OFFSET_ADJUSTMENT);
 
 				c->optimum_nodes[0].state = cur_node->state;
-				c->optimum_nodes[0].state.upcoming_offset = offset;
+				cur_node = &c->optimum_nodes[0];
+
+				cur_node->state.upcoming_offset = offset;
 			#if LZMS_USE_DELTA_MATCHES
-				c->optimum_nodes[0].state.upcoming_pair = 0;
+				cur_node->state.upcoming_pair = 0;
 			#endif
-				lzms_update_lru_queues(&c->optimum_nodes[0].state);
+				lzms_update_lru_queues(&cur_node->state);
 				goto begin;
 			}
 
@@ -1785,9 +1791,11 @@ begin:
 					lzms_encode_item(c, len, source);
 
 					c->optimum_nodes[0].state = cur_node->state;
-					c->optimum_nodes[0].state.upcoming_offset = 0;
-					c->optimum_nodes[0].state.upcoming_pair = pair;
-					lzms_update_lru_queues(&c->optimum_nodes[0].state);
+					cur_node = &c->optimum_nodes[0];
+
+					cur_node->state.upcoming_offset = 0;
+					cur_node->state.upcoming_pair = pair;
+					lzms_update_lru_queues(&cur_node->state);
 					goto begin;
 				}
 
