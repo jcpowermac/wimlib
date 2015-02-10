@@ -27,6 +27,8 @@
 #define SA_and_LCP_LCP_SHIFT	(32 - LCP_BITS)
 #define SA_and_LCP_POS_MASK	(((u32)1 << SA_and_LCP_LCP_SHIFT) - 1)
 
+#define PREFETCH_SAFETY		5
+
 /*
  * Include the template header to define the functions build_LCP(),
  * build_LCPIT(), and lcpit_advance_one_byte().  There are "normal" and "huge"
@@ -60,8 +62,8 @@ lcpit_matchfinder_get_needed_memory(size_t max_bufsize)
 {
 	u64 size = 0;
 
-	/* pos_data (+1 is for prefetch) */
-	size += ((u64)max_bufsize + 1) * sizeof(u32);
+	/* pos_data  */
+	size += ((u64)max_bufsize + PREFETCH_SAFETY) * sizeof(u32);
 
 	/* intervals or intervals64  */
 	size += (u64)max(max_bufsize, DIVSUFSORT_TMP_LEN) *
@@ -90,7 +92,7 @@ lcpit_matchfinder_init(struct lcpit_matchfinder *mf, size_t max_bufsize,
 	if (lcpit_matchfinder_get_needed_memory(max_bufsize) > SIZE_MAX)
 		return false;
 
-	mf->pos_data = MALLOC((max_bufsize + 1) * sizeof(u32));
+	mf->pos_data = MALLOC((max_bufsize + PREFETCH_SAFETY) * sizeof(u32));
 	mf->intervals = MALLOC(max(max_bufsize, DIVSUFSORT_TMP_LEN) *
 			       (max_bufsize <= MAX_NORMAL_BUFSIZE ?
 				sizeof(u32) : sizeof(u64)));
@@ -194,7 +196,10 @@ lcpit_matchfinder_load_buffer(struct lcpit_matchfinder *mf, const u8 *T, u32 n)
 		mf->huge_mode = true;
 	}
 	mf->cur_pos = 0; /* starting at beginning of input buffer  */
-	mf->pos_data[n] = 0; /* safety entry for prefetch() overrun  */
+
+	/* safety entries for prefetch overrun  */
+	for (u32 i = 0; i < PREFETCH_SAFETY; i++)
+		mf->pos_data[n + i] = 0;
 }
 
 /*

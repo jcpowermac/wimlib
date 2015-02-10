@@ -67,6 +67,12 @@ build_LCP_normal(u32 SA_and_LCP[restrict], const u32 ISA[restrict],
 	u32 h = 0;
 	for (u32 i = 0; i < n; i++) {
 		u32 r = ISA[i];
+	#if HUGE_MODE
+		prefetch(&SA[ISA[i + PREFETCH_SAFETY]]);
+		prefetch(&LCP[ISA[i + PREFETCH_SAFETY]]);
+	#else
+		prefetch(&SA_and_LCP[ISA[i + PREFETCH_SAFETY]]);
+	#endif
 		if (r > 0) {
 			u32 j = GET_SA_ENTRY(r - 1);
 			u32 lim = min(n - i, n - j);
