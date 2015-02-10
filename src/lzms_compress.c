@@ -1900,18 +1900,21 @@ begin:
 		cur_node->state = source_node->state;
 		for (;;) {
 			const u32 length = item_to_take.length;
-			int is_match = (length > 1);
-			lzms_update_main_state(&cur_node->state, is_match);
+			u32 source = item_to_take.source;
+
 			cur_node->state.upcoming_offset = 0;
 			cur_node->state.upcoming_pair = 0;
-			if (is_match) {
-				u32 source = item_to_take.source;
-				int is_delta = (source & LZMS_DELTA_SOURCE_TAG) != 0;
-				lzms_update_match_state(&cur_node->state, is_delta);
+			if (length > 1) {
+				/* Match  */
 
-				if (is_delta) {
+				lzms_update_main_state(&cur_node->state, 1);
+
+				if (source & LZMS_DELTA_SOURCE_TAG) {
 					/* Delta match  */
+
+					lzms_update_match_state(&cur_node->state, 1);
 					source &= ~LZMS_DELTA_SOURCE_TAG;
+
 					if (source >= LZMS_NUM_RECENT_OFFSETS) {
 						u32 pair = source - LZMS_OFFSET_ADJUSTMENT;
 						/* Explicit offset delta match  */
@@ -1932,6 +1935,7 @@ begin:
 								cur_node->state.recent_pairs[i + 1];
 					}
 				} else {
+					lzms_update_match_state(&cur_node->state, 0);
 					if (source >= LZMS_NUM_RECENT_OFFSETS) {
 						/* Explicit offset LZ match  */
 						lzms_update_lz_match_state(&cur_node->state, 0);
@@ -1952,6 +1956,10 @@ begin:
 								cur_node->state.recent_offsets[i + 1];
 					}
 				}
+			} else {
+				/* Literal  */
+
+				lzms_update_main_state(&cur_node->state, 0);
 			}
 
 			lzms_update_lru_queues(&cur_node->state);

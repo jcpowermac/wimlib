@@ -39,9 +39,6 @@ struct lcpit_matchfinder {
 		u64 *intervals64;
 	};
 
-	/* The suffix array  */
-	u32 *SA;
-
 	u32 min_match_len;
 	u32 nice_match_len;
 };

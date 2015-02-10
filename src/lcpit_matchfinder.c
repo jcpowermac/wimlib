@@ -24,8 +24,6 @@
 #define NORMAL_UNVISITED_TAG	((u32)1 << 31)
 #define MAX_NORMAL_BUFSIZE	((u32)1 << (31 - LCP_BITS))
 #define HUGE_UNVISITED_TAG	((u64)1 << 63)
-#define SA_and_LCP_LCP_SHIFT	(32 - LCP_BITS)
-#define SA_and_LCP_POS_MASK	(((u32)1 << SA_and_LCP_LCP_SHIFT) - 1)
 
 #define PREFETCH_SAFETY		5
 
@@ -63,14 +61,12 @@ lcpit_matchfinder_get_needed_memory(size_t max_bufsize)
 	u64 size = 0;
 
 	/* pos_data  */
-	size += ((u64)max_bufsize + PREFETCH_SAFETY) * sizeof(u32);
+	size += (u64)max(max_bufsize + PREFETCH_SAFETY, DIVSUFSORT_TMP_LEN) *
+		sizeof(u32);
 
 	/* intervals or intervals64  */
-	size += (u64)max(max_bufsize, DIVSUFSORT_TMP_LEN) *
-		(max_bufsize <= MAX_NORMAL_BUFSIZE ? sizeof(u32) : sizeof(u64));
-
-	/* SA */
-	size += (u64)max_bufsize * sizeof(u32);
+	size += (u64)max_bufsize * (max_bufsize <= MAX_NORMAL_BUFSIZE ?
+				    sizeof(u32) : sizeof(u64));
 
 	return size;
 }
@@ -92,13 +88,13 @@ lcpit_matchfinder_init(struct lcpit_matchfinder *mf, size_t max_bufsize,
 	if (lcpit_matchfinder_get_needed_memory(max_bufsize) > SIZE_MAX)
 		return false;
 
-	mf->pos_data = MALLOC((max_bufsize + PREFETCH_SAFETY) * sizeof(u32));
-	mf->intervals = MALLOC(max(max_bufsize, DIVSUFSORT_TMP_LEN) *
+	mf->pos_data = MALLOC(max(max_bufsize + PREFETCH_SAFETY,
+				  DIVSUFSORT_TMP_LEN) * sizeof(u32));
+	mf->intervals = MALLOC(max_bufsize *
 			       (max_bufsize <= MAX_NORMAL_BUFSIZE ?
 				sizeof(u32) : sizeof(u64)));
-	mf->SA = MALLOC(max_bufsize * sizeof(u32));
 
-	if (!mf->pos_data || !mf->intervals || !mf->SA) {
+	if (!mf->pos_data || !mf->intervals) {
 		lcpit_matchfinder_destroy(mf);
 		return false;
 	}
@@ -170,29 +166,26 @@ lcpit_matchfinder_load_buffer(struct lcpit_matchfinder *mf, const u8 *T, u32 n)
 	if (n == 0)
 		return;
 
-	build_SA(mf->SA, T, n, mf->intervals);
-	build_ISA(mf->pos_data, mf->SA, n);
+	build_SA(mf->intervals, T, n, mf->pos_data);
+	build_ISA(mf->pos_data, mf->intervals, n);
 	if (n <= MAX_NORMAL_BUFSIZE) {
 		/* "Normal" sized buffer  */
 
-		/* Build LCP, packing it into ->SA  */
-		build_LCP_normal(mf->SA, mf->pos_data, T, n,
+		/* Build LCP, packing it into the SA  */
+		build_LCP_normal(mf->intervals, mf->pos_data, T, n,
 				 mf->min_match_len, mf->nice_match_len);
 		/* Prepare ->intervals and ->pos_data  */
-		build_LCPIT_normal(mf->SA, mf->intervals, mf->pos_data, n);
+		build_LCPIT_normal(mf->intervals, mf->pos_data, n);
 		mf->huge_mode = false;
 	} else {
 		/* "Huge" sized buffer  */
-
-		/* Build LCP in the second half of ->intervals64.  It may be
-		 * partially overwritten in build_LCPIT_huge(), but this is okay
-		 * since each LCP entry is guaranteed to be consumed before it
-		 * can possibly be overwritten.  */
-		build_LCP_huge(mf->intervals + n, mf->SA, mf->pos_data, T, n,
+		for (s32 i = n - 1; i >= 0; i--)
+			mf->intervals64[i] = mf->intervals[i];
+		/* Build LCP, packing it into the SA  */
+		build_LCP_huge(mf->intervals64, mf->pos_data, T, n,
 			       mf->min_match_len, mf->nice_match_len);
 		/* Prepare ->intervals64 and ->pos_data  */
-		build_LCPIT_huge(mf->SA, mf->intervals + n, mf->intervals64,
-				 mf->pos_data, n);
+		build_LCPIT_huge(mf->intervals64, mf->pos_data, n);
 		mf->huge_mode = true;
 	}
 	mf->cur_pos = 0; /* starting at beginning of input buffer  */
@@ -256,6 +249,5 @@ lcpit_matchfinder_destroy(struct lcpit_matchfinder *mf)
 {
 	FREE(mf->pos_data);
 	FREE(mf->intervals);
-	FREE(mf->SA);
 	memset(mf, 0, sizeof(*mf));
 }

@@ -15,15 +15,15 @@
  * number.  In huge mode, we can't.
  */
 #if HUGE_MODE
-#  define GET_SA_ENTRY(r)	(SA[r])
-#  define GET_LCP_ENTRY(r)	(LCP[r])
-#  define SET_LCP_ENTRY(r, val)	(LCP[r] = (val))
 #  define UNVISITED_TAG		HUGE_UNVISITED_TAG
+#  define SA_and_LCP_TYPE	u64
+#  define SA_and_LCP_LCP_SHIFT	32
+#  define SA_and_LCP_POS_MASK	((u32)~0)
 #else
-#  define GET_SA_ENTRY(r)	(SA_and_LCP[r] & SA_and_LCP_POS_MASK)
-#  define GET_LCP_ENTRY(r)	(SA_and_LCP[r] >> SA_and_LCP_LCP_SHIFT)
-#  define SET_LCP_ENTRY(r, val)	(SA_and_LCP[r] |= (val) << SA_and_LCP_LCP_SHIFT)
 #  define UNVISITED_TAG		NORMAL_UNVISITED_TAG
+#  define SA_and_LCP_TYPE	u32
+#  define SA_and_LCP_LCP_SHIFT	(32 - LCP_BITS)
+#  define SA_and_LCP_POS_MASK	(((u32)1 << SA_and_LCP_LCP_SHIFT) - 1)
 #endif
 
 /*
@@ -54,27 +54,21 @@
  *	Suffix Arrays and Its Applications.  CPM '01 Proceedings of the 12th
  *	Annual Symposium on Combinatorial Pattern Matching pp. 181-192.
  */
+static void
 #if HUGE_MODE
-static void
-build_LCP_huge(u32 LCP[restrict], const u32 SA[restrict], const u32 ISA[restrict],
-	       const u8 T[restrict], u32 n, u32 min_lcp, u32 max_lcp)
+build_LCP_huge
 #else
-static void
-build_LCP_normal(u32 SA_and_LCP[restrict], const u32 ISA[restrict],
-		 const u8 T[restrict], u32 n, u32 min_lcp, u32 max_lcp)
+build_LCP_normal
 #endif
+(SA_and_LCP_TYPE SA_and_LCP[restrict], const u32 ISA[restrict],
+ const u8 T[restrict], u32 n, u32 min_lcp, u32 max_lcp)
 {
 	u32 h = 0;
 	for (u32 i = 0; i < n; i++) {
 		u32 r = ISA[i];
-	#if HUGE_MODE
-		prefetch(&SA[ISA[i + PREFETCH_SAFETY]]);
-		prefetch(&LCP[ISA[i + PREFETCH_SAFETY]]);
-	#else
 		prefetch(&SA_and_LCP[ISA[i + PREFETCH_SAFETY]]);
-	#endif
 		if (r > 0) {
-			u32 j = GET_SA_ENTRY(r - 1);
+			u32 j = SA_and_LCP[r - 1] & SA_and_LCP_POS_MASK;
 			u32 lim = min(n - i, n - j);
 			while (h < lim && T[i + h] == T[j + h])
 				h++;
@@ -83,7 +77,7 @@ build_LCP_normal(u32 SA_and_LCP[restrict], const u32 ISA[restrict],
 				stored_lcp = 0;
 			else if (stored_lcp > max_lcp)
 				stored_lcp = max_lcp;
-			SET_LCP_ENTRY(r, stored_lcp);
+			SA_and_LCP[r] |= (SA_and_LCP_TYPE)stored_lcp << SA_and_LCP_LCP_SHIFT;
 			if (h > 0)
 				h--;
 		}
@@ -130,20 +124,21 @@ build_LCP_normal(u32 SA_and_LCP[restrict], const u32 ISA[restrict],
  *	Arrays and Its Applications.  2001.  CPM '01 Proceedings of the 12th
  *	Annual Symposium on Combinatorial Pattern Matching pp. 181-192.
  */
+static void
 #if HUGE_MODE
-static void
-build_LCPIT_huge(const u32 SA[restrict], u32 LCP[], u64 intervals[],
-		 u32 pos_data[restrict], u32 n)
+build_LCPIT_huge
 #else
-static void
-build_LCPIT_normal(const u32 SA_and_LCP[restrict], u32 intervals[restrict],
-		   u32 pos_data[restrict], u32 n)
+build_LCPIT_normal
 #endif
+(SA_and_LCP_TYPE intervals[restrict], u32 pos_data[restrict], u32 n)
 {
+	/* 'SA_and_LCP' can alias 'intervals' because each entry of 'SA_and_LCP'
+	 * will be consumed before it can be overwritten.  */
+	SA_and_LCP_TYPE *SA_and_LCP = intervals;
 	u32 next_interval_idx = 0;
 	u32 open_intervals[LCP_MAX + 1];
 	u32 *top = open_intervals;
-	u32 prev_pos = GET_SA_ENTRY(0);
+	u32 prev_pos = SA_and_LCP[0] & SA_and_LCP_POS_MASK;
 
 	/* The interval with lcp=0 covers the entire array.  It remains open
 	 * until the end.  */
@@ -152,8 +147,8 @@ build_LCPIT_normal(const u32 SA_and_LCP[restrict], u32 intervals[restrict],
 	next_interval_idx++;
 
 	for (u32 r = 1; r < n; r++) {
-		u32 next_pos = GET_SA_ENTRY(r);
-		u32 next_lcp = GET_LCP_ENTRY(r);
+		u32 next_pos = SA_and_LCP[r] & SA_and_LCP_POS_MASK;
+		u32 next_lcp = SA_and_LCP[r] >> SA_and_LCP_LCP_SHIFT;
 		u32 top_lcp = intervals[*top];
 
 		if (next_lcp == top_lcp) {
@@ -343,7 +338,7 @@ lcpit_advance_one_byte_normal
 	return num_matches;
 }
 
-#undef GET_SA_ENTRY
-#undef GET_LCP_ENTRY
-#undef SET_LCP_ENTRY
 #undef UNVISITED_TAG
+#undef SA_and_LCP_TYPE
+#undef SA_and_LCP_LCP_SHIFT
+#undef SA_and_LCP_POS_MASK
