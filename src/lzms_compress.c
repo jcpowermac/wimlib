@@ -71,7 +71,17 @@
  */
 #define LZMS_COST_SHIFT		6
 
+/*
+ * Define to 1 to allow the compressor to use delta matches.  This improves the
+ * compression ratio slightly but slows down compression.  See lzms_decompress.c
+ * for general information about delta matches.
+ */
 #define LZMS_USE_DELTA_MATCHES	1
+
+/*
+ * These values define the number of entries in each hash table for finding
+ * delta matches.  There is one hash table for each allowed span.
+ */
 #define LZMS_DELTA_HASH_ORDER	10
 #define LZMS_DELTA_HASH_LENGTH	(1 << LZMS_DELTA_HASH_ORDER)
 
