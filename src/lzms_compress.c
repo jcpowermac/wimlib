@@ -2153,8 +2153,8 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	lzms_init_fast_length_slot_tab(c);
 	lzms_init_offset_slot_tabs(c);
 
-	c->try_multistep_ops = (compression_level >= 40);
-	c->use_delta_matches = (compression_level >= 40);
+	c->try_multistep_ops = (compression_level >= 45);
+	c->use_delta_matches = (compression_level >= 35);
 
 	*c_ret = c;
 	return 0;
