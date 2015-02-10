@@ -1509,17 +1509,17 @@ begin:
 					continue;
 
 				/* Extend the match to its full length.  */
-				const u32 len = lzms_extend_delta_match(in_next, matchptr,
-									2, in_end - in_next,
-									span);
+				const u32 rep_len = lzms_extend_delta_match(in_next, matchptr,
+									    2, in_end - in_next,
+									    span);
 
 				/* Early out for long repeat offset delta match */
-				if (len >= c->mf.nice_match_len) {
+				if (rep_len >= c->mf.nice_match_len) {
 
-					in_next = lzms_skip_bytes(c, len, in_next);
+					in_next = lzms_skip_bytes(c, rep_len, in_next);
 
 					lzms_encode_item_list(c, cur_node);
-					lzms_encode_item(c, len, LZMS_DELTA_SOURCE_TAG | rep_idx);
+					lzms_encode_item(c, rep_len, LZMS_DELTA_SOURCE_TAG | rep_idx);
 
 					c->optimum_nodes[0].state = cur_node->state;
 					cur_node = &c->optimum_nodes[0];
@@ -1533,7 +1533,7 @@ begin:
 					goto begin;
 				}
 
-				while (end_node < cur_node + len)
+				while (end_node < cur_node + rep_len)
 					(++end_node)->cost = INFINITE_COST;
 
 				u32 base_cost = cur_node->cost +
@@ -1546,24 +1546,24 @@ begin:
 
 				for (int i = 0; i < rep_idx; i++)
 					base_cost += lzms_bit_1_cost(cur_node->state.delta_repmatch_states[i],
-								   c->delta_repmatch_probs[i]);
+								     c->delta_repmatch_probs[i]);
 
 				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
 					base_cost += lzms_bit_0_cost(cur_node->state.delta_repmatch_states[rep_idx],
-								   c->delta_repmatch_probs[rep_idx]);
+								     c->delta_repmatch_probs[rep_idx]);
 
-				u32 l = 2;
+				u32 len = 2;
 				do {
-					u32 cost = base_cost + lzms_fast_length_cost(c, l);
-					if (cost < (cur_node + l)->cost) {
-						(cur_node + l)->cost = cost;
-						(cur_node + l)->item = (struct lzms_item) {
-							.length = l,
+					u32 cost = base_cost + lzms_fast_length_cost(c, len);
+					if (cost < (cur_node + len)->cost) {
+						(cur_node + len)->cost = cost;
+						(cur_node + len)->item = (struct lzms_item) {
+							.length = len,
 							.source = LZMS_DELTA_SOURCE_TAG | rep_idx,
 						};
-						(cur_node + l)->num_extra_items = 0;
+						(cur_node + len)->num_extra_items = 0;
 					}
-				} while (++l <= len);
+				} while (++len <= rep_len);
 			}
 		}
 
