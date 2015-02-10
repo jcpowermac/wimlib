@@ -171,6 +171,11 @@ struct lzms_lru_queue {
 #endif
 };
 
+struct lzms_item {
+	u32 length;
+	u32 source;
+};
+
 /*
  * This structure represents a byte position in the input buffer and a node in
  * the graph of possible match/literal choices.
@@ -216,10 +221,8 @@ struct lzms_optimum_node {
 	 *   queue of recent (power, raw offset) pairs
 	 */
 	unsigned num_extra_items;
-	u64 item;
-	u64 extra_items[2];
-#define ITEM_SOURCE_SHIFT 32
-#define ITEM_LENGTH_MASK (((u64)1 << ITEM_SOURCE_SHIFT) - 1)
+	struct lzms_item item;
+	struct lzms_item extra_items[2];
 
 	/*
 	 * The LZMS adaptive state that exists at this position.  This is filled
@@ -794,10 +797,10 @@ lzms_encode_delta_offset(struct lzms_compressor *c, u32 raw_offset)
 
 /* Encode a literal or match item.  */
 static void
-lzms_encode_item(struct lzms_compressor *c, u64 item)
+lzms_encode_item(struct lzms_compressor *c, struct lzms_item item)
 {
-	u32 length = item & ITEM_LENGTH_MASK;
-	u32 source = item >> ITEM_SOURCE_SHIFT;
+	u32 length = item.length;
+	u32 source = item.source;
 
 	/* Main bit: 0 = literal, 1 = match  */
 	int main_bit = (length > 1);
@@ -875,8 +878,8 @@ lzms_encode_item_list(struct lzms_compressor *c,
 		      struct lzms_optimum_node *cur_node)
 {
 	struct lzms_optimum_node *end_node;
-	u64 saved_item;
-	u64 item;
+	struct lzms_item saved_item;
+	struct lzms_item item;
 
 	/* The list is currently in reverse order (last item to first item).
 	 * Reverse it.  */
@@ -888,13 +891,13 @@ lzms_encode_item_list(struct lzms_compressor *c,
 			unsigned i = 0;
 			struct lzms_optimum_node *orig_node = cur_node;
 			do {
-				cur_node -= item & ITEM_LENGTH_MASK;
+				cur_node -= item.length;
 				cur_node->item = item;
 				item = orig_node->extra_items[i];
 			} while (++i != orig_node->num_extra_items);
 		}
 		/* item extends from (cur_node - len)...cur_node  */
-		cur_node -= item & ITEM_LENGTH_MASK;
+		cur_node -= item.length;
 		saved_item = cur_node->item;
 		cur_node->item = item;
 	} while (cur_node != c->optimum_nodes);
@@ -902,7 +905,7 @@ lzms_encode_item_list(struct lzms_compressor *c,
 	/* Walk the list of items from beginning to end, encoding each item.  */
 	do {
 		lzms_encode_item(c, cur_node->item);
-		cur_node += cur_node->item & ITEM_LENGTH_MASK;
+		cur_node += cur_node->item.length;
 	} while (cur_node != end_node);
 }
 
@@ -1047,9 +1050,10 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 			u32 cost = position_cost + lzms_fast_length_cost(c, l);
 			if (cost < (cur_node + l)->cost) {
 				(cur_node + l)->cost = cost;
-				(cur_node + l)->item =
-					((u64)(matches[i].offset + LZMS_OFFSET_ADJUSTMENT)
-						<< ITEM_SOURCE_SHIFT) | l;
+				(cur_node + l)->item = (struct lzms_item) {
+					.length = l,
+					.source = matches[i].offset + LZMS_OFFSET_ADJUSTMENT,
+				};
 				(cur_node + l)->num_extra_items = 0;
 			}
 		} while (++l <= matches[i].length);
@@ -1313,7 +1317,10 @@ begin:
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_item(c, ((u64)rep_idx << ITEM_SOURCE_SHIFT) | len);
+					lzms_encode_item(c, (struct lzms_item) {
+								.source = rep_idx,
+								.length = len,
+							    });
 
 					c->optimum_nodes[0].state.lru = cur_node->state.lru;
 					c->optimum_nodes[0].state.lru.lz.upcoming_offset =
@@ -1352,8 +1359,10 @@ begin:
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
-						(cur_node + l)->item =
-							((u64)rep_idx << ITEM_SOURCE_SHIFT) | l;
+						(cur_node + l)->item = (struct lzms_item) {
+							.length = l,
+							.source = rep_idx,
+						};
 						(cur_node + l)->num_extra_items = 0;
 					}
 				} while (++l <= len);
@@ -1408,12 +1417,18 @@ begin:
 
 					if (cost < (cur_node + total_len)->cost) {
 						(cur_node + total_len)->cost = cost;
-						(cur_node + total_len)->item =
-							((u64)0 << ITEM_SOURCE_SHIFT) | next_len;
-						(cur_node + total_len)->extra_items[0] =
-							((u64)*(in_next + len) << ITEM_SOURCE_SHIFT) | 1;
-						(cur_node + total_len)->extra_items[1] =
-							((u64)rep_idx << ITEM_SOURCE_SHIFT) | len;
+						(cur_node + total_len)->item = (struct lzms_item) {
+							.length = next_len,
+							.source = 0,
+						};
+						(cur_node + total_len)->extra_items[0] = (struct lzms_item) {
+							.length = 1,
+							.source = *(in_next + len),
+						};
+						(cur_node + total_len)->extra_items[1] = (struct lzms_item) {
+							.length = len,
+							.source = rep_idx,
+						};
 						(cur_node + total_len)->num_extra_items = 2;
 					}
 				}
@@ -1450,9 +1465,6 @@ begin:
 									2, in_end - in_next,
 									span);
 
-				const u64 source_bits = (u64)(LZMS_DELTA_SOURCE_TAG | rep_idx)
-								<< ITEM_SOURCE_SHIFT;
-
 				/* Early out for long repeat offset delta match */
 				if (len >= c->mf.nice_match_len) {
 
@@ -1461,7 +1473,10 @@ begin:
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_item(c, source_bits | len);
+					lzms_encode_item(c, (struct lzms_item) {
+						.length = len,
+						.source = LZMS_DELTA_SOURCE_TAG | rep_idx,
+					});
 
 					c->optimum_nodes[0].state.lru = cur_node->state.lru;
 					c->optimum_nodes[0].state.lru.delta.upcoming_pair = pair;
@@ -1497,7 +1512,10 @@ begin:
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
-						(cur_node + l)->item = source_bits | l;
+						(cur_node + l)->item = (struct lzms_item) {
+							.length = l,
+							.source = LZMS_DELTA_SOURCE_TAG | rep_idx,
+						};
 						(cur_node + l)->num_extra_items = 0;
 					}
 				} while (++l <= len);
@@ -1530,8 +1548,10 @@ begin:
 				if (cur_node != c->optimum_nodes)
 					lzms_encode_item_list(c, cur_node);
 
-				lzms_encode_item(c, ((u64)(offset + LZMS_OFFSET_ADJUSTMENT) <<
-						     ITEM_SOURCE_SHIFT) | best_len);
+				lzms_encode_item(c, (struct lzms_item) {
+					.length = best_len,
+					.source = offset + LZMS_OFFSET_ADJUSTMENT,
+				});
 
 				c->optimum_nodes[0].state.lru = cur_node->state.lru;
 				c->optimum_nodes[0].state.lru.lz.upcoming_offset = offset;
@@ -1627,12 +1647,18 @@ begin:
 
 				if (cost < (cur_node + total_len)->cost) {
 					(cur_node + total_len)->cost = cost;
-					(cur_node + total_len)->item =
-						((u64)0 << ITEM_SOURCE_SHIFT) | next_len;
-					(cur_node + total_len)->extra_items[0] =
-						((u64)*(in_next + len) << ITEM_SOURCE_SHIFT) | 1;
-					(cur_node + total_len)->extra_items[1] =
-						((u64)(offset + LZMS_OFFSET_ADJUSTMENT) << ITEM_SOURCE_SHIFT) | len;
+					(cur_node + total_len)->item = (struct lzms_item) {
+						.length = next_len,
+						.source = 0,
+					};
+					(cur_node + total_len)->extra_items[0] = (struct lzms_item) {
+						.length = 1,
+						.source = *(in_next + len),
+					};
+					(cur_node + total_len)->extra_items[1] = (struct lzms_item) {
+						.length = len,
+						.source = offset + LZMS_OFFSET_ADJUSTMENT,
+					};
 					(cur_node + total_len)->num_extra_items = 2;
 				}
 			}
@@ -1686,9 +1712,7 @@ begin:
 				const u32 raw_offset = offset >> power;
 				const u32 pair = (power << LZMS_DELTA_SOURCE_POWER_SHIFT) |
 						 raw_offset;
-				const u64 source_bits = (u64)(LZMS_DELTA_SOURCE_TAG |
-							      (pair + LZMS_OFFSET_ADJUSTMENT))
-								<< ITEM_SOURCE_SHIFT;
+				const u32 source = LZMS_DELTA_SOURCE_TAG | (pair + LZMS_OFFSET_ADJUSTMENT);
 
 				/* Early out for long explicit offset delta match  */
 				if (len >= c->mf.nice_match_len) {
@@ -1698,7 +1722,10 @@ begin:
 					if (cur_node != c->optimum_nodes)
 						lzms_encode_item_list(c, cur_node);
 
-					lzms_encode_item(c, source_bits | len);
+					lzms_encode_item(c, (struct lzms_item) {
+						.length = len,
+						.source = source,
+					});
 
 					c->optimum_nodes[0].state.lru = cur_node->state.lru;
 					c->optimum_nodes[0].state.lru.lz.upcoming_offset = 0;
@@ -1724,7 +1751,10 @@ begin:
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
 						(cur_node + l)->cost = cost;
-						(cur_node + l)->item = source_bits | l;
+						(cur_node + l)->item = (struct lzms_item) {
+							.length = l,
+							.source = source,
+						};
 						(cur_node + l)->num_extra_items = 0;
 					}
 				} while (++l <= len);
@@ -1739,7 +1769,10 @@ begin:
 				   lzms_literal_cost(c, *in_next, &cur_node->state);
 		if (literal_cost < (cur_node + 1)->cost) {
 			(cur_node + 1)->cost = literal_cost;
-			(cur_node + 1)->item = ((u64)*in_next << ITEM_SOURCE_SHIFT) | 1;
+			(cur_node + 1)->item = (struct lzms_item) {
+				.length = 1,
+				.source = *in_next,
+			};
 			(cur_node + 1)->num_extra_items = 0;
 		} else if (in_end - (in_next + 1) >= 2) {
 			/* try lit + rep0  */
@@ -1773,10 +1806,14 @@ begin:
 				u32 cost = base_cost + lzms_fast_length_cost(c, len);
 				if (cost < (cur_node + 1 + len)->cost) {
 					(cur_node + 1 + len)->cost = cost;
-					(cur_node + 1 + len)->item =
-						((u64)0 << ITEM_SOURCE_SHIFT) | len;
-					(cur_node + 1 + len)->extra_items[0] =
-						((u64)*in_next << ITEM_SOURCE_SHIFT) | 1;
+					(cur_node + 1 + len)->item = (struct lzms_item) {
+						.length = len,
+						.source = 0,
+					};
+					(cur_node + 1 + len)->extra_items[0] = (struct lzms_item) {
+						.length = 1,
+						.source = *in_next,
+					};
 					(cur_node + 1 + len)->num_extra_items = 1;
 				}
 			}
@@ -1789,17 +1826,17 @@ begin:
 		/* The lowest-cost path to the current position is now known.
 		 * Finalize the adaptive state that results from taking this
 		 * lowest-cost path.  */
-		u64 item_to_take = cur_node->item;
-		struct lzms_optimum_node *source_node = cur_node - (item_to_take & ITEM_LENGTH_MASK);
+		struct lzms_item item_to_take = cur_node->item;
+		struct lzms_optimum_node *source_node = cur_node - (item_to_take.length);
 		for (int i = 0; i < cur_node->num_extra_items; i++) {
 			item_to_take = cur_node->extra_items[i];
-			source_node -= item_to_take & ITEM_LENGTH_MASK;
+			source_node -= item_to_take.length;
 		}
 		int next_item_idx = (int)cur_node->num_extra_items - 1;
 		struct lzms_adaptive_state pending_state = source_node->state;
 
 		for (;;) {
-			const u32 length = item_to_take & ITEM_LENGTH_MASK;
+			const u32 length = item_to_take.length;
 			int is_match = (length > 1);
 			lzms_update_main_state(&pending_state, is_match);
 			pending_state.lru.lz.upcoming_offset = 0;
@@ -1807,7 +1844,7 @@ begin:
 			pending_state.lru.delta.upcoming_pair = 0;
 		#endif
 			if (is_match) {
-				u32 source = item_to_take >> ITEM_SOURCE_SHIFT;
+				u32 source = item_to_take.source;
 			#if LZMS_USE_DELTA_MATCHES
 				int is_delta = (source & LZMS_DELTA_SOURCE_TAG) != 0;
 			#else
