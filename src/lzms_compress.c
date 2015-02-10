@@ -1637,51 +1637,56 @@ begin:
 
 			/* try LZ-match + lit + LZ-rep0  */
 			if (c->try_multistep_ops &&
-			    in_end - in_next >= c->matches[0].length + 1 + 2)
+			    likely(in_end - (in_next + c->matches[0].length) >= 3))
 			{
 				for (u32 i = 0; i < num_matches; i++) {
-					u32 len = c->matches[i].length;
-					u32 offset = c->matches[i].offset;
-					const u8 *matchptr = in_next - offset;
+					const u32 len = c->matches[i].length;
+					const u32 offset = c->matches[i].offset;
+					const u8 * const matchptr = in_next - offset;
+
+					if (load_u16_unaligned(matchptr + len + 1) !=
+					    load_u16_unaligned(in_next + len + 1))
+						continue;
 
 					u32 rep0_len = lz_extend(in_next + len + 1,
 								 matchptr + len + 1,
-								 0,
+								 2,
 								 min(c->mf.nice_match_len,
 								     in_end - (in_next + len + 1)));
-					if (rep0_len < 2)
-						continue;
 
 					unsigned main_state = cur_node->state.main_state;
 					unsigned match_state = cur_node->state.match_state;
 					unsigned lz_match_state = cur_node->state.lz_match_state;
-					u32 offset_slot = lzms_comp_get_offset_slot(c, offset);
 
 					u32 cost = cur_node->cost;
 
+					/* add cost of LZ-match  */
 					cost += lzms_bit_1_cost(main_state, c->main_probs);
 					cost += lzms_bit_0_cost(match_state, c->match_probs);
 					cost += lzms_bit_0_cost(lz_match_state, c->lz_match_probs);
-
-					cost += lzms_lz_offset_slot_cost(c, offset_slot);
+					cost += lzms_lz_offset_slot_cost(c, lzms_comp_get_offset_slot(c, offset));
 					cost += lzms_fast_length_cost(c, len);
 
+					/* update state for LZ-match  */
 					main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_STATES;
 					match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_STATES;
 					lz_match_state = ((lz_match_state << 1) | 0) % LZMS_NUM_LZ_MATCH_STATES;
 
+					/* add cost of literal  */
 					cost += lzms_bit_0_cost(main_state, c->main_probs);
 					cost += (u32)c->literal_lens[*(in_next + len)] << COST_SHIFT;
 
+					/* update state for literal  */
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
 
+					/* add cost of LZ-rep0  */
 					cost += lzms_bit_1_cost(main_state, c->main_probs);
 					cost += lzms_bit_0_cost(match_state, c->match_probs);
 					cost += lzms_bit_1_cost(lz_match_state, c->lz_match_probs);
 					cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0], c->lz_repmatch_probs[0]);
 					cost += lzms_fast_length_cost(c, rep0_len);
 
-					u32 total_len = len + 1 + rep0_len;
+					const u32 total_len = len + 1 + rep0_len;
 
 					while (end_node < cur_node + total_len)
 						(++end_node)->cost = INFINITE_COST;
@@ -1708,10 +1713,15 @@ begin:
 
 		/* Explicit offset delta matches  */
 		if (c->use_delta_matches && in_end - in_next >= 3) {
+
+			const u32 pos = in_next - c->in_buffer;
+
 			/* Consider each possible power (log2 of span)  */
 			for (u32 power = 0; power < 8; power++) {
+
 				const u32 span = (u32)1 << power;
-				if (in_next - c->in_buffer < span)
+
+				if (unlikely(pos < span))
 					continue;
 
 				/* Insert the current sequence into the hash
@@ -1719,7 +1729,7 @@ begin:
 				 * was in the hash table.  */
 				const u32 hash = lzms_delta_hash3(in_next, span);
 				const u32 cur_match = c->delta_hash_tables[power][hash];
-				c->delta_hash_tables[power][hash] = in_next - c->in_buffer;
+				c->delta_hash_tables[power][hash] = pos;
 
 				/* If cur_match == 0, then no sequence was in
 				 * the hash table.  */
@@ -1733,7 +1743,7 @@ begin:
 				if (offset & (span - 1))
 					continue;
 
-				/* Check the first 2 bytes before entering the
+				/* Check the first 3 bytes before entering the
 				 * extension loop.  */
 				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
 				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
@@ -1743,7 +1753,7 @@ begin:
 				     (u8)(*(matchptr + 2) - *(matchptr + 2 - span))))
 					continue;
 
-				/* Extend the delta match to its full length. */
+				/* Extend the delta match to its full length.  */
 				const u32 len = lzms_extend_delta_match(in_next,
 									matchptr,
 									3,
