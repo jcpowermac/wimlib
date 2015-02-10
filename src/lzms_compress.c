@@ -1254,7 +1254,7 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 					 bool all_small_offsets,
 					 u32 base_cost)
 {
-	u32 l = 2;
+	u32 len = 2;
 	u32 i = num_matches - 1;
 	do {
 		unsigned slot =
@@ -1263,16 +1263,16 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
 				lzms_comp_get_offset_slot(c, matches[i].offset);
 		u32 position_cost = base_cost + lzms_lz_offset_slot_cost(c, slot);
 		do {
-			u32 cost = position_cost + lzms_fast_length_cost(c, l);
-			if (cost < (cur_node + l)->cost) {
-				(cur_node + l)->cost = cost;
-				(cur_node + l)->item = (struct lzms_item) {
-					.length = l,
+			u32 cost = position_cost + lzms_fast_length_cost(c, len);
+			if (cost < (cur_node + len)->cost) {
+				(cur_node + len)->cost = cost;
+				(cur_node + len)->item = (struct lzms_item) {
+					.length = len,
 					.source = matches[i].offset + LZMS_OFFSET_ADJUSTMENT,
 				};
-				(cur_node + l)->num_extra_items = 0;
+				(cur_node + len)->num_extra_items = 0;
 			}
-		} while (++l <= matches[i].length);
+		} while (++len <= matches[i].length);
 	} while (i--);
 }
 
@@ -1538,11 +1538,11 @@ begin:
 
 				u32 base_cost = cur_node->cost +
 						lzms_bit_1_cost(cur_node->state.main_state,
-							      c->main_probs) +
+								c->main_probs) +
 						lzms_bit_1_cost(cur_node->state.match_state,
-							      c->match_probs) +
+								c->match_probs) +
 						lzms_bit_1_cost(cur_node->state.delta_match_state,
-							      c->delta_match_probs);
+								c->delta_match_probs);
 
 				for (int i = 0; i < rep_idx; i++)
 					base_cost += lzms_bit_1_cost(cur_node->state.delta_repmatch_states[i],
@@ -1606,11 +1606,11 @@ begin:
 
 			u32 base_cost = cur_node->cost +
 					lzms_bit_1_cost(cur_node->state.main_state,
-						      c->main_probs) +
+							c->main_probs) +
 					lzms_bit_0_cost(cur_node->state.match_state,
-						      c->match_probs) +
+							c->match_probs) +
 					lzms_bit_0_cost(cur_node->state.lz_match_state,
-						      c->lz_match_probs);
+							c->lz_match_probs);
 
 			/*
 			 * matches[0].offset is the largest offset of the
@@ -1635,71 +1635,73 @@ begin:
 			}
 
 
-			/* try match + lit + rep0  */
+			/* try LZ-match + lit + LZ-rep0  */
 			if (c->try_multistep_ops &&
 			    in_end - in_next >= c->matches[0].length + 1 + 2)
-			for (u32 i = 0; i < num_matches; i++) {
-				u32 len = c->matches[i].length;
-				u32 offset = c->matches[i].offset;
-				const u8 *matchptr = in_next - offset;
+			{
+				for (u32 i = 0; i < num_matches; i++) {
+					u32 len = c->matches[i].length;
+					u32 offset = c->matches[i].offset;
+					const u8 *matchptr = in_next - offset;
 
-				u32 rep0_len = lz_extend(in_next + len + 1,
-							 matchptr + len + 1,
-							 0,
-							 min(c->mf.nice_match_len,
-							     in_end - (in_next + len + 1)));
-				if (rep0_len < 2)
-					continue;
+					u32 rep0_len = lz_extend(in_next + len + 1,
+								 matchptr + len + 1,
+								 0,
+								 min(c->mf.nice_match_len,
+								     in_end - (in_next + len + 1)));
+					if (rep0_len < 2)
+						continue;
 
-				unsigned main_state = cur_node->state.main_state;
-				unsigned match_state = cur_node->state.match_state;
-				unsigned lz_match_state = cur_node->state.lz_match_state;
-				u32 offset_slot = lzms_comp_get_offset_slot(c, offset);
+					unsigned main_state = cur_node->state.main_state;
+					unsigned match_state = cur_node->state.match_state;
+					unsigned lz_match_state = cur_node->state.lz_match_state;
+					u32 offset_slot = lzms_comp_get_offset_slot(c, offset);
 
-				u32 cost = cur_node->cost;
+					u32 cost = cur_node->cost;
 
-				cost += lzms_bit_1_cost(main_state, c->main_probs);
-				cost += lzms_bit_0_cost(match_state, c->match_probs);
-				cost += lzms_bit_0_cost(lz_match_state, c->lz_match_probs);
+					cost += lzms_bit_1_cost(main_state, c->main_probs);
+					cost += lzms_bit_0_cost(match_state, c->match_probs);
+					cost += lzms_bit_0_cost(lz_match_state, c->lz_match_probs);
 
-				cost += lzms_lz_offset_slot_cost(c, offset_slot);
-				cost += lzms_fast_length_cost(c, len);
+					cost += lzms_lz_offset_slot_cost(c, offset_slot);
+					cost += lzms_fast_length_cost(c, len);
 
-				main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_STATES;
-				match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_STATES;
-				lz_match_state = ((lz_match_state << 1) | 0) % LZMS_NUM_LZ_MATCH_STATES;
+					main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_STATES;
+					match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_STATES;
+					lz_match_state = ((lz_match_state << 1) | 0) % LZMS_NUM_LZ_MATCH_STATES;
 
-				cost += lzms_bit_0_cost(main_state, c->main_probs);
-				cost += (u32)c->literal_lens[*(in_next + len)] << COST_SHIFT;
+					cost += lzms_bit_0_cost(main_state, c->main_probs);
+					cost += (u32)c->literal_lens[*(in_next + len)] << COST_SHIFT;
 
-				main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
+					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_STATES;
 
-				cost += lzms_bit_1_cost(main_state, c->main_probs);
-				cost += lzms_bit_0_cost(match_state, c->match_probs);
-				cost += lzms_bit_1_cost(lz_match_state, c->lz_match_probs);
-				cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0], c->lz_repmatch_probs[0]);
-				cost += lzms_fast_length_cost(c, rep0_len);
+					cost += lzms_bit_1_cost(main_state, c->main_probs);
+					cost += lzms_bit_0_cost(match_state, c->match_probs);
+					cost += lzms_bit_1_cost(lz_match_state, c->lz_match_probs);
+					cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0], c->lz_repmatch_probs[0]);
+					cost += lzms_fast_length_cost(c, rep0_len);
 
-				u32 total_len = len + 1 + rep0_len;
+					u32 total_len = len + 1 + rep0_len;
 
-				while (end_node < cur_node + total_len)
-					(++end_node)->cost = INFINITE_COST;
+					while (end_node < cur_node + total_len)
+						(++end_node)->cost = INFINITE_COST;
 
-				if (cost < (cur_node + total_len)->cost) {
-					(cur_node + total_len)->cost = cost;
-					(cur_node + total_len)->item = (struct lzms_item) {
-						.length = rep0_len,
-						.source = 0,
-					};
-					(cur_node + total_len)->extra_items[0] = (struct lzms_item) {
-						.length = 1,
-						.source = *(in_next + len),
-					};
-					(cur_node + total_len)->extra_items[1] = (struct lzms_item) {
-						.length = len,
-						.source = offset + LZMS_OFFSET_ADJUSTMENT,
-					};
-					(cur_node + total_len)->num_extra_items = 2;
+					if (cost < (cur_node + total_len)->cost) {
+						(cur_node + total_len)->cost = cost;
+						(cur_node + total_len)->item = (struct lzms_item) {
+							.length = rep0_len,
+							.source = 0,
+						};
+						(cur_node + total_len)->extra_items[0] = (struct lzms_item) {
+							.length = 1,
+							.source = *(in_next + len),
+						};
+						(cur_node + total_len)->extra_items[1] = (struct lzms_item) {
+							.length = len,
+							.source = offset + LZMS_OFFSET_ADJUSTMENT,
+						};
+						(cur_node + total_len)->num_extra_items = 2;
+					}
 				}
 			}
 		}
