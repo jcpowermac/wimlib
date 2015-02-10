@@ -72,13 +72,6 @@
 #define COST_SHIFT		6
 
 /*
- * Define to 1 to allow the compressor to use delta matches.  This improves the
- * compression ratio slightly but slows down compression.  See lzms_decompress.c
- * for general information about delta matches.
- */
-#define USE_DELTA_MATCHES	1
-
-/*
  * These values define the number of entries in each hash table for finding
  * delta matches.  There is one hash table for each allowed span.
  */
@@ -177,22 +170,18 @@ struct lzms_adaptive_state {
 	u32 prev_offset;
 	u32 upcoming_offset;
 
-#if USE_DELTA_MATCHES
 	/* LRU queue for (power, raw_offset) references of delta matches  */
 	u32 recent_pairs[LZMS_NUM_RECENT_OFFSETS + 1];
 	u32 prev_pair;
 	u32 upcoming_pair;
-#endif
 
 	/* States for range coding item type decisions  */
 	u8 main_state;
 	u8 match_state;
 	u8 lz_match_state;
 	u8 lz_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
-#if USE_DELTA_MATCHES
 	u8 delta_match_state;
 	u8 delta_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
-#endif
 };
 
 /*
@@ -278,6 +267,14 @@ struct lzms_compressor {
 	 */
 	bool try_multistep_ops;
 
+	/*
+	 * Parameter: if true, the compressor can output delta matches.  This
+	 * often improves the compression ratio slightly, but it slows down
+	 * compression.  See lzms_decompress.c for general information about
+	 * delta matches.
+	 */
+	bool use_delta_matches;
+
 	/* 'last_target_usages' a large array that is only needed for
 	 * preprocessing, so it is in union with fields that don't need to be
 	 * initialized until after preprocessing.  */
@@ -287,10 +284,8 @@ struct lzms_compressor {
 	/* Temporary space to store matches found by the matchfinder  */
 	struct lz_match matches[MAX_FAST_LENGTH - LZMS_MIN_MATCH_LEN + 1];
 
-#if USE_DELTA_MATCHES
 	/* Hash tables for finding delta matches  */
 	u32 delta_hash_tables[LZMS_NUM_DELTA_POWER_SYMS][DELTA_HASH_LENGTH];
-#endif
 
 	/* The per-byte graph nodes for near-optimal parsing  */
 	struct lzms_optimum_node optimum_nodes[NUM_OPTIM_NODES + MAX_FAST_LENGTH];
@@ -311,20 +306,16 @@ struct lzms_compressor {
 	unsigned match_state;
 	unsigned lz_match_state;
 	unsigned lz_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
-#if USE_DELTA_MATCHES
 	unsigned delta_match_state;
 	unsigned delta_repmatch_states[LZMS_NUM_REPMATCH_CONTEXTS];
-#endif
 	struct lzms_probability_entry main_probs[LZMS_NUM_MAIN_STATES];
 	struct lzms_probability_entry match_probs[LZMS_NUM_MATCH_STATES];
 	struct lzms_probability_entry lz_match_probs[LZMS_NUM_LZ_MATCH_STATES];
 	struct lzms_probability_entry lz_repmatch_probs[LZMS_NUM_REPMATCH_CONTEXTS]
 							      [LZMS_NUM_LZ_REPMATCH_STATES];
-#if USE_DELTA_MATCHES
 	struct lzms_probability_entry delta_match_probs[LZMS_NUM_DELTA_MATCH_STATES];
 	struct lzms_probability_entry delta_repmatch_probs[LZMS_NUM_REPMATCH_CONTEXTS]
 								 [LZMS_NUM_DELTA_REPMATCH_STATES];
-#endif
 
 	/* Huffman codes  */
 
@@ -343,7 +334,6 @@ struct lzms_compressor {
 	u8 length_lens[LZMS_NUM_LENGTH_SYMS];
 	u32 length_freqs[LZMS_NUM_LENGTH_SYMS];
 
-#if USE_DELTA_MATCHES
 	struct lzms_huffman_rebuild_info delta_offset_rebuild_info;
 	u32 delta_offset_codewords[LZMS_MAX_NUM_OFFSET_SYMS];
 	u8 delta_offset_lens[LZMS_MAX_NUM_OFFSET_SYMS];
@@ -353,7 +343,6 @@ struct lzms_compressor {
 	u32 delta_power_codewords[LZMS_NUM_DELTA_POWER_SYMS];
 	u8 delta_power_lens[LZMS_NUM_DELTA_POWER_SYMS];
 	u32 delta_power_freqs[LZMS_NUM_DELTA_POWER_SYMS];
-#endif
 	}; /* struct */
 
 	s32 last_target_usages[65536];
@@ -609,7 +598,6 @@ lzms_encode_lz_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
 			c->lz_repmatch_probs[idx], &c->rc);
 }
 
-#if USE_DELTA_MATCHES
 static void
 lzms_encode_delta_match_bit(struct lzms_compressor *c, int bit)
 {
@@ -624,7 +612,6 @@ lzms_encode_delta_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
 			LZMS_NUM_DELTA_REPMATCH_STATES,
 			c->delta_repmatch_probs[idx], &c->rc);
 }
-#endif
 
 /******************************************************************************
  *                   Huffman encoding and verbatim bits                       *
@@ -766,7 +753,6 @@ lzms_encode_length_symbol(struct lzms_compressor *c, unsigned sym)
 					  &c->os, &c->length_rebuild_info);
 }
 
-#if USE_DELTA_MATCHES
 static bool
 lzms_encode_delta_offset_symbol(struct lzms_compressor *c, unsigned sym)
 {
@@ -782,7 +768,6 @@ lzms_encode_delta_power_symbol(struct lzms_compressor *c, unsigned sym)
 					  c->delta_power_lens, c->delta_power_freqs,
 					  &c->os, &c->delta_power_rebuild_info);
 }
-#endif
 
 static void
 lzms_update_fast_length_costs(struct lzms_compressor *c);
@@ -818,7 +803,6 @@ lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 			LZMS_MAX_EXTRA_OFFSET_BITS);
 }
 
-#if USE_DELTA_MATCHES
 /* Encode the raw offset of a delta match.  */
 static void
 lzms_encode_delta_offset(struct lzms_compressor *c, u32 raw_offset)
@@ -831,7 +815,6 @@ lzms_encode_delta_offset(struct lzms_compressor *c, u32 raw_offset)
 	lzms_write_bits(&c->os, extra_bits, num_extra_bits,
 			LZMS_MAX_EXTRA_OFFSET_BITS);
 }
-#endif
 
 /******************************************************************************
  *                             Item encoding                                  *
@@ -853,11 +836,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 		/* Match  */
 
 		/* Match bit: 0 = LZ match, 1 = delta match  */
-	#if USE_DELTA_MATCHES
 		int match_bit = (source & LZMS_DELTA_SOURCE_TAG) != 0;
-	#else
-		int match_bit = 0;
-	#endif
 		lzms_encode_match_bit(c, match_bit);
 
 		if (!match_bit) {
@@ -879,9 +858,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
 					lzms_encode_lz_repmatch_bit(c, 0, rep_idx);
 			}
-		}
-	#if USE_DELTA_MATCHES
-		else {
+		} else {
 			/* Delta match  */
 
 			source &= ~LZMS_DELTA_SOURCE_TAG;
@@ -906,7 +883,6 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 					lzms_encode_delta_repmatch_bit(c, 0, rep_idx);
 			}
 		}
-	#endif /* USE_DELTA_MATCHES */
 
 		/* Match length (encoded the same way for any match type)  */
 		lzms_encode_length(c, length);
@@ -1074,7 +1050,6 @@ lzms_lz_offset_slot_cost(const struct lzms_compressor *c, unsigned slot)
 	return num_bits << COST_SHIFT;
 }
 
-#if USE_DELTA_MATCHES
 /* Return the cost to encode the specified delta power and raw offset.  */
 static inline u32
 lzms_delta_source_cost(const struct lzms_compressor *c, u32 power, u32 raw_offset)
@@ -1085,7 +1060,6 @@ lzms_delta_source_cost(const struct lzms_compressor *c, u32 power, u32 raw_offse
 		       lzms_extra_offset_bits[slot];
 	return num_bits << COST_SHIFT;
 }
-#endif
 
 /******************************************************************************
  *                              Adaptive state                                *
@@ -1100,13 +1074,11 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 	state->prev_offset = 0;
 	state->upcoming_offset = 0;
 
-#if USE_DELTA_MATCHES
 	/* Recent (power, raw offset) pairs for delta matches  */
 	for (int i = 0; i < LZMS_NUM_RECENT_OFFSETS + 1; i++)
 		state->recent_pairs[i] = i + 1;
 	state->prev_pair = 0;
 	state->upcoming_pair = 0;
-#endif
 
 	/* States for predicting the probabilities of item types  */
 	state->main_state = 0;
@@ -1114,11 +1086,9 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 	state->lz_match_state = 0;
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		state->lz_repmatch_states[i] = 0;
-#if USE_DELTA_MATCHES
 	state->delta_match_state = 0;
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		state->delta_repmatch_states[i] = 0;
-#endif
 }
 
 /*
@@ -1141,14 +1111,12 @@ lzms_update_lru_queues(struct lzms_adaptive_state *state)
 	}
 	state->prev_offset = state->upcoming_offset;
 
-#if USE_DELTA_MATCHES
 	if (state->prev_pair != 0) {
 		for (int i = LZMS_NUM_REPMATCH_CONTEXTS; i >= 0; i--)
 			state->recent_pairs[i + 1] = state->recent_pairs[i];
 		state->recent_pairs[0] = state->prev_pair;
 	}
 	state->prev_pair = state->upcoming_pair;
-#endif
 }
 
 static inline void
@@ -1187,7 +1155,6 @@ lzms_update_lz_repmatch_states(struct lzms_adaptive_state *state, int rep_idx)
 				  LZMS_NUM_LZ_REPMATCH_STATES);
 }
 
-#if USE_DELTA_MATCHES
 static inline void
 lzms_update_delta_match_state(struct lzms_adaptive_state *state, int is_rep)
 {
@@ -1206,7 +1173,6 @@ lzms_update_delta_repmatch_states(struct lzms_adaptive_state *state, int rep_idx
 		lzms_update_state(&state->delta_repmatch_states[rep_idx], 0,
 				  LZMS_NUM_DELTA_REPMATCH_STATES);
 }
-#endif
 
 /******************************************************************************
  *                              Matchfinding                                  *
@@ -1214,8 +1180,6 @@ lzms_update_delta_repmatch_states(struct lzms_adaptive_state *state, int rep_idx
 
 /* Note: most of the matchfinding logic is elsewhere.  The code here just
  * handles delta matches.  */
-
-#if USE_DELTA_MATCHES
 
 /*
  * Compute a hash code for the first 3 bytes of the sequence beginning at @p
@@ -1248,7 +1212,6 @@ lzms_extend_delta_match(const u8 *in_next, const u8 *matchptr,
 	}
 	return len;
 }
-#endif /* USE_DELTA_MATCHES */
 
 /*
  * Skip the next @count bytes (don't search for matches at them).  @in_next
@@ -1261,11 +1224,11 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 	/* Skip LZ matches  */
 	lcpit_matchfinder_skip_bytes(&c->mf, count);
 
-#if USE_DELTA_MATCHES
-	/* Skip delta matches  */
 	const u32 pos = in_next - c->in_buffer;
-	if (unlikely(c->in_nbytes - (pos + count) <= 3))
+	if (!c->use_delta_matches || unlikely(c->in_nbytes - (pos + count) <= 3))
 		return in_next + count;
+
+	/* Skip delta matches  */
 	do {
 		/* Update the hash table for each power.  */
 		for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
@@ -1277,9 +1240,6 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 		}
 	} while (in_next++, --count);
 	return in_next;
-#else
-	return in_next + count;
-#endif
 }
 
 /******************************************************************************
@@ -1369,11 +1329,9 @@ begin:
 	cur_node->state.lz_match_state = c->lz_match_state;
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		cur_node->state.lz_repmatch_states[i] = c->lz_repmatch_states[i];
-#if USE_DELTA_MATCHES
 	cur_node->state.delta_match_state = c->delta_match_state;
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		cur_node->state.delta_repmatch_states[i] = c->delta_repmatch_states[i];
-#endif
 
 	if (in_next == in_end)
 		return;
@@ -1415,9 +1373,7 @@ begin:
 
 					cur_node->state.upcoming_offset =
 						cur_node->state.recent_offsets[rep_idx];
-				#if USE_DELTA_MATCHES
 					cur_node->state.upcoming_pair = 0;
-				#endif
 					for (int i = rep_idx; i < LZMS_NUM_RECENT_OFFSETS; i++)
 						cur_node->state.recent_offsets[i] =
 							cur_node->state.recent_offsets[i + 1];
@@ -1527,9 +1483,9 @@ begin:
 			}
 		}
 
-	#if USE_DELTA_MATCHES
 		/* Repeat offset delta matches  */
-		if (likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1 &&
+		if (c->use_delta_matches &&
+		    likely(in_next - c->in_buffer >= LZMS_MAX_INIT_RECENT_OFFSET + 1 &&
 			   (in_end - in_next >= 3)))
 		{
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_RECENT_OFFSETS; rep_idx++) {
@@ -1610,7 +1566,6 @@ begin:
 				} while (++l <= len);
 			}
 		}
-	#endif /* USE_DELTA_MATCHES */
 
 		/* Explicit offset LZ matches  */
 		num_matches = lcpit_matchfinder_get_matches(&c->mf, c->matches);
@@ -1641,9 +1596,7 @@ begin:
 				cur_node = &c->optimum_nodes[0];
 
 				cur_node->state.upcoming_offset = offset;
-			#if USE_DELTA_MATCHES
 				cur_node->state.upcoming_pair = 0;
-			#endif
 				lzms_update_lru_queues(&cur_node->state);
 				goto begin;
 			}
@@ -1751,9 +1704,8 @@ begin:
 			}
 		}
 
-	#if USE_DELTA_MATCHES
 		/* Explicit offset delta matches  */
-		if (in_end - in_next >= 3) {
+		if (c->use_delta_matches && in_end - in_next >= 3) {
 			/* Consider each possible power (log2 of span)  */
 			for (u32 power = 0; power < 8; power++) {
 				const u32 span = (u32)1 << power;
@@ -1844,7 +1796,6 @@ begin:
 				} while (++l <= len);
 			}
 		}
-	#endif /* USE_DELTA_MATCHES */
 
 		/* Literal  */
 		if (end_node < cur_node + 1)
@@ -1926,19 +1877,12 @@ begin:
 			int is_match = (length > 1);
 			lzms_update_main_state(&pending_state, is_match);
 			pending_state.upcoming_offset = 0;
-		#if USE_DELTA_MATCHES
 			pending_state.upcoming_pair = 0;
-		#endif
 			if (is_match) {
 				u32 source = item_to_take.source;
-			#if USE_DELTA_MATCHES
 				int is_delta = (source & LZMS_DELTA_SOURCE_TAG) != 0;
-			#else
-				int is_delta = 0;
-			#endif
 				lzms_update_match_state(&pending_state, is_delta);
 
-			#if USE_DELTA_MATCHES
 				if (is_delta) {
 					/* Delta match  */
 					source &= ~LZMS_DELTA_SOURCE_TAG;
@@ -1961,9 +1905,7 @@ begin:
 							pending_state.recent_pairs[i] =
 								pending_state.recent_pairs[i + 1];
 					}
-				} else
-			#endif
-				{
+				} else {
 					if (source >= LZMS_NUM_RECENT_OFFSETS) {
 						/* Explicit offset LZ match  */
 						lzms_update_lz_match_state(&pending_state, 0);
@@ -2067,7 +2009,6 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 				       c->length_codewords,
 				       c->length_lens);
 
-#if USE_DELTA_MATCHES
 	lzms_init_huffman_rebuild_info(&c->delta_offset_rebuild_info,
 				       num_offset_slots,
 				       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
@@ -2081,7 +2022,6 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 				       c->delta_power_freqs,
 				       c->delta_power_codewords,
 				       c->delta_power_lens);
-#endif
 
 	/* Initialize the states and probability entries.  */
 
@@ -2090,11 +2030,9 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 	c->lz_match_state = 0;
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		c->lz_repmatch_states[i] = 0;
-#if USE_DELTA_MATCHES
 	c->delta_match_state = 0;
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		c->delta_repmatch_states[i] = 0;
-#endif
 
 	lzms_init_probability_entries(c->main_probs, LZMS_NUM_MAIN_STATES);
 	lzms_init_probability_entries(c->match_probs, LZMS_NUM_MATCH_STATES);
@@ -2102,12 +2040,10 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		lzms_init_probability_entries(c->lz_repmatch_probs[i],
 					      LZMS_NUM_LZ_REPMATCH_STATES);
-#if USE_DELTA_MATCHES
 	lzms_init_probability_entries(c->delta_match_probs, LZMS_NUM_DELTA_MATCH_STATES);
 	for (int i = 0; i < LZMS_NUM_REPMATCH_CONTEXTS; i++)
 		lzms_init_probability_entries(c->delta_repmatch_probs[i],
 					      LZMS_NUM_DELTA_REPMATCH_STATES);
-#endif
 }
 
 /* Flush the output streams, prepare the final compressed data, and return its
@@ -2194,7 +2130,7 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	lzms_init_offset_slot_tabs(c);
 
 	c->try_multistep_ops = (compression_level >= 40);
-
+	c->use_delta_matches = (compression_level >= 40);
 
 	*c_ret = c;
 	return 0;
@@ -2229,10 +2165,8 @@ lzms_compress(const void *in, size_t in_nbytes,
 
 	/* Load the buffer into the matchfinder.  */
 	lcpit_matchfinder_load_buffer(&c->mf, c->in_buffer, c->in_nbytes);
-
-#if USE_DELTA_MATCHES
-	memset(c->delta_hash_tables, 0, sizeof(c->delta_hash_tables));
-#endif
+	if (c->use_delta_matches)
+		memset(c->delta_hash_tables, 0, sizeof(c->delta_hash_tables));
 
 	/* Initialize the encoder structures.  */
 	lzms_prepare_encoders(c, out, out_nbytes_avail,
