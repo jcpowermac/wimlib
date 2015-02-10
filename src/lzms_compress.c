@@ -261,6 +261,23 @@ struct lzms_compressor {
 	 * bytes of data in @in_buffer that are actually valid  */
 	size_t in_nbytes;
 
+	/*
+	 * Parameter: if true, try some multi-step operations during parsing.
+	 * Otherwise only try single-step operations.
+	 *
+	 * The multi-step operations currently considered are:
+	 *
+	 *	literal + LZ-rep0
+	 *	LZ-rep + literal + LZ-rep0
+	 *	match + literal + LZ-rep0
+	 *
+	 * Basically, those help with gap matches where two matches are
+	 * separated by a non-matching byte.
+	 *
+	 * This idea is borrowed from Igor Pavlov's LZMA encoder.
+	 */
+	bool try_multistep_ops;
+
 	/* 'last_target_usages' a large array that is only needed for
 	 * preprocessing, so it is in union with fields that don't need to be
 	 * initialized until after preprocessing.  */
@@ -1414,19 +1431,19 @@ begin:
 
 				u32 base_cost = cur_node->cost +
 						lzms_bit_1_cost(cur_node->state.main_state,
-							      c->main_probs) +
+								c->main_probs) +
 						lzms_bit_0_cost(cur_node->state.match_state,
-							      c->match_probs) +
+								c->match_probs) +
 						lzms_bit_1_cost(cur_node->state.lz_match_state,
-							      c->lz_match_probs);
+								c->lz_match_probs);
 
 				for (int i = 0; i < rep_idx; i++)
 					base_cost += lzms_bit_1_cost(cur_node->state.lz_repmatch_states[i],
-								   c->lz_repmatch_probs[i]);
+								     c->lz_repmatch_probs[i]);
 
 				if (rep_idx < LZMS_NUM_REPMATCH_CONTEXTS)
 					base_cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[rep_idx],
-								   c->lz_repmatch_probs[rep_idx]);
+								     c->lz_repmatch_probs[rep_idx]);
 
 				u32 l = 2;
 				do {
@@ -1443,7 +1460,8 @@ begin:
 
 
 				/* try rep + lit + rep0  */
-				if (in_end - (in_next + len + 1) >= 2 &&
+				if (c->try_multistep_ops &&
+				    in_end - (in_next + len + 1) >= 2 &&
 				    load_u16_unaligned(in_next + len + 1) ==
 				    load_u16_unaligned(matchptr + len + 1))
 				{
@@ -1665,7 +1683,8 @@ begin:
 
 
 			/* try match + lit + rep0  */
-			if (in_end - in_next >= c->matches[0].length + 1 + 2)
+			if (c->try_multistep_ops &&
+			    in_end - in_next >= c->matches[0].length + 1 + 2)
 			for (u32 i = 0; i < num_matches; i++) {
 				u32 len = c->matches[i].length;
 				u32 offset = c->matches[i].offset;
@@ -1839,7 +1858,9 @@ begin:
 				.source = *in_next,
 			};
 			(cur_node + 1)->num_extra_items = 0;
-		} else if (in_end - (in_next + 1) >= 2) {
+		} else if (c->try_multistep_ops &&
+			   in_end - (in_next + 1) >= 2)
+		{
 			/* try lit + rep0  */
 			u32 offset;
 			if (cur_node->state.prev_offset)
@@ -2172,6 +2193,9 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 
 	lzms_init_fast_length_slot_tab(c);
 	lzms_init_offset_slot_tabs(c);
+
+	c->try_multistep_ops = (compression_level >= 40);
+
 
 	*c_ret = c;
 	return 0;
