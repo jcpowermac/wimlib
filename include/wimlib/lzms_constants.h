@@ -27,13 +27,13 @@
  * matches  */
 #define LZMS_NUM_DELTA_REPS			3
 
-/* The number of bit contexts needed to encode an index in the LRU queue for
- * offsets of LZ matches  */
-#define LZMS_NUM_LZ_REP_CONTEXTS		(LZMS_NUM_LZ_REPS - 1)
+/* The maximum number of bits (binary decisions) that are needed to encode an
+ * index in the LRU queue for offsets of LZ matches  */
+#define LZMS_NUM_LZ_REP_DECISIONS		(LZMS_NUM_LZ_REPS - 1)
 
-/* The number of bit contexts needed to encode an index in the LRU queue for
- * (power, raw offset) pairs of LZ matches  */
-#define LZMS_NUM_DELTA_REP_CONTEXTS	(LZMS_NUM_DELTA_REPS - 1)
+/* The maximum number of bits (binary decisions) that are needed to encode an
+ * index in the LRU queue for (power, raw offset) pairs of LZ matches  */
+#define LZMS_NUM_DELTA_REP_DECISIONS		(LZMS_NUM_DELTA_REPS - 1)
 
 /* These values define the precision for probabilities in LZMS, which are always
  * given as a numerator; the implied denominator is LZMS_PROBABILITY_MAX.  */
@@ -45,13 +45,12 @@
 #define LZMS_INITIAL_RECENT_BITS		0x0000000055555555
 
 /* The number of states within each of the various bit contexts  */
-#define LZMS_NUM_MAIN_STATES			16
-#define LZMS_NUM_MATCH_STATES			32
-#define LZMS_NUM_LZ_MATCH_STATES		64
-#define LZMS_NUM_LZ_REP_STATES		64
-#define LZMS_NUM_DELTA_MATCH_STATES		64
-#define LZMS_NUM_DELTA_REP_STATES		64
-#define LZMS_MAX_NUM_STATES			64
+#define LZMS_NUM_MAIN_PROBS			16
+#define LZMS_NUM_MATCH_PROBS			32
+#define LZMS_NUM_LZ_MATCH_PROBS			64
+#define LZMS_NUM_LZ_REP_PROBS			64
+#define LZMS_NUM_DELTA_MATCH_PROBS		64
+#define LZMS_NUM_DELTA_REP_PROBS		64
 
 /* The number of symbols in each alphabet  */
 #define LZMS_NUM_LITERAL_SYMS			256
