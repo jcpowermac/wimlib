@@ -1690,8 +1690,8 @@ begin:
 					u32 cost = base_cost;
 
 					/* add cost of LZ-match  */
-					cost += lzms_lz_offset_slot_cost(c, lzms_comp_get_offset_slot(c, offset));
-					cost += lzms_fast_length_cost(c, len);
+					cost += lzms_lz_offset_slot_cost(c, lzms_comp_get_offset_slot(c, offset)) +
+						lzms_fast_length_cost(c, len);
 
 					/* update state for LZ-match  */
 					main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_PROBS;
@@ -1705,11 +1705,11 @@ begin:
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_PROBS;
 
 					/* add cost of LZ-rep0  */
-					cost += lzms_bit_1_cost(main_state, c->main_probs);
-					cost += lzms_bit_0_cost(match_state, c->match_probs);
-					cost += lzms_bit_1_cost(lz_state, c->lz_probs);
-					cost += lzms_bit_0_cost(cur_node->state.lz_rep_states[0], c->lz_rep_probs[0]);
-					cost += lzms_fast_length_cost(c, rep0_len);
+					cost += lzms_bit_1_cost(main_state, c->main_probs) +
+						lzms_bit_0_cost(match_state, c->match_probs) +
+						lzms_bit_1_cost(lz_state, c->lz_probs) +
+						lzms_bit_0_cost(cur_node->state.lz_rep_states[0], c->lz_rep_probs[0]) +
+						lzms_fast_length_cost(c, rep0_len);
 
 					const u32 total_len = len + 1 + rep0_len;
 
@@ -1761,12 +1761,13 @@ begin:
 				if (cur_match == 0)
 					continue;
 
-				const u8 * const matchptr = &c->in_buffer[cur_match];
-				const u32 offset = in_next - matchptr;
+				const u32 offset = pos - cur_match;
 
 				/* The offset must be a multiple of span.  */
 				if (offset & (span - 1))
 					continue;
+
+				const u8 * const matchptr = in_next - offset;
 
 				/* Check the first 3 bytes before entering the
 				 * extension loop.  */
@@ -1787,7 +1788,8 @@ begin:
 									span);
 
 				const u32 raw_offset = offset >> power;
-				const u32 pair = (power << LZMS_DELTA_SOURCE_POWER_SHIFT) | raw_offset;
+				const u32 pair = (power << LZMS_DELTA_SOURCE_POWER_SHIFT) |
+						 raw_offset;
 				const u32 source = LZMS_DELTA_SOURCE_TAG |
 						   (pair + LZMS_NUM_DELTA_REPS - 1);
 
@@ -1816,11 +1818,11 @@ begin:
 
 				u32 base_cost = cur_node->cost +
 						lzms_bit_1_cost(cur_node->state.main_state,
-							      c->main_probs) +
+								c->main_probs) +
 						lzms_bit_1_cost(cur_node->state.match_state,
-							      c->match_probs) +
+								c->match_probs) +
 						lzms_bit_0_cost(cur_node->state.delta_state,
-							      c->delta_probs) +
+								c->delta_probs) +
 						lzms_delta_source_cost(c, power, raw_offset);
 
 				u32 l = 2;
@@ -1859,6 +1861,7 @@ begin:
 				(cur_node->state.prev_lz_offset) ?
 					cur_node->state.prev_lz_offset :
 					cur_node->state.recent_lz_offsets[0];
+
 			if (load_u16_unaligned(in_next + 1) == load_u16_unaligned(in_next + 1 - offset)) {
 
 				const u32 rep0_len = lz_extend(in_next + 1,
@@ -1866,7 +1869,6 @@ begin:
 							       2,
 							       min(in_end - (in_next + 1),
 								   c->mf.nice_match_len));
-
 
 				/* Update main_state after literal  */
 				unsigned main_state = cur_node->state.main_state;
@@ -1958,6 +1960,7 @@ begin:
 					}
 				} else {
 					lzms_update_match_state(&cur_node->state, 0);
+
 					if (source >= LZMS_NUM_LZ_REPS) {
 						/* Explicit offset LZ match  */
 						lzms_update_lz_state(&cur_node->state, 0);
@@ -1980,7 +1983,6 @@ begin:
 				}
 			} else {
 				/* Literal  */
-
 				lzms_update_main_state(&cur_node->state, 0);
 			}
 
@@ -1993,7 +1995,6 @@ begin:
 			else
 				item_to_take = cur_node->extra_items[next_item_idx - 1];
 			--next_item_idx;
-			source_node = source_node + length;
 		}
 
 		/*
@@ -2098,11 +2099,13 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 		lzms_init_probability_entries(c->delta_rep_probs[i], LZMS_NUM_DELTA_REP_PROBS);
 }
 
-/* Flush the output streams, prepare the final compressed data, and return its
+/*
+ * Flush the output streams, prepare the final compressed data, and return its
  * size in bytes.
  *
  * A return value of 0 indicates that the data could not be compressed to fit in
- * the available space.  */
+ * the available space.
+ */
 static size_t
 lzms_finalize(struct lzms_compressor *c, u8 *out, size_t out_nbytes_avail)
 {
