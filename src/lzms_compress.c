@@ -1507,7 +1507,7 @@ begin:
 
 		/* Repeat offset delta matches  */
 		if (c->use_delta_matches &&
-		    likely(in_next - c->in_buffer >= LZMS_NUM_DELTA_REPS &&
+		    likely(in_next - c->in_buffer >= LZMS_NUM_DELTA_REPS + (1 << 0) &&
 			   (in_end - in_next >= 2)))
 		{
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_DELTA_REPS; rep_idx++) {
@@ -2165,11 +2165,6 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	if (max_bufsize > LZMS_MAX_BUFFER_SIZE)
 		return WIMLIB_ERR_INVALID_PARAM;
 
-	/* Scale nice_match_len with the compression level.  But to allow an
-	 * optimization on length cost calculations, don't allow nice_match_len
-	 * to exceed MAX_FAST_LENGTH.  */
-	nice_match_len = min(((u64)compression_level * 63) / 50, MAX_FAST_LENGTH);
-
 	c = ALIGNED_MALLOC(sizeof(struct lzms_compressor), 64);
 	if (!c)
 		goto oom0;
@@ -2177,6 +2172,11 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	c->in_buffer = MALLOC(max_bufsize);
 	if (!c->in_buffer)
 		goto oom1;
+
+	/* Scale nice_match_len with the compression level.  But to allow an
+	 * optimization on length cost calculations, don't allow nice_match_len
+	 * to exceed MAX_FAST_LENGTH.  */
+	nice_match_len = min(((u64)compression_level * 63) / 50, MAX_FAST_LENGTH);
 
 	if (!lcpit_matchfinder_init(&c->mf, max_bufsize, 2, nice_match_len))
 		goto oom2;
