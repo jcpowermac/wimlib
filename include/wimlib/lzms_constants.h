@@ -7,11 +7,9 @@
 #ifndef _LZMS_CONSTANTS_H
 #define _LZMS_CONSTANTS_H
 
-/* The smallest and largest allowed match lengths, in bytes  */
+/* Limits on match lengths and offsets (in bytes)  */
 #define LZMS_MIN_MATCH_LENGTH			1
 #define LZMS_MAX_MATCH_LENGTH			1073809578
-
-/* The smallest and largest allowed match offsets, in bytes  */
 #define LZMS_MIN_MATCH_OFFSET			1
 #define LZMS_MAX_MATCH_OFFSET			1180427428
 
@@ -20,28 +18,16 @@
  * itself supports higher match lengths and offsets, we'll use 2^30 bytes.  */
 #define LZMS_MAX_BUFFER_SIZE			1073741824
 
-/* Length of the LRU queue for offsets of LZ matches  */
+/* The length of each LRU queue for match sources:
+ *
+ *    1. offsets of LZ matches
+ *    2. (power, raw offset) pairs of delta matches */
 #define LZMS_NUM_LZ_REPS			3
-
-/* Length of the LRU queue for (power, raw_offset) pairs of delta matches  */
 #define LZMS_NUM_DELTA_REPS			3
 
-/* The number of binary decision classes for encoding indices into the LRU queue
- * for offsets of LZ matches  */
+/* The numbers of binary decision classes needed for encoding queue indices  */
 #define LZMS_NUM_LZ_REP_DECISIONS		(LZMS_NUM_LZ_REPS - 1)
-
-/* The number of binary decision classes for encoding indices into the LRU queue
- * for (power, raw_offset) pairs of delta matches  */
 #define LZMS_NUM_DELTA_REP_DECISIONS		(LZMS_NUM_DELTA_REPS - 1)
-
-/* These values define the precision for probabilities in LZMS, which are always
- * given as a numerator; the denominator is implied.  */
-#define LZMS_PROBABILITY_BITS			6
-#define LZMS_PROBABILITY_DENOMINATOR		(1 << LZMS_PROBABILITY_BITS)
-
-/* These values define the initial state of each probability entry.  */
-#define LZMS_INITIAL_PROBABILITY		48
-#define LZMS_INITIAL_RECENT_BITS		0x0000000055555555
 
 /* These are the numbers of probability entries for each binary decision class.
  * The logarithm base 2 of each of these values is the number of recently
@@ -54,6 +40,15 @@
 #define LZMS_NUM_LZ_REP_PROBS			64
 #define LZMS_NUM_DELTA_PROBS			64
 #define LZMS_NUM_DELTA_REP_PROBS		64
+
+/* These values define the precision for probabilities in LZMS, which are always
+ * given as a numerator; the denominator is implied.  */
+#define LZMS_PROBABILITY_BITS			6
+#define LZMS_PROBABILITY_DENOMINATOR		(1 << LZMS_PROBABILITY_BITS)
+
+/* These values define the initial state of each probability entry.  */
+#define LZMS_INITIAL_PROBABILITY		48
+#define LZMS_INITIAL_RECENT_BITS		0x0000000055555555
 
 /* The number of symbols in each Huffman-coded alphabet  */
 #define LZMS_NUM_LITERAL_SYMS			256
