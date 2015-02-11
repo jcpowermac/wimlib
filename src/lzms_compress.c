@@ -1258,7 +1258,7 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 	lcpit_matchfinder_skip_bytes(&c->mf, count);
 
 	/* Matchfinder for delta matches  */
-	const u32 pos = in_next - c->in_buffer;
+	u32 pos = in_next - c->in_buffer;
 	if (!c->use_delta_matches ||
 	    unlikely(c->in_nbytes - (pos + count) <= NBYTES_HASHED_FOR_DELTA))
 		return in_next + count;
@@ -1271,7 +1271,7 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 			u32 hash = lzms_delta_hash(in_next, span);
 			c->delta_hash_tables[power][hash] = pos;
 		}
-	} while (in_next++, --count);
+	} while (in_next++, pos++, --count);
 	return in_next;
 }
 
