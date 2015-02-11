@@ -72,10 +72,9 @@
 #define COST_SHIFT		6
 
 /*
- * Each hash table for finding delta matches contains DELTA_HASH_LENGTH entries.
- * There is one hash table for each allowed span.
+ * DELTA_HASH_LENGTH is the length of the hash table for finding delta matches.
  */
-#define DELTA_HASH_ORDER	10
+#define DELTA_HASH_ORDER	13
 #define DELTA_HASH_LENGTH	(1 << DELTA_HASH_ORDER)
 
 /*
@@ -316,8 +315,8 @@ struct lzms_compressor {
 	/* Temporary space to store matches found by the matchfinder  */
 	struct lz_match matches[MAX_FAST_LENGTH - LZMS_MIN_MATCH_LENGTH + 1];
 
-	/* Hash tables for finding delta matches  */
-	u32 delta_hash_tables[LZMS_NUM_DELTA_POWER_SYMS][DELTA_HASH_LENGTH];
+	/* Hash table for finding delta matches  */
+	u32 delta_hash_table[DELTA_HASH_LENGTH];
 
 	/* The per-byte graph nodes for near-optimal parsing  */
 	struct lzms_optimum_node optimum_nodes[NUM_OPTIM_NODES + MAX_FAST_LENGTH];
@@ -1221,13 +1220,14 @@ lzms_update_delta_rep_states(struct lzms_adaptive_state *state, int rep_idx)
  * @span.
  */
 static inline u32
-lzms_delta_hash(const u8 *p, u32 span)
+lzms_delta_hash(const u8 *p, u32 power)
 {
+	u32 span = (u32)1 << power;
 	BUILD_BUG_ON(NBYTES_HASHED_FOR_DELTA != 3);
 	u8 d0 = *(p + 0) - *(p + 0 - span);
 	u8 d1 = *(p + 1) - *(p + 1 - span);
 	u8 d2 = *(p + 2) - *(p + 2 - span);
-	u32 v = ((u32)d2 << 16) | ((u32)d1 << 8) | d0;
+	u32 v = (power << 24) | ((u32)d2 << 16) | ((u32)d1 << 8) | d0;
 	return lz_hash(v, DELTA_HASH_ORDER);
 }
 
@@ -1270,8 +1270,8 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 			u32 span = (u32)1 << power;
 			if (unlikely(pos < span))
 				continue;
-			u32 hash = lzms_delta_hash(in_next, span);
-			c->delta_hash_tables[power][hash] = pos;
+			u32 hash = lzms_delta_hash(in_next, power);
+			c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
 		}
 	} while (in_next++, pos++, --count);
 	return in_next;
@@ -1754,16 +1754,16 @@ begin:
 				/* Insert the current sequence into the hash
 				 * table for 'span' and get the sequence that
 				 * was in the hash table.  */
-				const u32 hash = lzms_delta_hash(in_next, span);
-				const u32 cur_match = c->delta_hash_tables[power][hash];
-				c->delta_hash_tables[power][hash] = pos;
+				const u32 hash = lzms_delta_hash(in_next, power);
+				const u32 cur_match = c->delta_hash_table[hash];
+				c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
 
 				/* If cur_match == 0, then no sequence was in
 				 * the hash table.  */
-				if (cur_match == 0)
+				if (cur_match == 0 || (cur_match >> LZMS_DELTA_SOURCE_POWER_SHIFT) != power)
 					continue;
 
-				const u32 offset = pos - cur_match;
+				const u32 offset = pos - (cur_match & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK);
 
 				/* The offset must be a multiple of span.  */
 				if (offset & (span - 1))
@@ -2223,7 +2223,7 @@ lzms_compress(const void *in, size_t in_nbytes,
 	/* Load the buffer into the matchfinder.  */
 	lcpit_matchfinder_load_buffer(&c->mf, c->in_buffer, c->in_nbytes);
 	if (c->use_delta_matches)
-		memset(c->delta_hash_tables, 0, sizeof(c->delta_hash_tables));
+		memset(c->delta_hash_table, 0, sizeof(c->delta_hash_table));
 
 	/* Initialize the encoder structures.  */
 	lzms_prepare_encoders(c, out, out_nbytes_avail,
