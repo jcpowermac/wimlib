@@ -83,6 +83,10 @@
  */
 #define NBYTES_HASHED_FOR_DELTA	3
 
+/*
+ * The number of delta match powers to consider (max value is
+ * LZMS_NUM_DELTA_POWER_SYMS)
+ */
 #define NUM_POWERS_TO_CONSIDER	6
 
 /* This structure tracks the state of writing bits as a series of 16-bit coding
@@ -1746,6 +1750,7 @@ begin:
 			const u32 pos = in_next - c->in_buffer;
 
 			/* Consider each possible power (log2 of span)  */
+			BUILD_BUG_ON(NUM_POWERS_TO_CONSIDER > LZMS_NUM_DELTA_POWER_SYMS);
 			for (u32 power = 0; power < NUM_POWERS_TO_CONSIDER; power++) {
 
 				const u32 span = (u32)1 << power;
