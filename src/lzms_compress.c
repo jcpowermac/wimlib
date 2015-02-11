@@ -443,7 +443,6 @@ lzms_comp_get_offset_slot(const struct lzms_compressor *c, u32 offset)
 static inline unsigned
 lzms_comp_get_offset_slot_fast(const struct lzms_compressor *c, u32 offset)
 {
-	LZMS_ASSERT(offset < 0xe4a5);
 	return c->offset_slot_tab_1[offset];
 }
 
@@ -644,8 +643,6 @@ static inline void
 lzms_write_bits(struct lzms_output_bitstream *os, const u32 bits,
 		const unsigned num_bits, const unsigned max_num_bits)
 {
-	LZMS_ASSERT(num_bits <= 48);
-
 	/* Add the bits to the bit buffer variable.  */
 	os->bitcount += num_bits;
 	os->bitbuf = (os->bitbuf << num_bits) | bits;
@@ -694,7 +691,8 @@ lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
 	info->codewords = codewords;
 	info->lens = lens;
 	info->freqs = freqs;
-	lzms_init_symbol_frequencies(freqs, num_syms);
+	for (unsigned sym = 0; sym < num_syms; sym++)
+		freqs[sym] = 1;
 	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
 				    info->freqs, info->lens, info->codewords);
 }
@@ -1030,7 +1028,6 @@ lzms_update_fast_length_costs(struct lzms_compressor *c)
 static inline u32
 lzms_fast_length_cost(const struct lzms_compressor *c, u32 length)
 {
-	LZMS_ASSERT(length <= MAX_FAST_LENGTH);
 	return c->fast_length_cost_tab[length];
 }
 
@@ -1315,18 +1312,6 @@ begin:
 	cur_node = c->optimum_nodes;
 	cur_node->cost = 0;
 	end_node = cur_node;
-
-	/* States should currently be consistent with the encoders.  */
-	LZMS_ASSERT(cur_node->state.main_state == c->main_state);
-	LZMS_ASSERT(cur_node->state.match_state == c->match_state);
-	LZMS_ASSERT(cur_node->state.lz_state == c->lz_state);
-	for (int i = 0; i < LZMS_NUM_LZ_REP_DECISIONS; i++)
-		LZMS_ASSERT(cur_node->state.lz_rep_states[i] ==
-			    c->lz_rep_states[i]);
-	LZMS_ASSERT(cur_node->state.delta_state == c->delta_state);
-	for (int i = 0; i < LZMS_NUM_DELTA_REP_DECISIONS; i++)
-		LZMS_ASSERT(cur_node->state.delta_rep_states[i] ==
-			    c->delta_rep_states[i]);
 
 	if (in_next == in_end)
 		return;

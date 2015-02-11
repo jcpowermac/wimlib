@@ -126,10 +126,9 @@
  * references to the first 3 entries at any given time.  The queue must be
  * initialized to the offsets {1, 2, 3, 4}.
  *
- * Repeat delta matches are handled similarly, but for them there are two queues
- * updated in lock-step: one for powers and one for raw offsets.  The power
- * queue must be initialized to {0, 0, 0, 0}, and the raw offset queue must be
- * initialized to {1, 2, 3, 4}.
+ * Repeat delta matches are handled similarly, but for them the queue contains
+ * (power, raw offset) pairs.  This queue must be initialized to
+ * {(0, 1), (0, 2), (0, 3), (0, 4)}.
  *
  * Bits from the binary range decoder must be used to disambiguate item types.
  * The range decoder must hold two state variables: the range, which must
@@ -154,14 +153,14 @@
  * it.
  *
  * The probability used to range-decode each bit must be taken from a table, of
- * which one instance must exist for each distinct context in which a
- * range-decoded bit is needed.  At each call of the range decoder, the
- * appropriate probability must be obtained by indexing the appropriate
- * probability table with the last 4 (in the context disambiguating literals
- * from matches), 5 (in the context disambiguating LZ matches from delta
- * matches), or 6 (in all other contexts) bits recently range-decoded in that
- * context, ordered such that the most recently decoded bit is the low-order bit
- * of the index.
+ * which one instance must exist for each distinct context, or "binary decision
+ * class", in which a range-decoded bit is needed.  At each call of the range
+ * decoder, the appropriate probability must be obtained by indexing the
+ * appropriate probability table with the last 4 (in the context disambiguating
+ * literals from matches), 5 (in the context disambiguating LZ matches from
+ * delta matches), or 6 (in all other contexts) bits recently range-decoded in
+ * that context, ordered such that the most recently decoded bit is the
+ * low-order bit of the index.
  *
  * Furthermore, each probability entry itself is variable, as its value must be
  * maintained as n/64 where n is the number of 0 bits in the most recently
@@ -198,12 +197,12 @@
  *    reconstitute the full length.  This code must be rebuilt whenever 512
  *    symbols have been decoded with it.
  *
- *  - The delta offset code, used for decoding the offsets of delta matches.
+ *  - The delta offset code, used for decoding the raw offsets of delta matches.
  *    Each symbol corresponds to an offset slot, which corresponds to a base
  *    value and some number of extra bits which must be read and added to the
- *    base value to reconstitute the full offset.  The number of symbols in this
- *    code is equal to the number of symbols in the LZ offset code.  This code
- *    must be rebuilt whenever 1024 symbols have been decoded with it.
+ *    base value to reconstitute the full raw offset.  The number of symbols in
+ *    this code is equal to the number of symbols in the LZ offset code.  This
+ *    code must be rebuilt whenever 1024 symbols have been decoded with it.
  *
  *  - The delta power code, used for decoding the powers of delta matches.  Each
  *    of the 8 symbols corresponds to a power.  This code must be rebuilt
@@ -594,7 +593,8 @@ lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
 	info->codewords = codewords;
 	info->lens = lens;
 	info->num_syms = num_syms;
-	lzms_init_symbol_frequencies(freqs, num_syms);
+	for (unsigned sym = 0; sym < num_syms; sym++)
+		freqs[sym] = 1;
 }
 
 static noinline void

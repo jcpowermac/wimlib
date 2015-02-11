@@ -16,8 +16,8 @@
 #define LZMS_MAX_MATCH_OFFSET			1180427428
 
 /* The value to which buffer sizes should be limited.  Microsoft's
- * implementation seems use 67108864 (2^26) bytes.  However, since the format
- * itself supports higher match lengths and offsets, we'll use 2^30.  */
+ * implementation seems to use 67108864 (2^26) bytes.  However, since the format
+ * itself supports higher match lengths and offsets, we'll use 2^30 bytes.  */
 #define LZMS_MAX_BUFFER_SIZE			1073741824
 
 /* Length of the LRU queue for offsets of LZ matches  */
@@ -26,12 +26,12 @@
 /* Length of the LRU queue for (power, raw_offset) pairs of delta matches  */
 #define LZMS_NUM_DELTA_REPS			3
 
-/* The maximum number of binary decisions that are needed to encode an index in
- * the LZ match offset LRU queue  */
+/* The number of binary decision classes for encoding indices into the LRU queue
+ * for offsets of LZ matches  */
 #define LZMS_NUM_LZ_REP_DECISIONS		(LZMS_NUM_LZ_REPS - 1)
 
-/* The maximum number of binary decisions that are needed to encode an index in
- * the delta match (power, raw offset) pair LRU queue  */
+/* The number of binary decision classes for encoding indices into the LRU queue
+ * for (power, raw_offset) pairs of delta matches  */
 #define LZMS_NUM_DELTA_REP_DECISIONS		(LZMS_NUM_DELTA_REPS - 1)
 
 /* These values define the precision for probabilities in LZMS, which are always
@@ -43,12 +43,11 @@
 #define LZMS_INITIAL_PROBABILITY		48
 #define LZMS_INITIAL_RECENT_BITS		0x0000000055555555
 
-/* The number of probabilities for each of the classes of binary decisions.
- *
+/* These are the numbers of probability entries for each binary decision class.
  * The logarithm base 2 of each of these values is the number of recently
  * encoded bits that are remembered for each decision class and are used to
  * select the appropriate probability entry when decoding/encoding the next
- * decision.  */
+ * binary decision (bit).  */
 #define LZMS_NUM_MAIN_PROBS			16
 #define LZMS_NUM_MATCH_PROBS			32
 #define LZMS_NUM_LZ_PROBS			64
@@ -56,7 +55,7 @@
 #define LZMS_NUM_DELTA_PROBS			64
 #define LZMS_NUM_DELTA_REP_PROBS		64
 
-/* The number of symbols in each alphabet  */
+/* The number of symbols in each Huffman-coded alphabet  */
 #define LZMS_NUM_LITERAL_SYMS			256
 #define LZMS_NUM_LENGTH_SYMS			54
 #define LZMS_NUM_DELTA_POWER_SYMS		8
@@ -74,12 +73,12 @@
  * the way frequencies are updated.  */
 #define LZMS_MAX_CODEWORD_LEN			15
 
-/* The maximum number of verbatim bits (in addition to the Huffman-encoded
- * length slot symbol) that may be required to encode a match length  */
+/* The maximum number of verbatim bits, in addition to the Huffman-encoded
+ * length slot symbol, that may be required to encode a match length  */
 #define LZMS_MAX_EXTRA_LENGTH_BITS		30
 
-/* The maximum number of verbatim bits (in addition to the Huffman-encoded
- * offset slot symbol) that may be required to encode a match offset  */
+/* The maximum number of verbatim bits, in addition to the Huffman-encoded
+ * offset slot symbol, that may be required to encode a match offset  */
 #define LZMS_MAX_EXTRA_OFFSET_BITS		30
 
 /* Parameters for x86 machine code pre/post-processing  */

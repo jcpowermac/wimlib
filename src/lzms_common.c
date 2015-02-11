@@ -354,13 +354,6 @@ lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t cou
 	}
 }
 
-void
-lzms_init_symbol_frequencies(u32 freqs[], size_t num_syms)
-{
-	for (size_t i = 0; i < num_syms; i++)
-		freqs[i] = 1;
-}
-
 /*
  * Translate relative addresses embedded in x86 instructions into absolute
  * addresses (@undo == %false), or undo this translation (@undo == %true).
@@ -528,8 +521,6 @@ lzms_x86_filter(u8 data[restrict], s32 size,
 	have_opcode:
 		if (undo) {
 			if (i - last_x86_pos <= max_trans_offset) {
-				LZMS_DEBUG("Undid x86 translation at position %d "
-					   "(opcode 0x%02x)", i, data[i]);
 				void *p32 = &data[i + opcode_nbytes];
 				u32 n = get_unaligned_u32_le(p32);
 				put_unaligned_u32_le(n - i, p32);
@@ -538,8 +529,6 @@ lzms_x86_filter(u8 data[restrict], s32 size,
 		} else {
 			target16 = i + get_unaligned_u16_le(&data[i + opcode_nbytes]);
 			if (i - last_x86_pos <= max_trans_offset) {
-				LZMS_DEBUG("Did x86 translation at position %d "
-					   "(opcode 0x%02x)", i, data[i]);
 				void *p32 = &data[i + opcode_nbytes];
 				u32 n = get_unaligned_u32_le(p32);
 				put_unaligned_u32_le(n + i, p32);

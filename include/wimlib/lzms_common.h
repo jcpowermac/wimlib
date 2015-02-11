@@ -11,36 +11,6 @@
 #include "wimlib/lzms_constants.h"
 #include "wimlib/types.h"
 
-//#define ENABLE_LZMS_DEBUG
-#ifdef ENABLE_LZMS_DEBUG
-#	define LZMS_DEBUG DEBUG
-#       define LZMS_ASSERT wimlib_assert
-#       include "wimlib/assert.h"
-#       include "wimlib/error.h"
-#else
-#	define LZMS_DEBUG(format, ...)
-#	define LZMS_ASSERT(...)
-#endif
-
-extern void
-lzms_x86_filter(u8 data[], s32 size, s32 last_target_usages[], bool undo);
-
-/* Probability entry for use by the range coder when in a specific state.  */
-struct lzms_probability_entry {
-
-	/* The probability (out of LZMS_PROBABILITY_DENOMINATOR).  This is equal
-	 * to the number of zeroes in the most recent
-	 * LZMS_PROBABILITY_DENOMINATOR bits that have been coded using this
-	 * probability entry.  This is a cached value because it can be computed
-	 * as the number of zeroes in @recent_bits.  */
-	u32 prob;
-
-	/* The most recent LZMS_PROBABILITY_DENOMINATOR bits that have been
-	 * coded using this probability entry.  Low order = newest, high order =
-	 * oldest.  */
-	u64 recent_bits;
-};
-
 /* Offset slot tables  */
 extern const u32 lzms_offset_slot_base[LZMS_MAX_NUM_OFFSET_SYMS + 1];
 extern const u8 lzms_extra_offset_bits[LZMS_MAX_NUM_OFFSET_SYMS];
@@ -69,27 +39,38 @@ lzms_get_length_slot(u32 length)
 extern unsigned
 lzms_get_num_offset_slots(size_t uncompressed_size);
 
+
+/* Probability entry for use by the range coder when in a specific state  */
+struct lzms_probability_entry {
+
+	/* The probability value, with an implied denominator of
+	 * LZMS_PROBABILITY_DENOMINATOR.  This is equal to the number of zeroes
+	 * in the most recent LZMS_PROBABILITY_DENOMINATOR bits that have been
+	 * coded using this probability entry.  This is a cached value because
+	 * it can be computed as the number of zeroes in @recent_bits.  */
+	u32 prob;
+
+	/* The most recent LZMS_PROBABILITY_DENOMINATOR bits that have been
+	 * coded using this probability entry.  The bits are ordered such that
+	 * low order is newest and high order is oldest.  */
+	u64 recent_bits;
+};
+
 extern void
 lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t count);
 
-extern void
-lzms_init_symbol_frequencies(u32 freqs[], size_t num_syms);
-
-/* Given a decoded bit, update the probability entry.  */
+/* Given a decoded or encoded bit, update the probability entry.  */
 static inline void
-lzms_update_probability_entry(struct lzms_probability_entry *prob_entry, int bit)
+lzms_update_probability_entry(struct lzms_probability_entry *entry, int bit)
 {
-	s32 delta_zero_bits;
+	BUILD_BUG_ON(LZMS_PROBABILITY_DENOMINATOR != sizeof(entry->recent_bits) * 8);
 
-	BUILD_BUG_ON(LZMS_PROBABILITY_DENOMINATOR !=
-		     sizeof(prob_entry->recent_bits) * 8);
+	s32 delta_zero_bits = (s32)(entry->recent_bits >>
+				    (LZMS_PROBABILITY_DENOMINATOR - 1)) - bit;
 
-	delta_zero_bits = (s32)(prob_entry->recent_bits >>
-				(LZMS_PROBABILITY_DENOMINATOR - 1)) - bit;
-
-	prob_entry->prob += delta_zero_bits;
-	prob_entry->recent_bits <<= 1;
-	prob_entry->recent_bits |= bit;
+	entry->prob += delta_zero_bits;
+	entry->recent_bits <<= 1;
+	entry->recent_bits |= bit;
 }
 
 /* Given a probability entry, return the chance out of
@@ -106,5 +87,9 @@ lzms_get_probability(const struct lzms_probability_entry *prob_entry)
 		prob--;
 	return prob;
 }
+
+/* Pre/post-processing  */
+extern void
+lzms_x86_filter(u8 data[], s32 size, s32 last_target_usages[], bool undo);
 
 #endif /* _LZMS_COMMON_H */
