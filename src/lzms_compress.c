@@ -1277,17 +1277,6 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
  *                          "Near-optimal" parsing                            *
  ******************************************************************************/
 
-static inline void
-lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
-					 struct lzms_optimum_node *cur_node,
-					 const struct lz_match matches[],
-					 u32 num_matches,
-					 bool all_small_offsets,
-					 u32 base_cost)
-{
-}
-
-
 /*
  * The main near-optimal parsing routine.
  *
