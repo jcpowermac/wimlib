@@ -332,31 +332,27 @@ struct lzms_decompressor {
 	const u8 *lz_offset_still_pending;
 	const u8 *delta_pair_still_pending;
 
-	/* States and probabilities for range decoding  */
+	/* States and probability entries for item type disambiguation  */
 
 	u32 main_state;
-	struct lzms_probability_entry main_prob_entries[
-			LZMS_NUM_MAIN_PROBS];
+	struct lzms_probability_entry main_probs[LZMS_NUM_MAIN_PROBS];
 
 	u32 match_state;
-	struct lzms_probability_entry match_prob_entries[
-			LZMS_NUM_MATCH_PROBS];
+	struct lzms_probability_entry match_probs[LZMS_NUM_MATCH_PROBS];
 
-	u32 lz_match_state;
-	struct lzms_probability_entry lz_match_prob_entries[
-			LZMS_NUM_LZ_MATCH_PROBS];
+	u32 lz_state;
+	struct lzms_probability_entry lz_probs[LZMS_NUM_LZ_PROBS];
 
-	u32 delta_match_state;
-	struct lzms_probability_entry delta_match_prob_entries[
-			LZMS_NUM_DELTA_MATCH_PROBS];
+	u32 delta_state;
+	struct lzms_probability_entry delta_probs[LZMS_NUM_DELTA_PROBS];
 
 	u32 lz_rep_states[LZMS_NUM_LZ_REP_DECISIONS];
-	struct lzms_probability_entry lz_rep_prob_entries[
-			LZMS_NUM_LZ_REP_DECISIONS][LZMS_NUM_LZ_REP_PROBS];
+	struct lzms_probability_entry lz_rep_probs
+			[LZMS_NUM_LZ_REP_DECISIONS][LZMS_NUM_LZ_REP_PROBS];
 
-	u32 delta_repmatch_states[LZMS_NUM_DELTA_REP_DECISIONS];
-	struct lzms_probability_entry delta_repmatch_prob_entries[
-			LZMS_NUM_DELTA_REP_DECISIONS][LZMS_NUM_DELTA_REP_PROBS];
+	u32 delta_rep_states[LZMS_NUM_DELTA_REP_DECISIONS];
+	struct lzms_probability_entry delta_rep_probs
+			[LZMS_NUM_DELTA_REP_DECISIONS][LZMS_NUM_DELTA_REP_PROBS];
 
 	/* Huffman decoding  */
 
@@ -482,7 +478,7 @@ lzms_range_decoder_init(struct lzms_range_decoder *rd,
  * @prob is the chance out of LZMS_PROBABILITY_MAX that the next bit is 0.
  */
 static inline int
-lzms_range_decoder_decode_bit(struct lzms_range_decoder *rd, u32 prob)
+lzms_range_decode_bit(struct lzms_range_decoder *rd, u32 prob)
 {
 	u32 bound;
 
@@ -510,26 +506,26 @@ lzms_range_decoder_decode_bit(struct lzms_range_decoder *rd, u32 prob)
 	}
 }
 
-/* Decode and return the next bit from the range decoder.  This wraps around
- * lzms_range_decoder_decode_bit() to handle using and updating the appropriate
- * state and probability entry.  */
+/*
+ * Decode a bit.  This wraps around lzms_range_decode_bit() to handle using and
+ * updating the state and its corresponding probability entry.
+ */
 static inline int
-lzms_range_decode_bit(struct lzms_range_decoder *rd,
-		      u32 *state_p, u32 num_states,
-		      struct lzms_probability_entry prob_entries[])
+lzms_decode_bit(struct lzms_range_decoder *rd, u32 *state_p, u32 num_states,
+		struct lzms_probability_entry *probs)
 {
 	struct lzms_probability_entry *prob_entry;
 	u32 prob;
 	int bit;
 
 	/* Load the probability entry corresponding to the current state.  */
-	prob_entry = &prob_entries[*state_p];
+	prob_entry = &probs[*state_p];
 
 	/* Get the probability that the next bit is 0.  */
 	prob = lzms_get_probability(prob_entry);
 
 	/* Decode the next bit.  */
-	bit = lzms_range_decoder_decode_bit(rd, prob);
+	bit = lzms_range_decode_bit(rd, prob);
 
 	/* Update the state and probability entry based on the decoded bit.  */
 	*state_p = ((*state_p << 1) | bit) & (num_states - 1);
@@ -542,49 +538,43 @@ lzms_range_decode_bit(struct lzms_range_decoder *rd,
 static int
 lzms_decode_main_bit(struct lzms_decompressor *d)
 {
-	return lzms_range_decode_bit(&d->rd, &d->main_state,
-				     LZMS_NUM_MAIN_PROBS,
-				     d->main_prob_entries);
+	return lzms_decode_bit(&d->rd, &d->main_state,
+			       LZMS_NUM_MAIN_PROBS, d->main_probs);
 }
 
 static int
 lzms_decode_match_bit(struct lzms_decompressor *d)
 {
-	return lzms_range_decode_bit(&d->rd, &d->match_state,
-				     LZMS_NUM_MATCH_PROBS,
-				     d->match_prob_entries);
+	return lzms_decode_bit(&d->rd, &d->match_state,
+			       LZMS_NUM_MATCH_PROBS, d->match_probs);
 }
 
 static int
 lzms_decode_lz_match_bit(struct lzms_decompressor *d)
 {
-	return lzms_range_decode_bit(&d->rd, &d->lz_match_state,
-				     LZMS_NUM_LZ_MATCH_PROBS,
-				     d->lz_match_prob_entries);
+	return lzms_decode_bit(&d->rd, &d->lz_state,
+			       LZMS_NUM_LZ_PROBS, d->lz_probs);
 }
 
 static int
 lzms_decode_delta_match_bit(struct lzms_decompressor *d)
 {
-	return lzms_range_decode_bit(&d->rd, &d->delta_match_state,
-				     LZMS_NUM_DELTA_MATCH_PROBS,
-				     d->delta_match_prob_entries);
+	return lzms_decode_bit(&d->rd, &d->delta_state,
+			       LZMS_NUM_DELTA_PROBS, d->delta_probs);
 }
 
 static noinline int
 lzms_decode_lz_repeat_match_bit(struct lzms_decompressor *d, int idx)
 {
-	return lzms_range_decode_bit(&d->rd, &d->lz_rep_states[idx],
-				     LZMS_NUM_LZ_REP_PROBS,
-				     d->lz_rep_prob_entries[idx]);
+	return lzms_decode_bit(&d->rd, &d->lz_rep_states[idx],
+			       LZMS_NUM_LZ_REP_PROBS, d->lz_rep_probs[idx]);
 }
 
 static noinline int
 lzms_decode_delta_repeat_match_bit(struct lzms_decompressor *d, int idx)
 {
-	return lzms_range_decode_bit(&d->rd, &d->delta_repmatch_states[idx],
-				     LZMS_NUM_DELTA_REP_PROBS,
-				     d->delta_repmatch_prob_entries[idx]);
+	return lzms_decode_bit(&d->rd, &d->delta_rep_states[idx],
+			       LZMS_NUM_DELTA_REP_PROBS, d->delta_rep_probs[idx]);
 }
 
 static void
@@ -900,26 +890,26 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 	lzms_range_decoder_init(&d->rd, in, in_nbytes / sizeof(le16));
 
 	d->main_state = 0;
-	lzms_init_probability_entries(d->main_prob_entries, LZMS_NUM_MAIN_PROBS);
+	lzms_init_probability_entries(d->main_probs, LZMS_NUM_MAIN_PROBS);
 
 	d->match_state = 0;
-	lzms_init_probability_entries(d->match_prob_entries, LZMS_NUM_MATCH_PROBS);
+	lzms_init_probability_entries(d->match_probs, LZMS_NUM_MATCH_PROBS);
 
-	d->lz_match_state = 0;
-	lzms_init_probability_entries(d->lz_match_prob_entries, LZMS_NUM_LZ_MATCH_PROBS);
+	d->lz_state = 0;
+	lzms_init_probability_entries(d->lz_probs, LZMS_NUM_LZ_PROBS);
 
 	for (int i = 0; i < LZMS_NUM_LZ_REP_DECISIONS; i++) {
 		d->lz_rep_states[i] = 0;
-		lzms_init_probability_entries(d->lz_rep_prob_entries[i],
+		lzms_init_probability_entries(d->lz_rep_probs[i],
 					      LZMS_NUM_LZ_REP_PROBS);
 	}
 
-	d->delta_match_state = 0;
-	lzms_init_probability_entries(d->delta_match_prob_entries, LZMS_NUM_DELTA_MATCH_PROBS);
+	d->delta_state = 0;
+	lzms_init_probability_entries(d->delta_probs, LZMS_NUM_DELTA_PROBS);
 
 	for (int i = 0; i < LZMS_NUM_DELTA_REP_DECISIONS; i++) {
-		d->delta_repmatch_states[i] = 0;
-		lzms_init_probability_entries(d->delta_repmatch_prob_entries[i],
+		d->delta_rep_states[i] = 0;
+		lzms_init_probability_entries(d->delta_rep_probs[i],
 					      LZMS_NUM_DELTA_REP_PROBS);
 	}
 

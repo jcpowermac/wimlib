@@ -47,9 +47,9 @@
 /* The number of states within each of the various bit contexts  */
 #define LZMS_NUM_MAIN_PROBS			16
 #define LZMS_NUM_MATCH_PROBS			32
-#define LZMS_NUM_LZ_MATCH_PROBS			64
+#define LZMS_NUM_LZ_PROBS			64
 #define LZMS_NUM_LZ_REP_PROBS			64
-#define LZMS_NUM_DELTA_MATCH_PROBS		64
+#define LZMS_NUM_DELTA_PROBS			64
 #define LZMS_NUM_DELTA_REP_PROBS		64
 
 /* The number of symbols in each alphabet  */
