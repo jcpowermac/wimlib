@@ -8,8 +8,8 @@
 #define _LZMS_CONSTANTS_H
 
 /* The smallest and largest allowed match lengths, in bytes  */
-#define LZMS_MIN_MATCH_LEN			1
-#define LZMS_MAX_MATCH_LEN			1073809578
+#define LZMS_MIN_MATCH_LENGTH			1
+#define LZMS_MAX_MATCH_LENGTH			1073809578
 
 /* The smallest and largest allowed match offsets, in bytes  */
 #define LZMS_MIN_MATCH_OFFSET			1
@@ -71,7 +71,7 @@
 
 /* The maximum length, in bits, of any Huffman codeword.  This is guaranteed by
  * the way frequencies are updated.  */
-#define LZMS_MAX_CODEWORD_LEN			15
+#define LZMS_MAX_CODEWORD_LENGTH		15
 
 /* The maximum number of verbatim bits, in addition to the Huffman-encoded
  * length slot symbol, that may be required to encode a match length  */

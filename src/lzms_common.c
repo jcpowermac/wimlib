@@ -302,8 +302,8 @@ const u32 lzms_length_slot_base[LZMS_NUM_LENGTH_SYMS + 1] = {
 	0x0000009b, 0x000000ab, 0x000000cb, 0x000000eb,
 	0x0000012b, 0x000001ab, 0x000002ab, 0x000004ab,
 	0x000008ab, 0x000108ab, 0x400108ab,
-	/* The last entry is extra; it is equal to LZMS_MAX_MATCH_LEN + 1 and is
-	 * here to aid binary search.  */
+	/* The last entry is extra; it is equal to LZMS_MAX_MATCH_LENGTH + 1 and
+	 * is here to aid binary search.  */
 };
 
 /* Table: length slot => number of extra length bits  */

@@ -600,11 +600,11 @@ lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
 static noinline void
 lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
 {
-	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
+	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LENGTH,
 				    info->freqs, info->lens, info->codewords);
 	make_huffman_decode_table(info->decode_table, info->num_syms,
 				  info->table_bits, info->lens,
-				  LZMS_MAX_CODEWORD_LEN);
+				  LZMS_MAX_CODEWORD_LENGTH);
 	for (unsigned i = 0; i < info->num_syms; i++)
 		info->freqs[i] = (info->freqs[i] >> 1) + 1;
 	info->num_syms_until_rebuild = info->rebuild_freq;
@@ -622,7 +622,7 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 	if (unlikely(--rebuild_info->num_syms_until_rebuild == 0))
 		lzms_rebuild_huffman_code(rebuild_info);
 
-	lzms_ensure_bits(is, LZMS_MAX_CODEWORD_LEN);
+	lzms_ensure_bits(is, LZMS_MAX_CODEWORD_LENGTH);
 
 	/* Index the decode table by the next table_bits bits of the input.  */
 	key_bits = lzms_peek_bits(is, table_bits);
@@ -778,7 +778,7 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			if (unlikely(offset > out_next - out))
 				return -1;
 
-			lz_copy(out_next, length, offset, out_end, LZMS_MIN_MATCH_LEN);
+			lz_copy(out_next, length, offset, out_end, LZMS_MIN_MATCH_LENGTH);
 			out_next += length;
 
 			d->lz_offset_still_pending = out_next;

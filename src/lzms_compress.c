@@ -282,7 +282,7 @@ struct lzms_compressor {
 	struct {
 
 	/* Temporary space to store matches found by the matchfinder  */
-	struct lz_match matches[MAX_FAST_LENGTH - LZMS_MIN_MATCH_LEN + 1];
+	struct lz_match matches[MAX_FAST_LENGTH - LZMS_MIN_MATCH_LENGTH + 1];
 
 	/* Hash tables for finding delta matches  */
 	u32 delta_hash_tables[LZMS_NUM_DELTA_POWER_SYMS][DELTA_HASH_LENGTH];
@@ -373,7 +373,7 @@ static void
 lzms_init_fast_length_slot_tab(struct lzms_compressor *c)
 {
 	unsigned slot = 0;
-	for (u32 len = LZMS_MIN_MATCH_LEN; len <= MAX_FAST_LENGTH; len++) {
+	for (u32 len = LZMS_MIN_MATCH_LENGTH; len <= MAX_FAST_LENGTH; len++) {
 		if (len >= lzms_length_slot_base[slot + 1])
 			slot++;
 		c->fast_length_slot_tab[len] = slot;
@@ -693,14 +693,14 @@ lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
 	info->freqs = freqs;
 	for (unsigned sym = 0; sym < num_syms; sym++)
 		freqs[sym] = 1;
-	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
+	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LENGTH,
 				    info->freqs, info->lens, info->codewords);
 }
 
 static noinline void
 lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
 {
-	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LEN,
+	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LENGTH,
 				    info->freqs, info->lens, info->codewords);
 	for (unsigned i = 0; i < info->num_syms; i++)
 		info->freqs[i] = (info->freqs[i] >> 1) + 1;
@@ -718,7 +718,7 @@ lzms_huffman_encode_symbol(unsigned sym,
 			   struct lzms_output_bitstream *os,
 			   struct lzms_huffman_rebuild_info *rebuild_info)
 {
-	lzms_write_bits(os, codewords[sym], lens[sym], LZMS_MAX_CODEWORD_LEN);
+	lzms_write_bits(os, codewords[sym], lens[sym], LZMS_MAX_CODEWORD_LENGTH);
 	++freqs[sym];
 	if (--rebuild_info->num_syms_until_rebuild == 0) {
 		lzms_rebuild_huffman_code(rebuild_info);
@@ -1013,7 +1013,7 @@ lzms_update_fast_length_costs(struct lzms_compressor *c)
 {
 	int slot = -1;
 	u32 cost = 0;
-	for (u32 len = LZMS_MIN_MATCH_LEN; len <= MAX_FAST_LENGTH; len++) {
+	for (u32 len = LZMS_MIN_MATCH_LENGTH; len <= MAX_FAST_LENGTH; len++) {
 		if (len >= lzms_length_slot_base[slot + 1]) {
 			slot++;
 			cost = (u32)(c->length_lens[slot] +
