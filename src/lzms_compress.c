@@ -1049,6 +1049,14 @@ lzms_bit_1_cost(unsigned state, const struct lzms_probability_entry *probs)
 	return lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR - probs[state].prob];
 }
 
+/* Return the cost to encode a literal, including the main bit.  */
+static inline u32
+lzms_literal_cost(struct lzms_compressor *c, unsigned main_state, unsigned literal)
+{
+	return lzms_bit_0_cost(main_state, c->main_probs) +
+		((u32)c->literal_lens[literal] << COST_SHIFT);
+}
+
 /* Update 'fast_length_cost_tab' to use the latest Huffman code.  */
 static void
 lzms_update_fast_length_costs(struct lzms_compressor *c)
@@ -1320,11 +1328,10 @@ lzms_consider_lz_explicit_offset_matches(const struct lzms_compressor *c,
  * The costs of literals and matches are estimated using the range encoder
  * states and the semi-adaptive Huffman codes.  Except for range encoding
  * states, costs are assumed to be constant throughout a single run of the
- * parsing algorithm, which can parse up to NUM_OPTIM_NODES bytes of data.
- * This introduces a source of non-optimality because the probabilities and
- * Huffman codes can change over this part of the data.  (Of course, besides
- * there are a other reasons why the result isn't optimal in terms of
- * compression ratio.)
+ * parsing algorithm, which can parse up to NUM_OPTIM_NODES bytes of data.  This
+ * introduces a source of non-optimality because the probabilities and Huffman
+ * codes can change over this part of the data.  (Of course, besides there are a
+ * other reasons why the result isn't optimal in terms of compression ratio.)
  */
 static void
 lzms_near_optimal_parse(struct lzms_compressor *c)
@@ -1362,8 +1369,8 @@ begin:
 		{
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_LZ_REPS; rep_idx++) {
 
-				/* Looking for a repeat offset LZ match at
-				 * repeat offset index @rep_idx  */
+				/* Looking for a repeat offset LZ match at queue
+				 * index @rep_idx  */
 
 				const u32 offset = cur_node->state.recent_lz_offsets[rep_idx];
 				const u8 * const matchptr = in_next - offset;
@@ -1461,8 +1468,7 @@ begin:
 					u32 cost = base_cost + lzms_fast_length_cost(c, rep_len);
 
 					/* add literal cost  */
-					cost += lzms_bit_0_cost(main_state, c->main_probs) +
-					        ((u32)c->literal_lens[*(in_next + rep_len)] << COST_SHIFT);
+					cost += lzms_literal_cost(c, main_state, *(in_next + rep_len));
 
 					/* update state for literal  */
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_PROBS;
@@ -1507,7 +1513,7 @@ begin:
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_DELTA_REPS; rep_idx++) {
 
 				/* Looking for a repeat offset delta match at
-				 * repeat offset index @rep_idx  */
+				 * queue index @rep_idx  */
 
 				const u32 pair = cur_node->state.recent_delta_pairs[rep_idx];
 				const u32 power = pair >> LZMS_DELTA_SOURCE_POWER_SHIFT;
@@ -1681,12 +1687,9 @@ begin:
 					unsigned match_state = cur_node->state.match_state;
 					unsigned lz_state = cur_node->state.lz_state;
 
-					u32 cost = cur_node->cost;
+					u32 cost = base_cost;
 
 					/* add cost of LZ-match  */
-					cost += lzms_bit_1_cost(main_state, c->main_probs);
-					cost += lzms_bit_0_cost(match_state, c->match_probs);
-					cost += lzms_bit_0_cost(lz_state, c->lz_probs);
 					cost += lzms_lz_offset_slot_cost(c, lzms_comp_get_offset_slot(c, offset));
 					cost += lzms_fast_length_cost(c, len);
 
@@ -1696,8 +1699,7 @@ begin:
 					lz_state = ((lz_state << 1) | 0) % LZMS_NUM_LZ_PROBS;
 
 					/* add cost of literal  */
-					cost += lzms_bit_0_cost(main_state, c->main_probs);
-					cost += (u32)c->literal_lens[*(in_next + len)] << COST_SHIFT;
+					cost += lzms_literal_cost(c, main_state, *(in_next + len));
 
 					/* update state for literal  */
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_PROBS;
@@ -1840,9 +1842,8 @@ begin:
 		if (end_node < cur_node + 1)
 			(++end_node)->cost = INFINITE_COST;
 		const u32 cur_and_lit_cost = cur_node->cost +
-					     lzms_bit_0_cost(cur_node->state.main_state,
-							     c->main_probs) +
-					     ((u32)c->literal_lens[*in_next] << COST_SHIFT);
+					     lzms_literal_cost(c, cur_node->state.main_state,
+							       *in_next);
 		if (cur_and_lit_cost < (cur_node + 1)->cost) {
 			(cur_node + 1)->cost = cur_and_lit_cost;
 			(cur_node + 1)->item = (struct lzms_item) {
