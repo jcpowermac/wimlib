@@ -613,7 +613,7 @@ lzms_encode_match_bit(struct lzms_compressor *c, int bit)
 }
 
 static void
-lzms_encode_lz_match_bit(struct lzms_compressor *c, int bit)
+lzms_encode_lz_bit(struct lzms_compressor *c, int bit)
 {
 	lzms_encode_bit(bit, &c->lz_state, LZMS_NUM_LZ_PROBS,
 			c->lz_probs, &c->rc);
@@ -627,7 +627,7 @@ lzms_encode_lz_rep_bit(struct lzms_compressor *c, int bit, int idx)
 }
 
 static void
-lzms_encode_delta_match_bit(struct lzms_compressor *c, int bit)
+lzms_encode_delta_bit(struct lzms_compressor *c, int bit)
 {
 	lzms_encode_bit(bit, &c->delta_state, LZMS_NUM_DELTA_PROBS,
 			c->delta_probs, &c->rc);
@@ -883,7 +883,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 
 			/* LZ bit: 0 = explicit offset, 1 = repeat offset  */
 			int lz_bit = (source < LZMS_NUM_LZ_REPS);
-			lzms_encode_lz_match_bit(c, lz_bit);
+			lzms_encode_lz_bit(c, lz_bit);
 
 			if (!lz_bit) {
 				/* Explicit offset LZ match  */
@@ -904,7 +904,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 
 			/* Delta bit: 0 = explicit offset, 1 = repeat offset  */
 			int delta_bit = (source < LZMS_NUM_DELTA_REPS);
-			lzms_encode_delta_match_bit(c, delta_bit);
+			lzms_encode_delta_bit(c, delta_bit);
 
 			if (!delta_bit) {
 				/* Explicit offset delta match  */
@@ -1187,7 +1187,7 @@ lzms_update_lz_rep_states(struct lzms_adaptive_state *state, int rep_idx)
 }
 
 static inline void
-lzms_update_delta_match_state(struct lzms_adaptive_state *state, int is_rep)
+lzms_update_delta_state(struct lzms_adaptive_state *state, int is_rep)
 {
 	lzms_update_state(&state->delta_state, is_rep, LZMS_NUM_DELTA_PROBS);
 }
@@ -1524,7 +1524,7 @@ begin:
 					lzms_update_lru_queues(&cur_node->state);
 					lzms_update_main_state(&cur_node->state, 1);
 					lzms_update_match_state(&cur_node->state, 1);
-					lzms_update_delta_match_state(&cur_node->state, 1);
+					lzms_update_delta_state(&cur_node->state, 1);
 					lzms_update_delta_rep_states(&cur_node->state, rep_idx);
 					goto begin;
 				}
@@ -1787,7 +1787,7 @@ begin:
 					lzms_update_lru_queues(&cur_node->state);
 					lzms_update_main_state(&cur_node->state, 1);
 					lzms_update_match_state(&cur_node->state, 1);
-					lzms_update_delta_match_state(&cur_node->state, 0);
+					lzms_update_delta_state(&cur_node->state, 0);
 					goto begin;
 				}
 
@@ -1918,13 +1918,13 @@ begin:
 					if (source >= LZMS_NUM_DELTA_REPS) {
 						u32 pair = source - (LZMS_NUM_DELTA_REPS - 1);
 						/* Explicit offset delta match  */
-						lzms_update_delta_match_state(&cur_node->state, 0);
+						lzms_update_delta_state(&cur_node->state, 0);
 						cur_node->state.upcoming_delta_pair = pair;
 					} else {
 						/* Repeat offset delta match  */
 						int rep_idx = source;
 
-						lzms_update_delta_match_state(&cur_node->state, 1);
+						lzms_update_delta_state(&cur_node->state, 1);
 						lzms_update_delta_rep_states(&cur_node->state, rep_idx);
 
 						cur_node->state.upcoming_delta_pair =
