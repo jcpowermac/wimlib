@@ -520,7 +520,8 @@ lzms_range_encoder_flush(struct lzms_range_encoder *rc)
 /*
  * Encode the next bit using the range encoder.
  *
- * @prob is the chance out of LZMS_PROBABILITY_MAX that the next bit is 0.
+ * @prob is the probability (out of LZMS_PROBABILITY_DENOMINATOR) that the next
+ * bit is a 0.
  */
 static inline void
 lzms_range_encode_bit(struct lzms_range_encoder *rc, int bit, u32 prob)
@@ -951,12 +952,12 @@ lzms_encode_item_list(struct lzms_compressor *c,
  * lzms_bit_costs is a precomputed table that stores a mapping from probability
  * to cost for each possible probability.  Specifically, the array indices are
  * the numerators of the possible probabilities in LZMS, where the denominators
- * are LZMS_PROBABILITY_MAX; and the stored costs are the bit costs multiplied
- * by 1<<COST_SHIFT and rounded down to the nearest integer.  Furthermore,
- * the values stored for 0/64 and 64/64 probabilities are equal to the adjacent
- * values, since these probabilities are not actually permitted.
+ * are LZMS_PROBABILITY_DENOMINATOR; and the stored costs are the bit costs
+ * multiplied by 1<<COST_SHIFT and rounded down to the nearest integer.
+ * Furthermore, the values stored for 0/64 and 64/64 probabilities are equal to
+ * the adjacent values, since these probabilities are not actually permitted.
  */
-static const u32 lzms_bit_costs[LZMS_PROBABILITY_MAX + 1] = {
+static const u32 lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR + 1] = {
 	384, 384, 320, 282, 256, 235, 218, 204,
 	192, 181, 171, 162, 154, 147, 140, 133,
 	128, 122, 117, 112, 107, 102, 98,  94,
@@ -981,14 +982,14 @@ lzms_check_cost_shift(void)
 static void
 lzms_init_bit_costs(void)
 {
-	for (u32 i = 0; i <= LZMS_PROBABILITY_MAX; i++) {
+	for (u32 i = 0; i <= LZMS_PROBABILITY_DENOMINATOR; i++) {
 		u32 prob = i;
 		if (prob == 0)
 			prob++;
-		else if (prob == LZMS_PROBABILITY_MAX)
+		else if (prob == LZMS_PROBABILITY_DENOMINATOR)
 			prob--;
 
-		lzms_bit_costs[i] = -log2((double)prob / LZMS_PROBABILITY_MAX) *
+		lzms_bit_costs[i] = -log2((double)prob / LZMS_PROBABILITY_DENOMINATOR) *
 					(1 << COST_SHIFT);
 	}
 }
@@ -998,14 +999,14 @@ lzms_init_bit_costs(void)
 static inline u32
 lzms_bit_0_cost(unsigned state, const struct lzms_probability_entry *probs)
 {
-	return lzms_bit_costs[probs[state].num_recent_zero_bits];
+	return lzms_bit_costs[probs[state].prob];
 }
 
 /* Return the cost to encode a 1 bit when in the specified state.  */
 static inline u32
 lzms_bit_1_cost(unsigned state, const struct lzms_probability_entry *probs)
 {
-	return lzms_bit_costs[LZMS_PROBABILITY_MAX - probs[state].num_recent_zero_bits];
+	return lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR - probs[state].prob];
 }
 
 /* Update the table that directly provides the costs for small lengths.  */

@@ -473,9 +473,11 @@ lzms_range_decoder_init(struct lzms_range_decoder *rd,
 	rd->end = in + count;
 }
 
-/* Decode and return the next bit from the range decoder.
+/*
+ * Decode and return the next bit from the range decoder.
  *
- * @prob is the chance out of LZMS_PROBABILITY_MAX that the next bit is 0.
+ * @prob is the probability (out of LZMS_PROBABILITY_DENOMINATOR) that the next
+ * bit is a 0.
  */
 static inline int
 lzms_range_decode_bit(struct lzms_range_decoder *rd, u32 prob)
@@ -968,7 +970,7 @@ lzms_create_decompressor(size_t max_bufsize, void **d_ret)
 {
 	struct lzms_decompressor *d;
 
-	if (max_bufsize > min(LZMS_MAX_MATCH_LEN - 1, LZMS_MAX_MATCH_OFFSET - LZMS_MAX_MATCH_LEN))
+	if (max_bufsize > LZMS_MAX_BUFFER_SIZE)
 		return WIMLIB_ERR_INVALID_PARAM;
 
 	d = ALIGNED_MALLOC(sizeof(struct lzms_decompressor),
@@ -980,9 +982,11 @@ lzms_create_decompressor(size_t max_bufsize, void **d_ret)
 	return 0;
 }
 
-/* Decompress @in_nbytes bytes of LZMS-compressed data at @in and write the
+/*
+ * Decompress @in_nbytes bytes of LZMS-compressed data at @in and write the
  * uncompressed data, which had original size @out_nbytes, to @out.  Return 0 if
- * successful or -1 if the compressed data is invalid.  */
+ * successful or -1 if the compressed data is invalid.
+ */
 static int
 lzms_decompress(const void *in, size_t in_nbytes, void *out, size_t out_nbytes,
 		void *_d)

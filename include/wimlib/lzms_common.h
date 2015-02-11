@@ -28,16 +28,16 @@ lzms_x86_filter(u8 data[], s32 size, s32 last_target_usages[], bool undo);
 /* Probability entry for use by the range coder when in a specific state.  */
 struct lzms_probability_entry {
 
-	/* Number of zeroes in the most recent LZMS_PROBABILITY_MAX bits that
-	 * have been coded using this probability entry.  This is a cached value
-	 * because it can be computed as LZMS_PROBABILITY_MAX minus the number
-	 * of bits set in the low-order LZMS_PROBABILITY_MAX bits of
-	 * @recent_bits.  */
-	u32 num_recent_zero_bits;
+	/* The probability (out of LZMS_PROBABILITY_DENOMINATOR).  This is equal
+	 * to the number of zeroes in the most recent
+	 * LZMS_PROBABILITY_DENOMINATOR bits that have been coded using this
+	 * probability entry.  This is a cached value because it can be computed
+	 * as the number of zeroes in @recent_bits.  */
+	u32 prob;
 
-	/* The most recent LZMS_PROBABILITY_MAX bits that have been coded using
-	 * this probability entry.  The size of this variable, in bits, must be
-	 * at least LZMS_PROBABILITY_MAX.  */
+	/* The most recent LZMS_PROBABILITY_DENOMINATOR bits that have been
+	 * coded using this probability entry.  Low order = newest, high order =
+	 * oldest.  */
 	u64 recent_bits;
 };
 
@@ -81,28 +81,28 @@ lzms_update_probability_entry(struct lzms_probability_entry *prob_entry, int bit
 {
 	s32 delta_zero_bits;
 
-	BUILD_BUG_ON(LZMS_PROBABILITY_MAX != sizeof(prob_entry->recent_bits) * 8);
+	BUILD_BUG_ON(LZMS_PROBABILITY_DENOMINATOR !=
+		     sizeof(prob_entry->recent_bits) * 8);
 
-	delta_zero_bits = (s32)(prob_entry->recent_bits >> (LZMS_PROBABILITY_MAX - 1)) - bit;
+	delta_zero_bits = (s32)(prob_entry->recent_bits >>
+				(LZMS_PROBABILITY_DENOMINATOR - 1)) - bit;
 
-	prob_entry->num_recent_zero_bits += delta_zero_bits;
+	prob_entry->prob += delta_zero_bits;
 	prob_entry->recent_bits <<= 1;
 	prob_entry->recent_bits |= bit;
 }
 
-/* Given a probability entry, return the chance out of LZMS_PROBABILITY_MAX that
- * the next decoded bit will be a 0.  */
+/* Given a probability entry, return the chance out of
+ * LZMS_PROBABILITY_DENOMINATOR that the next decoded bit will be a 0.  */
 static inline u32
 lzms_get_probability(const struct lzms_probability_entry *prob_entry)
 {
-	u32 prob;
-
-	prob = prob_entry->num_recent_zero_bits;
+	u32 prob = prob_entry->prob;
 
 	/* 0% and 100% probabilities aren't allowed.  */
 	if (prob == 0)
 		prob++;
-	if (prob == LZMS_PROBABILITY_MAX)
+	if (prob == LZMS_PROBABILITY_DENOMINATOR)
 		prob--;
 	return prob;
 }

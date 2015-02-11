@@ -35,9 +35,9 @@
 #define LZMS_NUM_DELTA_REP_DECISIONS		(LZMS_NUM_DELTA_REPS - 1)
 
 /* These values define the precision for probabilities in LZMS, which are always
- * given as a numerator; the implied denominator is LZMS_PROBABILITY_MAX.  */
+ * given as a numerator; the denominator is implied.  */
 #define LZMS_PROBABILITY_BITS			6
-#define LZMS_PROBABILITY_MAX			(1 << LZMS_PROBABILITY_BITS)
+#define LZMS_PROBABILITY_DENOMINATOR		(1 << LZMS_PROBABILITY_BITS)
 
 /* These values define the initial state of each probability entry.  */
 #define LZMS_INITIAL_PROBABILITY		48
