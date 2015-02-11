@@ -74,7 +74,7 @@
 /*
  * DELTA_HASH_LENGTH is the length of the hash table for finding delta matches.
  */
-#define DELTA_HASH_ORDER	14
+#define DELTA_HASH_ORDER	16
 #define DELTA_HASH_LENGTH	(1 << DELTA_HASH_ORDER)
 
 /*
@@ -323,6 +323,9 @@ struct lzms_compressor {
 
 	/* Hash table for finding delta matches  */
 	u32 delta_hash_table[DELTA_HASH_LENGTH];
+
+	/* Precomputed hash codes for the next sequence  */
+	u32 next_delta_hashes[NUM_POWERS_TO_CONSIDER];
 
 	/* The per-byte graph nodes for near-optimal parsing  */
 	struct lzms_optimum_node optimum_nodes[NUM_OPTIM_NODES + MAX_FAST_LENGTH];
@@ -1258,16 +1261,19 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 	/* Matchfinder for delta matches  */
 	u32 pos = in_next - c->in_buffer;
 	if (!c->use_delta_matches ||
-	    unlikely(c->in_nbytes - (pos + count) <= NBYTES_HASHED_FOR_DELTA))
+	    unlikely(c->in_nbytes - (pos + count) <= NBYTES_HASHED_FOR_DELTA + 1))
 		return in_next + count;
 	do {
 		/* Update the hash table for each power.  */
 		for (u32 power = 0; power < NUM_POWERS_TO_CONSIDER; power++) {
-			u32 span = (u32)1 << power;
+			const u32 span = (u32)1 << power;
 			if (unlikely(pos < span))
 				continue;
-			u32 hash = lzms_delta_hash(in_next, span);
+			const u32 next_hash = lzms_delta_hash(in_next + 1, span);
+			const u32 hash = c->next_delta_hashes[power];
 			c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
+			c->next_delta_hashes[power] = next_hash;
+			prefetch(&c->delta_hash_table[next_hash]);
 		}
 	} while (in_next++, pos++, --count);
 	return in_next;
@@ -1712,7 +1718,7 @@ begin:
 		}
 
 		/* Explicit offset delta matches  */
-		if (c->use_delta_matches && in_end - in_next >= NBYTES_HASHED_FOR_DELTA) {
+		if (c->use_delta_matches && in_end - in_next >= NBYTES_HASHED_FOR_DELTA + 1) {
 
 			const u32 pos = in_next - c->in_buffer;
 
@@ -1725,12 +1731,13 @@ begin:
 				if (unlikely(pos < span))
 					continue;
 
-				/* Insert the current sequence into the hash
-				 * table for 'span' and get the sequence that
-				 * was in the hash table.  */
-				const u32 hash = lzms_delta_hash(in_next, span);
+				const u32 next_hash = lzms_delta_hash(in_next + 1, span);
+				const u32 hash = c->next_delta_hashes[power];
 				const u32 cur_match = c->delta_hash_table[hash];
+
 				c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
+				c->next_delta_hashes[power] = next_hash;
+				prefetch(&c->delta_hash_table[next_hash]);
 
 				if ((cur_match >> LZMS_DELTA_SOURCE_POWER_SHIFT) != power)
 					continue;
@@ -2202,6 +2209,8 @@ lzms_compress(const void *in, size_t in_nbytes,
 			c->delta_hash_table[i] = NUM_POWERS_TO_CONSIDER <<
 						 LZMS_DELTA_SOURCE_POWER_SHIFT;
 		}
+		for (u32 i = 0; i < NUM_POWERS_TO_CONSIDER; i++)
+			c->next_delta_hashes[i] = 0;
 	}
 
 	/* Initialize the encoder structures.  */
