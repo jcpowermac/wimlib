@@ -179,9 +179,9 @@ struct lzms_adaptive_state {
 	u8 main_state;
 	u8 match_state;
 	u8 lz_match_state;
-	u8 lz_repmatch_states[LZMS_NUM_LZ_REPMATCH_CONTEXTS];
+	u8 lz_rep_states[LZMS_NUM_LZ_REP_CONTEXTS];
 	u8 delta_match_state;
-	u8 delta_repmatch_states[LZMS_NUM_DELTA_REPMATCH_CONTEXTS];
+	u8 delta_rep_states[LZMS_NUM_DELTA_REP_CONTEXTS];
 } _aligned_attribute(64);
 
 /*
@@ -305,17 +305,17 @@ struct lzms_compressor {
 	unsigned main_state;
 	unsigned match_state;
 	unsigned lz_match_state;
-	unsigned lz_repmatch_states[LZMS_NUM_LZ_REPMATCH_CONTEXTS];
+	unsigned lz_rep_states[LZMS_NUM_LZ_REP_CONTEXTS];
 	unsigned delta_match_state;
-	unsigned delta_repmatch_states[LZMS_NUM_DELTA_REPMATCH_CONTEXTS];
+	unsigned delta_rep_states[LZMS_NUM_DELTA_REP_CONTEXTS];
 	struct lzms_probability_entry main_probs[LZMS_NUM_MAIN_STATES];
 	struct lzms_probability_entry match_probs[LZMS_NUM_MATCH_STATES];
 	struct lzms_probability_entry lz_match_probs[LZMS_NUM_LZ_MATCH_STATES];
-	struct lzms_probability_entry lz_repmatch_probs[LZMS_NUM_LZ_REPMATCH_CONTEXTS]
-							      [LZMS_NUM_LZ_REPMATCH_STATES];
+	struct lzms_probability_entry lz_rep_probs[LZMS_NUM_LZ_REP_CONTEXTS]
+						  [LZMS_NUM_LZ_REP_STATES];
 	struct lzms_probability_entry delta_match_probs[LZMS_NUM_DELTA_MATCH_STATES];
-	struct lzms_probability_entry delta_repmatch_probs[LZMS_NUM_DELTA_REPMATCH_CONTEXTS]
-								 [LZMS_NUM_DELTA_REPMATCH_STATES];
+	struct lzms_probability_entry delta_rep_probs[LZMS_NUM_DELTA_REP_CONTEXTS]
+						     [LZMS_NUM_DELTA_REP_STATES];
 
 	/* Huffman codes  */
 
@@ -592,11 +592,11 @@ lzms_encode_lz_match_bit(struct lzms_compressor *c, int bit)
 }
 
 static void
-lzms_encode_lz_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
+lzms_encode_lz_rep_bit(struct lzms_compressor *c, int bit, int idx)
 {
-	lzms_encode_bit(bit, &c->lz_repmatch_states[idx],
-			LZMS_NUM_LZ_REPMATCH_STATES,
-			c->lz_repmatch_probs[idx], &c->rc);
+	lzms_encode_bit(bit, &c->lz_rep_states[idx],
+			LZMS_NUM_LZ_REP_STATES,
+			c->lz_rep_probs[idx], &c->rc);
 }
 
 static void
@@ -607,11 +607,11 @@ lzms_encode_delta_match_bit(struct lzms_compressor *c, int bit)
 }
 
 static void
-lzms_encode_delta_repmatch_bit(struct lzms_compressor *c, int bit, int idx)
+lzms_encode_delta_rep_bit(struct lzms_compressor *c, int bit, int idx)
 {
-	lzms_encode_bit(bit, &c->delta_repmatch_states[idx],
-			LZMS_NUM_DELTA_REPMATCH_STATES,
-			c->delta_repmatch_probs[idx], &c->rc);
+	lzms_encode_bit(bit, &c->delta_rep_states[idx],
+			LZMS_NUM_DELTA_REP_STATES,
+			c->delta_rep_probs[idx], &c->rc);
 }
 
 /******************************************************************************
@@ -855,9 +855,9 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 				/* Repeat offset LZ match  */
 				int rep_idx = source;
 				for (int i = 0; i < rep_idx; i++)
-					lzms_encode_lz_repmatch_bit(c, 1, i);
-				if (rep_idx < LZMS_NUM_LZ_REPMATCH_CONTEXTS)
-					lzms_encode_lz_repmatch_bit(c, 0, rep_idx);
+					lzms_encode_lz_rep_bit(c, 1, i);
+				if (rep_idx < LZMS_NUM_LZ_REP_CONTEXTS)
+					lzms_encode_lz_rep_bit(c, 0, rep_idx);
 			}
 		} else {
 			/* Delta match  */
@@ -879,9 +879,9 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 				/* Repeat offset delta match  */
 				int rep_idx = source;
 				for (int i = 0; i < rep_idx; i++)
-					lzms_encode_delta_repmatch_bit(c, 1, i);
-				if (rep_idx < LZMS_NUM_DELTA_REPMATCH_CONTEXTS)
-					lzms_encode_delta_repmatch_bit(c, 0, rep_idx);
+					lzms_encode_delta_rep_bit(c, 1, i);
+				if (rep_idx < LZMS_NUM_DELTA_REP_CONTEXTS)
+					lzms_encode_delta_rep_bit(c, 0, rep_idx);
 			}
 		}
 
@@ -1076,11 +1076,11 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 	state->main_state = 0;
 	state->match_state = 0;
 	state->lz_match_state = 0;
-	for (int i = 0; i < LZMS_NUM_LZ_REPMATCH_CONTEXTS; i++)
-		state->lz_repmatch_states[i] = 0;
+	for (int i = 0; i < LZMS_NUM_LZ_REP_CONTEXTS; i++)
+		state->lz_rep_states[i] = 0;
 	state->delta_match_state = 0;
-	for (int i = 0; i < LZMS_NUM_DELTA_REPMATCH_CONTEXTS; i++)
-		state->delta_repmatch_states[i] = 0;
+	for (int i = 0; i < LZMS_NUM_DELTA_REP_CONTEXTS; i++)
+		state->delta_rep_states[i] = 0;
 }
 
 /*
@@ -1097,14 +1097,14 @@ static void
 lzms_update_lru_queues(struct lzms_adaptive_state *state)
 {
 	if (state->prev_offset != 0) {
-		for (int i = LZMS_NUM_LZ_REPMATCH_CONTEXTS; i >= 0; i--)
+		for (int i = LZMS_NUM_LZ_REP_CONTEXTS; i >= 0; i--)
 			state->recent_offsets[i + 1] = state->recent_offsets[i];
 		state->recent_offsets[0] = state->prev_offset;
 	}
 	state->prev_offset = state->upcoming_offset;
 
 	if (state->prev_pair != 0) {
-		for (int i = LZMS_NUM_DELTA_REPMATCH_CONTEXTS; i >= 0; i--)
+		for (int i = LZMS_NUM_DELTA_REP_CONTEXTS; i >= 0; i--)
 			state->recent_pairs[i + 1] = state->recent_pairs[i];
 		state->recent_pairs[0] = state->prev_pair;
 	}
@@ -1136,15 +1136,15 @@ lzms_update_lz_match_state(struct lzms_adaptive_state *state, int is_rep)
 }
 
 static inline void
-lzms_update_lz_repmatch_states(struct lzms_adaptive_state *state, int rep_idx)
+lzms_update_lz_rep_states(struct lzms_adaptive_state *state, int rep_idx)
 {
 	for (int i = 0; i < rep_idx; i++)
-		lzms_update_state(&state->lz_repmatch_states[i], 1,
-				  LZMS_NUM_LZ_REPMATCH_STATES);
+		lzms_update_state(&state->lz_rep_states[i], 1,
+				  LZMS_NUM_LZ_REP_STATES);
 
-	if (rep_idx < LZMS_NUM_LZ_REPMATCH_CONTEXTS)
-		lzms_update_state(&state->lz_repmatch_states[rep_idx], 0,
-				  LZMS_NUM_LZ_REPMATCH_STATES);
+	if (rep_idx < LZMS_NUM_LZ_REP_CONTEXTS)
+		lzms_update_state(&state->lz_rep_states[rep_idx], 0,
+				  LZMS_NUM_LZ_REP_STATES);
 }
 
 static inline void
@@ -1155,15 +1155,15 @@ lzms_update_delta_match_state(struct lzms_adaptive_state *state, int is_rep)
 }
 
 static inline void
-lzms_update_delta_repmatch_states(struct lzms_adaptive_state *state, int rep_idx)
+lzms_update_delta_rep_states(struct lzms_adaptive_state *state, int rep_idx)
 {
 	for (int i = 0; i < rep_idx; i++)
-		lzms_update_state(&state->delta_repmatch_states[i], 1,
-				  LZMS_NUM_DELTA_REPMATCH_STATES);
+		lzms_update_state(&state->delta_rep_states[i], 1,
+				  LZMS_NUM_DELTA_REP_STATES);
 
-	if (rep_idx < LZMS_NUM_DELTA_REPMATCH_CONTEXTS)
-		lzms_update_state(&state->delta_repmatch_states[rep_idx], 0,
-				  LZMS_NUM_DELTA_REPMATCH_STATES);
+	if (rep_idx < LZMS_NUM_DELTA_REP_CONTEXTS)
+		lzms_update_state(&state->delta_rep_states[rep_idx], 0,
+				  LZMS_NUM_DELTA_REP_STATES);
 }
 
 /******************************************************************************
@@ -1319,13 +1319,13 @@ begin:
 	LZMS_ASSERT(cur_node->state.main_state == c->main_state);
 	LZMS_ASSERT(cur_node->state.match_state == c->match_state);
 	LZMS_ASSERT(cur_node->state.lz_match_state == c->lz_match_state);
-	for (int i = 0; i < LZMS_NUM_LZ_REPMATCH_CONTEXTS; i++)
-		LZMS_ASSERT(cur_node->state.lz_repmatch_states[i] ==
-			    c->lz_repmatch_states[i]);
+	for (int i = 0; i < LZMS_NUM_LZ_REP_CONTEXTS; i++)
+		LZMS_ASSERT(cur_node->state.lz_rep_states[i] ==
+			    c->lz_rep_states[i]);
 	LZMS_ASSERT(cur_node->state.delta_match_state == c->delta_match_state);
-	for (int i = 0; i < LZMS_NUM_DELTA_REPMATCH_CONTEXTS; i++)
-		LZMS_ASSERT(cur_node->state.delta_repmatch_states[i] ==
-			    c->delta_repmatch_states[i]);
+	for (int i = 0; i < LZMS_NUM_DELTA_REP_CONTEXTS; i++)
+		LZMS_ASSERT(cur_node->state.delta_rep_states[i] ==
+			    c->delta_rep_states[i]);
 
 	if (in_next == in_end)
 		return;
@@ -1375,7 +1375,7 @@ begin:
 					lzms_update_main_state(&cur_node->state, 1);
 					lzms_update_match_state(&cur_node->state, 0);
 					lzms_update_lz_match_state(&cur_node->state, 1);
-					lzms_update_lz_repmatch_states(&cur_node->state, rep_idx);
+					lzms_update_lz_rep_states(&cur_node->state, rep_idx);
 					goto begin;
 				}
 
@@ -1391,12 +1391,12 @@ begin:
 								c->lz_match_probs);
 
 				for (int i = 0; i < rep_idx; i++)
-					base_cost += lzms_bit_1_cost(cur_node->state.lz_repmatch_states[i],
-								     c->lz_repmatch_probs[i]);
+					base_cost += lzms_bit_1_cost(cur_node->state.lz_rep_states[i],
+								     c->lz_rep_probs[i]);
 
-				if (rep_idx < LZMS_NUM_LZ_REPMATCH_CONTEXTS)
-					base_cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[rep_idx],
-								     c->lz_repmatch_probs[rep_idx]);
+				if (rep_idx < LZMS_NUM_LZ_REP_CONTEXTS)
+					base_cost += lzms_bit_0_cost(cur_node->state.lz_rep_states[rep_idx],
+								     c->lz_rep_probs[rep_idx]);
 
 				u32 len = 2;
 				do {
@@ -1427,7 +1427,7 @@ begin:
 					unsigned main_state = cur_node->state.main_state;
 					unsigned match_state = cur_node->state.match_state;
 					unsigned lz_match_state = cur_node->state.lz_match_state;
-					unsigned lz_repmatch0_state = cur_node->state.lz_repmatch_states[0];
+					unsigned lz_rep0_state = cur_node->state.lz_rep_states[0];
 
 					/* update states for rep match  */
 					main_state = ((main_state << 1) | 1) %
@@ -1436,8 +1436,8 @@ begin:
 								LZMS_NUM_MATCH_STATES;
 					lz_match_state = ((lz_match_state << 1) | 1) %
 								LZMS_NUM_LZ_MATCH_STATES;
-					lz_repmatch0_state = ((lz_repmatch0_state << 1) | (rep_idx > 0)) %
-								LZMS_NUM_LZ_REPMATCH_STATES;
+					lz_rep0_state = ((lz_rep0_state << 1) | (rep_idx > 0)) %
+								LZMS_NUM_LZ_REP_STATES;
 
 					/* rep cost  */
 					u32 cost = base_cost + lzms_fast_length_cost(c, rep_len);
@@ -1453,7 +1453,7 @@ begin:
 					cost += lzms_bit_1_cost(main_state, c->main_probs) +
 						lzms_bit_0_cost(match_state, c->match_probs) +
 						lzms_bit_1_cost(lz_match_state, c->lz_match_probs) +
-						lzms_bit_0_cost(lz_repmatch0_state, c->lz_repmatch_probs[0]) +
+						lzms_bit_0_cost(lz_rep0_state, c->lz_rep_probs[0]) +
 						lzms_fast_length_cost(c, rep0_len);
 
 					const u32 total_len = rep_len + 1 + rep0_len;
@@ -1531,7 +1531,7 @@ begin:
 					lzms_update_main_state(&cur_node->state, 1);
 					lzms_update_match_state(&cur_node->state, 1);
 					lzms_update_delta_match_state(&cur_node->state, 1);
-					lzms_update_delta_repmatch_states(&cur_node->state, rep_idx);
+					lzms_update_delta_rep_states(&cur_node->state, rep_idx);
 					goto begin;
 				}
 
@@ -1547,12 +1547,12 @@ begin:
 								c->delta_match_probs);
 
 				for (int i = 0; i < rep_idx; i++)
-					base_cost += lzms_bit_1_cost(cur_node->state.delta_repmatch_states[i],
-								     c->delta_repmatch_probs[i]);
+					base_cost += lzms_bit_1_cost(cur_node->state.delta_rep_states[i],
+								     c->delta_rep_probs[i]);
 
-				if (rep_idx < LZMS_NUM_DELTA_REPMATCH_CONTEXTS)
-					base_cost += lzms_bit_0_cost(cur_node->state.delta_repmatch_states[rep_idx],
-								     c->delta_repmatch_probs[rep_idx]);
+				if (rep_idx < LZMS_NUM_DELTA_REP_CONTEXTS)
+					base_cost += lzms_bit_0_cost(cur_node->state.delta_rep_states[rep_idx],
+								     c->delta_rep_probs[rep_idx]);
 
 				u32 len = 2;
 				do {
@@ -1688,7 +1688,7 @@ begin:
 					cost += lzms_bit_1_cost(main_state, c->main_probs);
 					cost += lzms_bit_0_cost(match_state, c->match_probs);
 					cost += lzms_bit_1_cost(lz_match_state, c->lz_match_probs);
-					cost += lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0], c->lz_repmatch_probs[0]);
+					cost += lzms_bit_0_cost(cur_node->state.lz_rep_states[0], c->lz_rep_probs[0]);
 					cost += lzms_fast_length_cost(c, rep0_len);
 
 					const u32 total_len = len + 1 + rep0_len;
@@ -1860,8 +1860,8 @@ begin:
 								 c->match_probs) +
 						 lzms_bit_1_cost(cur_node->state.lz_match_state,
 								 c->lz_match_probs) +
-						 lzms_bit_0_cost(cur_node->state.lz_repmatch_states[0],
-								 c->lz_repmatch_probs[0]) +
+						 lzms_bit_0_cost(cur_node->state.lz_rep_states[0],
+								 c->lz_rep_probs[0]) +
 						 lzms_fast_length_cost(c, rep0_len);
 
 				const u32 total_len = 1 + rep0_len;
@@ -1927,7 +1927,7 @@ begin:
 						int rep_idx = source;
 
 						lzms_update_delta_match_state(&cur_node->state, 1);
-						lzms_update_delta_repmatch_states(&cur_node->state, rep_idx);
+						lzms_update_delta_rep_states(&cur_node->state, rep_idx);
 
 						cur_node->state.upcoming_pair =
 							cur_node->state.recent_pairs[rep_idx];
@@ -1948,7 +1948,7 @@ begin:
 						int rep_idx = source;
 
 						lzms_update_lz_match_state(&cur_node->state, 1);
-						lzms_update_lz_repmatch_states(&cur_node->state, rep_idx);
+						lzms_update_lz_rep_states(&cur_node->state, rep_idx);
 
 						cur_node->state.upcoming_offset =
 							cur_node->state.recent_offsets[rep_idx];
@@ -2062,22 +2062,20 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 	c->main_state = 0;
 	c->match_state = 0;
 	c->lz_match_state = 0;
-	for (int i = 0; i < LZMS_NUM_LZ_REPMATCH_CONTEXTS; i++)
-		c->lz_repmatch_states[i] = 0;
+	for (int i = 0; i < LZMS_NUM_LZ_REP_CONTEXTS; i++)
+		c->lz_rep_states[i] = 0;
 	c->delta_match_state = 0;
-	for (int i = 0; i < LZMS_NUM_DELTA_REPMATCH_CONTEXTS; i++)
-		c->delta_repmatch_states[i] = 0;
+	for (int i = 0; i < LZMS_NUM_DELTA_REP_CONTEXTS; i++)
+		c->delta_rep_states[i] = 0;
 
 	lzms_init_probability_entries(c->main_probs, LZMS_NUM_MAIN_STATES);
 	lzms_init_probability_entries(c->match_probs, LZMS_NUM_MATCH_STATES);
 	lzms_init_probability_entries(c->lz_match_probs, LZMS_NUM_LZ_MATCH_STATES);
-	for (int i = 0; i < LZMS_NUM_LZ_REPMATCH_CONTEXTS; i++)
-		lzms_init_probability_entries(c->lz_repmatch_probs[i],
-					      LZMS_NUM_LZ_REPMATCH_STATES);
+	for (int i = 0; i < LZMS_NUM_LZ_REP_CONTEXTS; i++)
+		lzms_init_probability_entries(c->lz_rep_probs[i], LZMS_NUM_LZ_REP_STATES);
 	lzms_init_probability_entries(c->delta_match_probs, LZMS_NUM_DELTA_MATCH_STATES);
-	for (int i = 0; i < LZMS_NUM_DELTA_REPMATCH_CONTEXTS; i++)
-		lzms_init_probability_entries(c->delta_repmatch_probs[i],
-					      LZMS_NUM_DELTA_REPMATCH_STATES);
+	for (int i = 0; i < LZMS_NUM_DELTA_REP_CONTEXTS; i++)
+		lzms_init_probability_entries(c->delta_rep_probs[i], LZMS_NUM_DELTA_REP_STATES);
 }
 
 /* Flush the output streams, prepare the final compressed data, and return its
