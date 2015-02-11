@@ -101,9 +101,9 @@ struct lzms_output_bitstream {
  * starts at the beginning of the output buffer and proceeds forwards.  */
 struct lzms_range_encoder {
 
-	/* The low boundary of the current range.  Logically, this is a 33-bit
+	/* The lower boundary of the current range.  Logically, this is a 33-bit
 	 * integer whose high bit is needed to detect carries.  */
-	u64 low;
+	u64 lower_bound;
 
 	/* The size of the current range  */
 	u32 range_size;
@@ -458,7 +458,7 @@ lzms_comp_get_offset_slot_fast(const struct lzms_compressor *c, u32 offset)
 static void
 lzms_range_encoder_init(struct lzms_range_encoder *rc, le16 *out, size_t count)
 {
-	rc->low = 0;
+	rc->lower_bound = 0;
 	rc->range_size = 0xffffffff;
 	rc->cache = 0;
 	rc->cache_size = 1;
@@ -476,24 +476,25 @@ lzms_range_encoder_init(struct lzms_range_encoder *rc, le16 *out, size_t count)
  * LZMS the first coding unit is not ignored by the decompressor, so the encoder
  * cannot output a dummy value to that position.
  *
- * The basic idea is that we're writing bits from @rc->low to the output.
- * However, due to carrying, the writing of coding units with value 0xffff, as
- * well as one prior coding unit, must be delayed until it is determined whether
- * a carry is needed.
+ * The basic idea is that we're writing bits from @rc->lower_bound to the
+ * output.  However, due to carrying, the writing of coding units with value
+ * 0xffff, as well as one prior coding unit, must be delayed until it is
+ * determined whether a carry is needed.
  */
 static void
 lzms_range_encoder_shift_low(struct lzms_range_encoder *rc)
 {
-	if ((u32)(rc->low) < 0xffff0000 ||
-	    (u32)(rc->low >> 32) != 0)
+	if ((u32)(rc->lower_bound) < 0xffff0000 ||
+	    (u32)(rc->lower_bound >> 32) != 0)
 	{
-		/* Carry not needed (rc->low < 0xffff0000), or carry occurred
-		 * ((rc->low >> 32) != 0, a.k.a. the carry bit is 1).  */
+		/* Carry not needed (rc->lower_bound < 0xffff0000), or carry
+		 * occurred ((rc->lower_bound >> 32) != 0, a.k.a. the carry bit
+		 * is 1).  */
 		do {
 			if (likely(rc->next >= rc->begin)) {
 				if (rc->next != rc->end) {
 					put_unaligned_u16_le(rc->cache +
-							     (u16)(rc->low >> 32),
+							     (u16)(rc->lower_bound >> 32),
 							     rc->next++);
 				}
 			} else {
@@ -502,10 +503,10 @@ lzms_range_encoder_shift_low(struct lzms_range_encoder *rc)
 			rc->cache = 0xffff;
 		} while (--rc->cache_size != 0);
 
-		rc->cache = (rc->low >> 16) & 0xffff;
+		rc->cache = (rc->lower_bound >> 16) & 0xffff;
 	}
 	++rc->cache_size;
-	rc->low = (rc->low & 0xffff) << 16;
+	rc->lower_bound = (rc->lower_bound & 0xffff) << 16;
 }
 
 static bool
@@ -534,7 +535,7 @@ lzms_range_encode_bit(struct lzms_range_encoder *rc, int bit, u32 prob)
 	if (bit == 0) {
 		rc->range_size = bound;
 	} else {
-		rc->low += bound;
+		rc->lower_bound += bound;
 		rc->range_size -= bound;
 	}
 }
