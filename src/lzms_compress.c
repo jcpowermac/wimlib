@@ -2227,8 +2227,15 @@ lzms_compress(const void *in, size_t in_nbytes,
 
 	/* Load the buffer into the matchfinder.  */
 	lcpit_matchfinder_load_buffer(&c->mf, c->in_buffer, c->in_nbytes);
-	if (c->use_delta_matches)
-		memset(c->delta_hash_table, 0, sizeof(c->delta_hash_table));
+
+	if (c->use_delta_matches) {
+		for (u32 i = 0; i < DELTA_HASH_LENGTH; i++) {
+			BUILD_BUG_ON(NUM_POWERS_TO_CONSIDER + 1 >
+				     1 << (sizeof(c->delta_hash_table[i]) * 8 - LZMS_DELTA_SOURCE_POWER_SHIFT));
+			c->delta_hash_table[i] = NUM_POWERS_TO_CONSIDER <<
+						 LZMS_DELTA_SOURCE_POWER_SHIFT;
+		}
+	}
 
 	/* Initialize the encoder structures.  */
 	lzms_prepare_encoders(c, out, out_nbytes_avail,
