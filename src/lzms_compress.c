@@ -72,11 +72,17 @@
 #define COST_SHIFT		6
 
 /*
- * These values define the number of entries in each hash table for finding
- * delta matches.  There is one hash table for each allowed span.
+ * Each hash table for finding delta matches contains DELTA_HASH_LENGTH entries.
+ * There is one hash table for each allowed span.
  */
 #define DELTA_HASH_ORDER	10
 #define DELTA_HASH_LENGTH	(1 << DELTA_HASH_ORDER)
+
+/*
+ * The number of bytes to hash when finding delta matches, also taken to be the
+ * minimum length of an explicit offset delta match
+ */
+#define NBYTES_HASHED_FOR_DELTA	3
 
 /* This structure tracks the state of writing bits as a series of 16-bit coding
  * units, starting at the end of the output buffer and proceeding backwards.  */
@@ -129,30 +135,43 @@ struct lzms_range_encoder {
 
 /* Bookkeeping information for an adaptive Huffman code  */
 struct lzms_huffman_rebuild_info {
+
+	/* The remaining number of symbols to encode until this code must be
+	 * rebuilt  */
 	unsigned num_syms_until_rebuild;
+
+	/* The number of symbols in this code  */
 	unsigned num_syms;
+
+	/* The rebuild frequency (in symbols) of this code  */
 	unsigned rebuild_freq;
+
+	/* The Huffman codeword for each symbol  */
 	u32 *codewords;
+
+	/* The length of each Huffman codeword, in bits  */
 	u8 *lens;
+
+	/* The frequency of each symbol  */
 	u32 *freqs;
 };
 
 /*
- * A match or literal.
+ * The compressor-internal representation of a match or literal.
  *
  * Literals have length=1; matches have length > 1.
  *
  * The source is encoded as follows:
- * - For literals, the literal byte itself
- * - For explicit offset LZ matches, the match offset plus
- *   (LZMS_NUM_LZ_REPS - 1)
- * - For repeat offset LZ matches, the index of the offset in recent_lz_offsets
- * - For explicit offset delta matches, LZMS_DELTA_SOURCE_TAG is set, the next 3
+ *
+ * - Literals: the literal byte itself
+ * - Explicit offset LZ matches: the match offset plus (LZMS_NUM_LZ_REPS - 1)
+ * - Repeat offset LZ matches: the index of the offset in recent_lz_offsets
+ * - Explicit offset delta matches: LZMS_DELTA_SOURCE_TAG is set, the next 3
  *   bits are the power, and the remainder is the raw offset plus
  *   (LZMS_NUM_DELTA_REPS - 1)
- * - For repeat offset delta matches, LZMS_DELTA_SOURCE_TAG is set and the
- *   remainder is the index of the (power, raw_offset) pair in recent_delta_pairs
- *   queue of recent (power, raw offset) pairs
+ * - Repeat offset delta matches: LZMS_DELTA_SOURCE_TAG is set, and the
+ *   remainder is the index of the (power, raw_offset) pair in
+ *   recent_delta_pairs
  */
 struct lzms_item {
 	u32 length;
@@ -163,19 +182,30 @@ struct lzms_item {
 #define LZMS_DELTA_SOURCE_POWER_SHIFT		28
 #define LZMS_DELTA_SOURCE_RAW_OFFSET_MASK	(((u32)1 << LZMS_DELTA_SOURCE_POWER_SHIFT) - 1)
 
+static inline void
+check_that_powers_fit_in_bitfield(void)
+{
+	BUILD_BUG_ON(LZMS_NUM_DELTA_POWER_SYMS >
+		     (1 << (31 - LZMS_DELTA_SOURCE_POWER_SHIFT)));
+}
+
+/* A stripped-down version of the adaptive state, excluding the probability
+ * entries and Huffman codes  */
 struct lzms_adaptive_state {
 
-	/* LRU queue for offsets of LZ matches  */
+	/* Recent offsets for LZ matches  */
 	u32 recent_lz_offsets[LZMS_NUM_LZ_REPS + 1];
-	u32 prev_lz_offset;
-	u32 upcoming_lz_offset;
+	u32 prev_lz_offset; /* 0 means none */
+	u32 upcoming_lz_offset; /* 0 means none */
 
-	/* LRU queue for (power, raw_offset) references of delta matches  */
+	/* Recent (power, raw offset) pairs for delta matches.
+	 * The low LZMS_DELTA_SOURCE_POWER_SHIFT bits of each entry are the raw
+	 * offset, and the high bits are the power.  */
 	u32 recent_delta_pairs[LZMS_NUM_DELTA_REPS + 1];
-	u32 prev_delta_pair;
-	u32 upcoming_delta_pair;
+	u32 prev_delta_pair; /* 0 means none */
+	u32 upcoming_delta_pair; /* 0 means none  */
 
-	/* States for range coding item type decisions  */
+	/* States for predicting the probabilities of item types  */
 	u8 main_state;
 	u8 match_state;
 	u8 lz_state;
@@ -209,9 +239,9 @@ struct lzms_optimum_node {
 	 * cost paths are found to reach this position.
 	 *
 	 * In some cases we look ahead more than one item.  If we looked ahead n
-	 * items to reach this position, then @item is the last item taken, and
+	 * items to reach this position, then @item is the last item taken,
 	 * @extra_items contains the other items ordered from second-to-last to
-	 * first.  @num_extra_items is n - 1.
+	 * first, and @num_extra_items is n - 1.
 	 */
 	unsigned num_extra_items;
 	struct lzms_item item;
@@ -237,7 +267,7 @@ struct lzms_optimum_node {
 	struct lzms_adaptive_state state;
 } _aligned_attribute(64);
 
-/* The main LZMS compressor structure  */
+/* The main compressor structure  */
 struct lzms_compressor {
 
 	/* The matchfinder for LZ matches  */
@@ -270,12 +300,12 @@ struct lzms_compressor {
 	/*
 	 * Parameter: if true, the compressor can output delta matches.  This
 	 * often improves the compression ratio slightly, but it slows down
-	 * compression.  See lzms_decompress.c for general information about
-	 * delta matches.
+	 * compression.  See the documentation in the decompressor for general
+	 * information about delta matches.
 	 */
 	bool use_delta_matches;
 
-	/* 'last_target_usages' a large array that is only needed for
+	/* 'last_target_usages' is a large array that is only needed for
 	 * preprocessing, so it is in union with fields that don't need to be
 	 * initialized until after preprocessing.  */
 	union {
@@ -343,6 +373,7 @@ struct lzms_compressor {
 	u32 delta_power_codewords[LZMS_NUM_DELTA_POWER_SYMS];
 	u8 delta_power_lens[LZMS_NUM_DELTA_POWER_SYMS];
 	u32 delta_power_freqs[LZMS_NUM_DELTA_POWER_SYMS];
+
 	}; /* struct */
 
 	s32 last_target_usages[65536];
@@ -469,11 +500,11 @@ lzms_range_encoder_init(struct lzms_range_encoder *rc, le16 *out, size_t count)
 /*
  * Attempt to flush bits from the range encoder.
  *
- * Note: this is based on the public domain code for LZMA written by Igor
- * Pavlov.  The only differences in this function are that in LZMS the bits must
- * be output in 16-bit coding units instead of 8-bit coding units, and that in
- * LZMS the first coding unit is not ignored by the decompressor, so the encoder
- * cannot output a dummy value to that position.
+ * This is based on the public domain code for LZMA written by Igor Pavlov.  The
+ * only differences in this function are that in LZMS the bits must be output in
+ * 16-bit coding units instead of 8-bit coding units, and that in LZMS the first
+ * coding unit is not ignored by the decompressor, so the encoder cannot output
+ * a dummy value to that position.
  *
  * The basic idea is that we're writing bits from @rc->lower_bound to the
  * output.  However, due to carrying, the writing of coding units with value
@@ -511,7 +542,7 @@ lzms_range_encoder_shift_low(struct lzms_range_encoder *rc)
 static bool
 lzms_range_encoder_flush(struct lzms_range_encoder *rc)
 {
-	for (unsigned i = 0; i < 4; i++)
+	for (int i = 0; i < 4; i++)
 		lzms_range_encoder_shift_low(rc);
 	return rc->next != rc->end;
 }
@@ -568,7 +599,7 @@ lzms_encode_bit(int bit, unsigned *state_p, unsigned num_states,
 	lzms_range_encode_bit(rc, bit, prob);
 }
 
-/* Helper functions for encoding bits in the various contexts  */
+/* Helper functions for encoding bits in the various decision classes  */
 
 static void
 lzms_encode_main_bit(struct lzms_compressor *c, int bit)
@@ -594,8 +625,7 @@ lzms_encode_lz_match_bit(struct lzms_compressor *c, int bit)
 static void
 lzms_encode_lz_rep_bit(struct lzms_compressor *c, int bit, int idx)
 {
-	lzms_encode_bit(bit, &c->lz_rep_states[idx],
-			LZMS_NUM_LZ_REP_PROBS,
+	lzms_encode_bit(bit, &c->lz_rep_states[idx], LZMS_NUM_LZ_REP_PROBS,
 			c->lz_rep_probs[idx], &c->rc);
 }
 
@@ -609,8 +639,7 @@ lzms_encode_delta_match_bit(struct lzms_compressor *c, int bit)
 static void
 lzms_encode_delta_rep_bit(struct lzms_compressor *c, int bit, int idx)
 {
-	lzms_encode_bit(bit, &c->delta_rep_states[idx],
-			LZMS_NUM_DELTA_REP_PROBS,
+	lzms_encode_bit(bit, &c->delta_rep_states[idx], LZMS_NUM_DELTA_REP_PROBS,
 			c->delta_rep_probs[idx], &c->rc);
 }
 
@@ -681,30 +710,43 @@ lzms_output_bitstream_flush(struct lzms_output_bitstream *os)
 }
 
 static void
-lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
-			       unsigned num_syms, unsigned rebuild_freq,
-			       u32 *freqs, u32 *codewords, u8 *lens)
+lzms_build_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info)
 {
-	info->num_syms_until_rebuild = rebuild_freq;
-	info->num_syms = num_syms;
-	info->rebuild_freq = rebuild_freq;
-	info->codewords = codewords;
-	info->lens = lens;
-	info->freqs = freqs;
-	for (unsigned sym = 0; sym < num_syms; sym++)
-		freqs[sym] = 1;
-	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LENGTH,
-				    info->freqs, info->lens, info->codewords);
+	make_canonical_huffman_code(rebuild_info->num_syms,
+				    LZMS_MAX_CODEWORD_LENGTH,
+				    rebuild_info->freqs,
+				    rebuild_info->lens,
+				    rebuild_info->codewords);
+	rebuild_info->num_syms_until_rebuild = rebuild_info->rebuild_freq;
 }
 
-static noinline void
-lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
+static void
+lzms_init_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info,
+		       unsigned num_syms, unsigned rebuild_freq,
+		       u32 *codewords, u8 *lens, u32 *freqs)
 {
-	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LENGTH,
-				    info->freqs, info->lens, info->codewords);
-	for (unsigned i = 0; i < info->num_syms; i++)
-		info->freqs[i] = (info->freqs[i] >> 1) + 1;
-	info->num_syms_until_rebuild = info->rebuild_freq;
+	rebuild_info->num_syms = num_syms;
+	rebuild_info->rebuild_freq = rebuild_freq;
+	rebuild_info->codewords = codewords;
+	rebuild_info->lens = lens;
+	rebuild_info->freqs = freqs;
+
+	/* Initially, all symbols are equally likely.  */
+	for (unsigned sym = 0; sym < num_syms; sym++)
+		freqs[sym] = 1;
+
+	lzms_build_huffman_code(rebuild_info);
+}
+
+static void
+lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info)
+{
+	lzms_build_huffman_code(rebuild_info);
+
+	/* Dilute the symbol frequencies.  */
+	u32 *freqs = rebuild_info->freqs;
+	for (unsigned sym = 0; sym < rebuild_info->num_syms; sym++)
+		freqs[sym] = (freqs[sym] >> 1) + 1;
 }
 
 /*
@@ -842,7 +884,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 		if (!match_bit) {
 			/* LZ match  */
 
-			/* LZ match bit: 0 = explicit offset, 1 = repeat offset  */
+			/* LZ bit: 0 = explicit offset, 1 = repeat offset  */
 			int lz_bit = (source < LZMS_NUM_LZ_REPS);
 			lzms_encode_lz_match_bit(c, lz_bit);
 
@@ -863,7 +905,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 
 			source &= ~LZMS_DELTA_SOURCE_TAG;
 
-			/* Delta match bit: 0 = explicit offset, 1 = repeat offset  */
+			/* Delta bit: 0 = explicit offset, 1 = repeat offset  */
 			int delta_bit = (source < LZMS_NUM_DELTA_REPS);
 			lzms_encode_delta_match_bit(c, delta_bit);
 
@@ -871,7 +913,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 				/* Explicit offset delta match  */
 				u32 power = source >> LZMS_DELTA_SOURCE_POWER_SHIFT;
 				u32 raw_offset = (source & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK) -
-						(LZMS_NUM_DELTA_REPS - 1);
+						 (LZMS_NUM_DELTA_REPS - 1);
 				lzms_encode_delta_power_symbol(c, power);
 				lzms_encode_delta_offset(c, raw_offset);
 			} else {
@@ -952,8 +994,8 @@ lzms_encode_item_list(struct lzms_compressor *c,
  * the numerators of the possible probabilities in LZMS, where the denominators
  * are LZMS_PROBABILITY_DENOMINATOR; and the stored costs are the bit costs
  * multiplied by 1<<COST_SHIFT and rounded down to the nearest integer.
- * Furthermore, the values stored for 0/64 and 64/64 probabilities are equal to
- * the adjacent values, since these probabilities are not actually permitted.
+ * Furthermore, the values stored for 0% and 100% probabilities are equal to the
+ * adjacent values, since these probabilities are not actually permitted.
  */
 static const u32 lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR + 1] = {
 	384, 384, 320, 282, 256, 235, 218, 204,
@@ -968,7 +1010,7 @@ static const u32 lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR + 1] = {
 };
 
 static inline void
-lzms_check_cost_shift(void)
+check_cost_shift(void)
 {
 	/* lzms_bit_costs is hard-coded to the current COST_SHIFT.  */
 	BUILD_BUG_ON(COST_SHIFT != 6);
@@ -978,13 +1020,13 @@ lzms_check_cost_shift(void)
 #include <math.h>
 
 static void
-lzms_init_bit_costs(void)
+lzms_compute_bit_costs(void)
 {
 	for (u32 i = 0; i <= LZMS_PROBABILITY_DENOMINATOR; i++) {
 		u32 prob = i;
 		if (prob == 0)
 			prob++;
-		else if (prob == LZMS_PROBABILITY_DENOMINATOR)
+		if (prob == LZMS_PROBABILITY_DENOMINATOR)
 			prob--;
 
 		lzms_bit_costs[i] = -log2((double)prob / LZMS_PROBABILITY_DENOMINATOR) *
@@ -993,21 +1035,21 @@ lzms_init_bit_costs(void)
 }
 #endif
 
-/* Return the cost to encode a 0 bit when in the specified state.  */
+/* Return the cost to encode a 0 bit in the specified context.  */
 static inline u32
 lzms_bit_0_cost(unsigned state, const struct lzms_probability_entry *probs)
 {
 	return lzms_bit_costs[probs[state].prob];
 }
 
-/* Return the cost to encode a 1 bit when in the specified state.  */
+/* Return the cost to encode a 1 bit in the specified context.  */
 static inline u32
 lzms_bit_1_cost(unsigned state, const struct lzms_probability_entry *probs)
 {
 	return lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR - probs[state].prob];
 }
 
-/* Update the table that directly provides the costs for small lengths.  */
+/* Update 'fast_length_cost_tab' to use the latest Huffman code.  */
 static void
 lzms_update_fast_length_costs(struct lzms_compressor *c)
 {
@@ -1058,19 +1100,16 @@ lzms_delta_source_cost(const struct lzms_compressor *c, u32 power, u32 raw_offse
 static void
 lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 {
-	/* Recent offsets for LZ matches  */
 	for (int i = 0; i < LZMS_NUM_LZ_REPS + 1; i++)
 		state->recent_lz_offsets[i] = i + 1;
 	state->prev_lz_offset = 0;
 	state->upcoming_lz_offset = 0;
 
-	/* Recent (power, raw offset) pairs for delta matches  */
 	for (int i = 0; i < LZMS_NUM_DELTA_REPS + 1; i++)
 		state->recent_delta_pairs[i] = i + 1;
 	state->prev_delta_pair = 0;
 	state->upcoming_delta_pair = 0;
 
-	/* States for predicting the probabilities of item types  */
 	state->main_state = 0;
 	state->match_state = 0;
 	state->lz_state = 0;
@@ -1082,8 +1121,7 @@ lzms_init_adaptive_state(struct lzms_adaptive_state *state)
 }
 
 /*
- * Update the LRU queues for match sources when advancing by one literal or
- * match.
+ * Update the LRU queues for match sources when advancing by one item.
  *
  * Note: using LZMA as a point of comparison, the LRU queues in LZMS are more
  * complex because:
@@ -1095,14 +1133,14 @@ static void
 lzms_update_lru_queues(struct lzms_adaptive_state *state)
 {
 	if (state->prev_lz_offset != 0) {
-		for (int i = LZMS_NUM_LZ_REP_DECISIONS; i >= 0; i--)
+		for (int i = LZMS_NUM_LZ_REPS - 1; i >= 0; i--)
 			state->recent_lz_offsets[i + 1] = state->recent_lz_offsets[i];
 		state->recent_lz_offsets[0] = state->prev_lz_offset;
 	}
 	state->prev_lz_offset = state->upcoming_lz_offset;
 
 	if (state->prev_delta_pair != 0) {
-		for (int i = LZMS_NUM_DELTA_REP_DECISIONS; i >= 0; i--)
+		for (int i = LZMS_NUM_DELTA_REPS - 1; i >= 0; i--)
 			state->recent_delta_pairs[i + 1] = state->recent_delta_pairs[i];
 		state->recent_delta_pairs[0] = state->prev_delta_pair;
 	}
@@ -1137,31 +1175,26 @@ static inline void
 lzms_update_lz_rep_states(struct lzms_adaptive_state *state, int rep_idx)
 {
 	for (int i = 0; i < rep_idx; i++)
-		lzms_update_state(&state->lz_rep_states[i], 1,
-				  LZMS_NUM_LZ_REP_PROBS);
+		lzms_update_state(&state->lz_rep_states[i], 1, LZMS_NUM_LZ_REP_PROBS);
 
 	if (rep_idx < LZMS_NUM_LZ_REP_DECISIONS)
-		lzms_update_state(&state->lz_rep_states[rep_idx], 0,
-				  LZMS_NUM_LZ_REP_PROBS);
+		lzms_update_state(&state->lz_rep_states[rep_idx], 0, LZMS_NUM_LZ_REP_PROBS);
 }
 
 static inline void
 lzms_update_delta_match_state(struct lzms_adaptive_state *state, int is_rep)
 {
-	lzms_update_state(&state->delta_state, is_rep,
-			  LZMS_NUM_DELTA_PROBS);
+	lzms_update_state(&state->delta_state, is_rep, LZMS_NUM_DELTA_PROBS);
 }
 
 static inline void
 lzms_update_delta_rep_states(struct lzms_adaptive_state *state, int rep_idx)
 {
 	for (int i = 0; i < rep_idx; i++)
-		lzms_update_state(&state->delta_rep_states[i], 1,
-				  LZMS_NUM_DELTA_REP_PROBS);
+		lzms_update_state(&state->delta_rep_states[i], 1, LZMS_NUM_DELTA_REP_PROBS);
 
 	if (rep_idx < LZMS_NUM_DELTA_REP_DECISIONS)
-		lzms_update_state(&state->delta_rep_states[rep_idx], 0,
-				  LZMS_NUM_DELTA_REP_PROBS);
+		lzms_update_state(&state->delta_rep_states[rep_idx], 0, LZMS_NUM_DELTA_REP_PROBS);
 }
 
 /******************************************************************************
@@ -1171,17 +1204,20 @@ lzms_update_delta_rep_states(struct lzms_adaptive_state *state, int rep_idx)
 /* Note: most of the matchfinding logic is elsewhere.  The code here just
  * handles delta matches.  */
 
+
 /*
- * Compute a hash code for the first 3 bytes of the sequence beginning at @p
- * when taken in a delta context with the specified @span.
+ * Compute a hash code for the first NBYTES_HASHED_FOR_DELTA bytes of the
+ * sequence beginning at @p when taken in a delta context with the specified
+ * @span.
  */
 static inline u32
-lzms_delta_hash3(const u8 *p, u32 span)
+lzms_delta_hash(const u8 *p, u32 span)
 {
-	u8 d1 = *(p + 0) - *(p + 0 - span);
-	u8 d2 = *(p + 1) - *(p + 1 - span);
-	u8 d3 = *(p + 2) - *(p + 2 - span);
-	u32 v = ((u32)d3 << 16) | ((u32)d2 << 8) | d1;
+	BUILD_BUG_ON(NBYTES_HASHED_FOR_DELTA != 3);
+	u8 d0 = *(p + 0) - *(p + 0 - span);
+	u8 d1 = *(p + 1) - *(p + 1 - span);
+	u8 d2 = *(p + 2) - *(p + 2 - span);
+	u32 v = ((u32)d2 << 16) | ((u32)d1 << 8) | d0;
 	return lz_hash(v, DELTA_HASH_ORDER);
 }
 
@@ -1205,27 +1241,26 @@ lzms_extend_delta_match(const u8 *in_next, const u8 *matchptr,
 
 /*
  * Skip the next @count bytes (don't search for matches at them).  @in_next
- * points to the first byte to skip.  The return value is a pointer to the first
- * byte following those that were skipped.
+ * points to the first byte to skip.  The return value is @in_next + count.
  */
 static const u8 *
 lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 {
-	/* Skip LZ matches  */
+	/* Matchfinder for LZ matches  */
 	lcpit_matchfinder_skip_bytes(&c->mf, count);
 
+	/* Matchfinder for delta matches  */
 	const u32 pos = in_next - c->in_buffer;
-	if (!c->use_delta_matches || unlikely(c->in_nbytes - (pos + count) <= 3))
+	if (!c->use_delta_matches ||
+	    unlikely(c->in_nbytes - (pos + count) <= NBYTES_HASHED_FOR_DELTA))
 		return in_next + count;
-
-	/* Skip delta matches  */
 	do {
 		/* Update the hash table for each power.  */
 		for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
 			u32 span = (u32)1 << power;
 			if (unlikely(pos < span))
 				continue;
-			u32 hash = lzms_delta_hash3(in_next, span);
+			u32 hash = lzms_delta_hash(in_next, span);
 			c->delta_hash_tables[power][hash] = pos;
 		}
 	} while (in_next++, --count);
@@ -1467,7 +1502,7 @@ begin:
 		/* Repeat offset delta matches  */
 		if (c->use_delta_matches &&
 		    likely(in_next - c->in_buffer >= LZMS_NUM_DELTA_REPS &&
-			   (in_end - in_next >= 3)))
+			   (in_end - in_next >= 2)))
 		{
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_DELTA_REPS; rep_idx++) {
 
@@ -1700,7 +1735,7 @@ begin:
 		}
 
 		/* Explicit offset delta matches  */
-		if (c->use_delta_matches && in_end - in_next >= 3) {
+		if (c->use_delta_matches && in_end - in_next >= NBYTES_HASHED_FOR_DELTA) {
 
 			const u32 pos = in_next - c->in_buffer;
 
@@ -1715,7 +1750,7 @@ begin:
 				/* Insert the current sequence into the hash
 				 * table for 'span' and get the sequence that
 				 * was in the hash table.  */
-				const u32 hash = lzms_delta_hash3(in_next, span);
+				const u32 hash = lzms_delta_hash(in_next, span);
 				const u32 cur_match = c->delta_hash_tables[power][hash];
 				c->delta_hash_tables[power][hash] = pos;
 
@@ -1733,6 +1768,7 @@ begin:
 
 				/* Check the first 3 bytes before entering the
 				 * extension loop.  */
+				BUILD_BUG_ON(NBYTES_HASHED_FOR_DELTA != 3);
 				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
 				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
 				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
@@ -2005,40 +2041,40 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 
 	/* Initialize the Huffman codes.  */
 
-	lzms_init_huffman_rebuild_info(&c->literal_rebuild_info,
-				       LZMS_NUM_LITERAL_SYMS,
-				       LZMS_LITERAL_CODE_REBUILD_FREQ,
-				       c->literal_freqs,
-				       c->literal_codewords,
-				       c->literal_lens);
+	lzms_init_huffman_code(&c->literal_rebuild_info,
+			       LZMS_NUM_LITERAL_SYMS,
+			       LZMS_LITERAL_CODE_REBUILD_FREQ,
+			       c->literal_codewords,
+			       c->literal_lens,
+			       c->literal_freqs);
 
-	lzms_init_huffman_rebuild_info(&c->lz_offset_rebuild_info,
-				       num_offset_slots,
-				       LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
-				       c->lz_offset_freqs,
-				       c->lz_offset_codewords,
-				       c->lz_offset_lens);
+	lzms_init_huffman_code(&c->lz_offset_rebuild_info,
+			       num_offset_slots,
+			       LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
+			       c->lz_offset_codewords,
+			       c->lz_offset_lens,
+			       c->lz_offset_freqs);
 
-	lzms_init_huffman_rebuild_info(&c->length_rebuild_info,
-				       LZMS_NUM_LENGTH_SYMS,
-				       LZMS_LENGTH_CODE_REBUILD_FREQ,
-				       c->length_freqs,
-				       c->length_codewords,
-				       c->length_lens);
+	lzms_init_huffman_code(&c->length_rebuild_info,
+			       LZMS_NUM_LENGTH_SYMS,
+			       LZMS_LENGTH_CODE_REBUILD_FREQ,
+			       c->length_codewords,
+			       c->length_lens,
+			       c->length_freqs);
 
-	lzms_init_huffman_rebuild_info(&c->delta_offset_rebuild_info,
-				       num_offset_slots,
-				       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
-				       c->delta_offset_freqs,
-				       c->delta_offset_codewords,
-				       c->delta_offset_lens);
+	lzms_init_huffman_code(&c->delta_offset_rebuild_info,
+			       num_offset_slots,
+			       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
+			       c->delta_offset_codewords,
+			       c->delta_offset_lens,
+			       c->delta_offset_freqs);
 
-	lzms_init_huffman_rebuild_info(&c->delta_power_rebuild_info,
-				       LZMS_NUM_DELTA_POWER_SYMS,
-				       LZMS_DELTA_POWER_CODE_REBUILD_FREQ,
-				       c->delta_power_freqs,
-				       c->delta_power_codewords,
-				       c->delta_power_lens);
+	lzms_init_huffman_code(&c->delta_power_rebuild_info,
+			       LZMS_NUM_DELTA_POWER_SYMS,
+			       LZMS_DELTA_POWER_CODE_REBUILD_FREQ,
+			       c->delta_power_codewords,
+			       c->delta_power_lens,
+			       c->delta_power_freqs);
 
 	/* Initialize the states and probability entries.  */
 
