@@ -74,7 +74,7 @@
 /*
  * DELTA_HASH_LENGTH is the length of the hash table for finding delta matches.
  */
-#define DELTA_HASH_ORDER	13
+#define DELTA_HASH_ORDER	14
 #define DELTA_HASH_LENGTH	(1 << DELTA_HASH_ORDER)
 
 /*
@@ -82,6 +82,8 @@
  * minimum length of an explicit offset delta match
  */
 #define NBYTES_HASHED_FOR_DELTA	3
+
+#define NUM_POWERS_TO_CONSIDER	6
 
 /* This structure tracks the state of writing bits as a series of 16-bit coding
  * units, starting at the end of the output buffer and proceeding backwards.  */
@@ -1220,14 +1222,14 @@ lzms_update_delta_rep_states(struct lzms_adaptive_state *state, int rep_idx)
  * @span.
  */
 static inline u32
-lzms_delta_hash(const u8 *p, u32 power)
+lzms_delta_hash(const u8 *p, u32 span)
 {
-	u32 span = (u32)1 << power;
 	BUILD_BUG_ON(NBYTES_HASHED_FOR_DELTA != 3);
 	u8 d0 = *(p + 0) - *(p + 0 - span);
 	u8 d1 = *(p + 1) - *(p + 1 - span);
 	u8 d2 = *(p + 2) - *(p + 2 - span);
-	u32 v = (power << 24) | ((u32)d2 << 16) | ((u32)d1 << 8) | d0;
+	u32 v = ((span + ((u32)(uintptr_t)p & (span - 1))) << 24) |
+		((u32)d2 << 16) | ((u32)d1 << 8) | d0;
 	return lz_hash(v, DELTA_HASH_ORDER);
 }
 
@@ -1266,11 +1268,11 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 		return in_next + count;
 	do {
 		/* Update the hash table for each power.  */
-		for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
+		for (u32 power = 0; power < NUM_POWERS_TO_CONSIDER; power++) {
 			u32 span = (u32)1 << power;
 			if (unlikely(pos < span))
 				continue;
-			u32 hash = lzms_delta_hash(in_next, power);
+			u32 hash = lzms_delta_hash(in_next, span);
 			c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
 		}
 	} while (in_next++, pos++, --count);
@@ -1744,7 +1746,7 @@ begin:
 			const u32 pos = in_next - c->in_buffer;
 
 			/* Consider each possible power (log2 of span)  */
-			for (u32 power = 0; power < LZMS_NUM_DELTA_POWER_SYMS; power++) {
+			for (u32 power = 0; power < NUM_POWERS_TO_CONSIDER; power++) {
 
 				const u32 span = (u32)1 << power;
 
@@ -1754,13 +1756,11 @@ begin:
 				/* Insert the current sequence into the hash
 				 * table for 'span' and get the sequence that
 				 * was in the hash table.  */
-				const u32 hash = lzms_delta_hash(in_next, power);
+				const u32 hash = lzms_delta_hash(in_next, span);
 				const u32 cur_match = c->delta_hash_table[hash];
 				c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
 
-				/* If cur_match == 0, then no sequence was in
-				 * the hash table.  */
-				if (cur_match == 0 || (cur_match >> LZMS_DELTA_SOURCE_POWER_SHIFT) != power)
+				if ((cur_match >> LZMS_DELTA_SOURCE_POWER_SHIFT) != power)
 					continue;
 
 				const u32 offset = pos - (cur_match & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK);
