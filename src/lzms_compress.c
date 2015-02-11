@@ -74,7 +74,7 @@
 /*
  * DELTA_HASH_LENGTH is the length of the hash table for finding delta matches.
  */
-#define DELTA_HASH_ORDER	16
+#define DELTA_HASH_ORDER	17
 #define DELTA_HASH_LENGTH	(1 << DELTA_HASH_ORDER)
 
 /*
@@ -171,27 +171,24 @@ struct lzms_huffman_rebuild_info {
  * - Literals: the literal byte itself
  * - Explicit offset LZ matches: the match offset plus (LZMS_NUM_LZ_REPS - 1)
  * - Repeat offset LZ matches: the index of the offset in recent_lz_offsets
- * - Explicit offset delta matches: LZMS_DELTA_SOURCE_TAG is set, the next 3
- *   bits are the power, and the remainder is the raw offset plus
- *   (LZMS_NUM_DELTA_REPS - 1)
- * - Repeat offset delta matches: LZMS_DELTA_SOURCE_TAG is set, and the
- *   remainder is the index of the (power, raw_offset) pair in
- *   recent_delta_pairs
+ * - Explicit offset delta matches: DELTA_SOURCE_TAG is set, the next 3 bits are
+ *   the power, and the remainder is the raw offset plus (LZMS_NUM_DELTA_REPS-1)
+ * - Repeat offset delta matches: DELTA_SOURCE_TAG is set, and the remainder is
+ *   the index of the (power, raw_offset) pair in recent_delta_pairs
  */
 struct lzms_item {
 	u32 length;
 	u32 source;
 };
 
-#define LZMS_DELTA_SOURCE_TAG			((u32)1 << 31)
-#define LZMS_DELTA_SOURCE_POWER_SHIFT		28
-#define LZMS_DELTA_SOURCE_RAW_OFFSET_MASK	(((u32)1 << LZMS_DELTA_SOURCE_POWER_SHIFT) - 1)
+#define DELTA_SOURCE_TAG		((u32)1 << 31)
+#define DELTA_SOURCE_POWER_SHIFT	28
+#define DELTA_SOURCE_RAW_OFFSET_MASK	(((u32)1 << DELTA_SOURCE_POWER_SHIFT) - 1)
 
 static inline void
 check_that_powers_fit_in_bitfield(void)
 {
-	BUILD_BUG_ON(LZMS_NUM_DELTA_POWER_SYMS >
-		     (1 << (31 - LZMS_DELTA_SOURCE_POWER_SHIFT)));
+	BUILD_BUG_ON(LZMS_NUM_DELTA_POWER_SYMS > (1 << (31 - DELTA_SOURCE_POWER_SHIFT)));
 }
 
 /* A stripped-down version of the adaptive state, excluding the probability
@@ -204,7 +201,7 @@ struct lzms_adaptive_state {
 	u32 upcoming_lz_offset; /* 0 means none */
 
 	/* Recent (power, raw offset) pairs for delta matches.
-	 * The low LZMS_DELTA_SOURCE_POWER_SHIFT bits of each entry are the raw
+	 * The low DELTA_SOURCE_POWER_SHIFT bits of each entry are the raw
 	 * offset, and the high bits are the power.  */
 	u32 recent_delta_pairs[LZMS_NUM_DELTA_REPS + 1];
 	u32 prev_delta_pair; /* 0 means none */
@@ -878,7 +875,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 		/* Match  */
 
 		/* Match bit: 0 = LZ match, 1 = delta match  */
-		int match_bit = (source & LZMS_DELTA_SOURCE_TAG) != 0;
+		int match_bit = (source & DELTA_SOURCE_TAG) != 0;
 		lzms_encode_match_bit(c, match_bit);
 
 		if (!match_bit) {
@@ -903,7 +900,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 		} else {
 			/* Delta match  */
 
-			source &= ~LZMS_DELTA_SOURCE_TAG;
+			source &= ~DELTA_SOURCE_TAG;
 
 			/* Delta bit: 0 = explicit offset, 1 = repeat offset  */
 			int delta_bit = (source < LZMS_NUM_DELTA_REPS);
@@ -911,8 +908,8 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 
 			if (!delta_bit) {
 				/* Explicit offset delta match  */
-				u32 power = source >> LZMS_DELTA_SOURCE_POWER_SHIFT;
-				u32 raw_offset = (source & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK) -
+				u32 power = source >> DELTA_SOURCE_POWER_SHIFT;
+				u32 raw_offset = (source & DELTA_SOURCE_RAW_OFFSET_MASK) -
 						 (LZMS_NUM_DELTA_REPS - 1);
 				lzms_encode_delta_power_symbol(c, power);
 				lzms_encode_delta_offset(c, raw_offset);
@@ -1271,7 +1268,7 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 				continue;
 			const u32 next_hash = lzms_delta_hash(in_next + 1, span);
 			const u32 hash = c->next_delta_hashes[power];
-			c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
+			c->delta_hash_table[hash] = pos | (power << DELTA_SOURCE_POWER_SHIFT);
 			c->next_delta_hashes[power] = next_hash;
 			prefetch(&c->delta_hash_table[next_hash]);
 		}
@@ -1489,8 +1486,8 @@ begin:
 				 * queue index @rep_idx  */
 
 				const u32 pair = cur_node->state.recent_delta_pairs[rep_idx];
-				const u32 power = pair >> LZMS_DELTA_SOURCE_POWER_SHIFT;
-				const u32 raw_offset = pair & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK;
+				const u32 power = pair >> DELTA_SOURCE_POWER_SHIFT;
+				const u32 raw_offset = pair & DELTA_SOURCE_RAW_OFFSET_MASK;
 				const u32 span = (u32)1 << power;
 				const u32 offset = raw_offset << power;
 				const u8 * const matchptr = in_next - offset;
@@ -1514,7 +1511,7 @@ begin:
 					in_next = lzms_skip_bytes(c, rep_len, in_next);
 
 					lzms_encode_item_list(c, cur_node);
-					lzms_encode_item(c, rep_len, LZMS_DELTA_SOURCE_TAG | rep_idx);
+					lzms_encode_item(c, rep_len, DELTA_SOURCE_TAG | rep_idx);
 
 					c->optimum_nodes[0].state = cur_node->state;
 					cur_node = &c->optimum_nodes[0];
@@ -1558,7 +1555,7 @@ begin:
 						(cur_node + len)->cost = cost;
 						(cur_node + len)->item = (struct lzms_item) {
 							.length = len,
-							.source = LZMS_DELTA_SOURCE_TAG | rep_idx,
+							.source = DELTA_SOURCE_TAG | rep_idx,
 						};
 						(cur_node + len)->num_extra_items = 0;
 					}
@@ -1735,14 +1732,14 @@ begin:
 				const u32 hash = c->next_delta_hashes[power];
 				const u32 cur_match = c->delta_hash_table[hash];
 
-				c->delta_hash_table[hash] = pos | (power << LZMS_DELTA_SOURCE_POWER_SHIFT);
+				c->delta_hash_table[hash] = pos | (power << DELTA_SOURCE_POWER_SHIFT);
 				c->next_delta_hashes[power] = next_hash;
 				prefetch(&c->delta_hash_table[next_hash]);
 
-				if ((cur_match >> LZMS_DELTA_SOURCE_POWER_SHIFT) != power)
+				if ((cur_match >> DELTA_SOURCE_POWER_SHIFT) != power)
 					continue;
 
-				const u32 offset = pos - (cur_match & LZMS_DELTA_SOURCE_RAW_OFFSET_MASK);
+				const u32 offset = pos - (cur_match & DELTA_SOURCE_RAW_OFFSET_MASK);
 
 				/* The offset must be a multiple of span.  */
 				if (offset & (span - 1))
@@ -1769,9 +1766,9 @@ begin:
 									span);
 
 				const u32 raw_offset = offset >> power;
-				const u32 pair = (power << LZMS_DELTA_SOURCE_POWER_SHIFT) |
+				const u32 pair = (power << DELTA_SOURCE_POWER_SHIFT) |
 						 raw_offset;
-				const u32 source = LZMS_DELTA_SOURCE_TAG |
+				const u32 source = DELTA_SOURCE_TAG |
 						   (pair + LZMS_NUM_DELTA_REPS - 1);
 
 				/* Early out for long explicit offset delta match  */
@@ -1912,11 +1909,11 @@ begin:
 
 				lzms_update_main_state(&cur_node->state, 1);
 
-				if (source & LZMS_DELTA_SOURCE_TAG) {
+				if (source & DELTA_SOURCE_TAG) {
 					/* Delta match  */
 
 					lzms_update_match_state(&cur_node->state, 1);
-					source &= ~LZMS_DELTA_SOURCE_TAG;
+					source &= ~DELTA_SOURCE_TAG;
 
 					if (source >= LZMS_NUM_DELTA_REPS) {
 						u32 pair = source - (LZMS_NUM_DELTA_REPS - 1);
@@ -2205,9 +2202,8 @@ lzms_compress(const void *in, size_t in_nbytes,
 	if (c->use_delta_matches) {
 		for (u32 i = 0; i < DELTA_HASH_LENGTH; i++) {
 			BUILD_BUG_ON(NUM_POWERS_TO_CONSIDER + 1 >
-				     1 << (sizeof(c->delta_hash_table[i]) * 8 - LZMS_DELTA_SOURCE_POWER_SHIFT));
-			c->delta_hash_table[i] = NUM_POWERS_TO_CONSIDER <<
-						 LZMS_DELTA_SOURCE_POWER_SHIFT;
+				     1 << (sizeof(c->delta_hash_table[i]) * 8 - DELTA_SOURCE_POWER_SHIFT));
+			c->delta_hash_table[i] = NUM_POWERS_TO_CONSIDER << DELTA_SOURCE_POWER_SHIFT;
 		}
 		for (u32 i = 0; i < NUM_POWERS_TO_CONSIDER; i++)
 			c->next_delta_hashes[i] = 0;
