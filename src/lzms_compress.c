@@ -295,7 +295,9 @@ struct lzms_compressor {
 	 *
 	 * This idea is borrowed from Igor Pavlov's LZMA encoder.
 	 */
-	bool try_multistep_ops;
+	bool try_lit_lzrep0;
+	bool try_lzrep_lit_lzrep0;
+	bool try_lzmatch_lit_lzrep0;
 
 	/*
 	 * Parameter: if true, the compressor can output delta matches.  This
@@ -1441,7 +1443,7 @@ begin:
 
 
 				/* try LZ-rep + lit + LZ-rep0  */
-				if (c->try_multistep_ops &&
+				if (c->try_lzrep_lit_lzrep0 &&
 				    in_end - (in_next + rep_len) >= 3 &&
 				    load_u16_unaligned(in_next + rep_len + 1) ==
 				    load_u16_unaligned(matchptr + rep_len + 1))
@@ -1665,7 +1667,7 @@ begin:
 
 
 			/* try LZ-match + lit + LZ-rep0  */
-			if (c->try_multistep_ops &&
+			if (c->try_lzmatch_lit_lzrep0 &&
 			    likely(in_end - (in_next + c->matches[0].length) >= 3))
 			{
 				for (u32 i = 0; i < num_matches; i++) {
@@ -1825,7 +1827,7 @@ begin:
 								c->delta_probs) +
 						lzms_delta_source_cost(c, power, raw_offset);
 
-				u32 l = 2;
+				u32 l = NBYTES_HASHED_FOR_DELTA;
 				do {
 					u32 cost = base_cost + lzms_fast_length_cost(c, l);
 					if (cost < (cur_node + l)->cost) {
@@ -1853,9 +1855,7 @@ begin:
 				.source = *in_next,
 			};
 			(cur_node + 1)->num_extra_items = 0;
-		} else if (c->try_multistep_ops &&
-			   in_end - (in_next + 1) >= 2)
-		{
+		} else if (c->try_lit_lzrep0 && in_end - (in_next + 1) >= 2) {
 			/* try lit + LZ-rep0  */
 			const u32 offset =
 				(cur_node->state.prev_lz_offset) ?
@@ -2184,8 +2184,10 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	lzms_init_fast_length_slot_tab(c);
 	lzms_init_offset_slot_tabs(c);
 
-	c->try_multistep_ops = (compression_level >= 45);
 	c->use_delta_matches = (compression_level >= 35);
+	c->try_lzmatch_lit_lzrep0 = (compression_level >= 45);
+	c->try_lit_lzrep0 = (compression_level >= 60);
+	c->try_lzrep_lit_lzrep0 = (compression_level >= 60);
 
 	*c_ret = c;
 	return 0;
