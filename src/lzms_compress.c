@@ -40,11 +40,6 @@
 #include "wimlib/util.h"
 
 /*
- * The values defined below are not intrinsic to the LZMS format itself --- they
- * are specific to this compressor implementation.
- */
-
-/*
  * MAX_FAST_LENGTH is the maximum match length for which the length slot can be
  * looked up directly in 'fast_length_slot_tab' and the length cost can be
  * looked up directly in 'fast_length_cost_tab'.
@@ -57,36 +52,26 @@
  */
 #define MAX_FAST_LENGTH		255
 
-/*
- * NUM_OPTIM_NODES is the maximum number of bytes the parsing algorithm will
+/* NUM_OPTIM_NODES is the maximum number of bytes the parsing algorithm will
  * step forward before forcing the pending items to be encoded.  If this value
  * is increased, then there will be fewer forced flushes, but the probability
- * entries and Huffman codes will be more likely to become outdated.
- */
+ * entries and Huffman codes will be more likely to become outdated.  */
 #define NUM_OPTIM_NODES		2048
 
-/*
- * COST_SHIFT is a scaling factor that makes it possible to consider fractional
- * bit costs.  A single bit has a cost of (1 << COST_SHIFT).
- */
+/* COST_SHIFT is a scaling factor that makes it possible to consider fractional
+ * bit costs.  A single bit has a cost of (1 << COST_SHIFT).  */
 #define COST_SHIFT		6
 
-/*
- * DELTA_HASH_LENGTH is the length of the hash table for finding delta matches.
- */
+/* Length of the hash table for finding delta matches  */
 #define DELTA_HASH_ORDER	17
 #define DELTA_HASH_LENGTH	(1 << DELTA_HASH_ORDER)
 
-/*
- * The number of bytes to hash when finding delta matches, also taken to be the
- * minimum length of an explicit offset delta match
- */
+/* The number of bytes to hash when finding delta matches; also taken to be the
+ * minimum length of an explicit offset delta match  */
 #define NBYTES_HASHED_FOR_DELTA	3
 
-/*
- * The number of delta match powers to consider (max value is
- * LZMS_NUM_DELTA_POWER_SYMS)
- */
+/* The number of delta match powers to consider (must be <=
+ * LZMS_NUM_DELTA_POWER_SYMS)  */
 #define NUM_POWERS_TO_CONSIDER	6
 
 /* This structure tracks the state of writing bits as a series of 16-bit coding
@@ -191,8 +176,8 @@ check_that_powers_fit_in_bitfield(void)
 	BUILD_BUG_ON(LZMS_NUM_DELTA_POWER_SYMS > (1 << (31 - DELTA_SOURCE_POWER_SHIFT)));
 }
 
-/* A stripped-down version of the adaptive state, excluding the probability
- * entries and Huffman codes  */
+/* A stripped-down version of the adaptive state in LZMS, excluding the
+ * probability entries and Huffman codes  */
 struct lzms_adaptive_state {
 
 	/* Recent offsets for LZ matches  */
@@ -283,16 +268,10 @@ struct lzms_compressor {
 	size_t in_nbytes;
 
 	/*
-	 * Parameter: if true, try some multi-step operations during parsing.
-	 * Otherwise only try single-step operations.
+	 * Boolean flags to enable consideration of various types of multi-step
+	 * operations during parsing.
 	 *
-	 * The multi-step operations currently considered are:
-	 *
-	 *	literal + LZ-rep0
-	 *	LZ-rep + literal + LZ-rep0
-	 *	match + literal + LZ-rep0
-	 *
-	 * Basically, those help with gap matches where two matches are
+	 * Multi-step operations can help with gaps where two matches are
 	 * separated by a non-matching byte.
 	 *
 	 * This idea is borrowed from Igor Pavlov's LZMA encoder.
@@ -302,10 +281,9 @@ struct lzms_compressor {
 	bool try_lzmatch_lit_lzrep0;
 
 	/*
-	 * Parameter: if true, the compressor can output delta matches.  This
-	 * often improves the compression ratio slightly, but it slows down
-	 * compression.  See the documentation in the decompressor for general
-	 * information about delta matches.
+	 * If true, the compressor can output delta matches.  This often
+	 * improves the compression ratio slightly, but it slows down
+	 * compression.
 	 */
 	bool use_delta_matches;
 
@@ -321,7 +299,7 @@ struct lzms_compressor {
 	/* Hash table for finding delta matches  */
 	u32 delta_hash_table[DELTA_HASH_LENGTH];
 
-	/* Precomputed hash codes for the next sequence  */
+	/* For each delta power, the hash code for the next sequence  */
 	u32 next_delta_hashes[NUM_POWERS_TO_CONSIDER];
 
 	/* The per-byte graph nodes for near-optimal parsing  */
@@ -727,11 +705,7 @@ lzms_init_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info,
 	rebuild_info->codewords = codewords;
 	rebuild_info->lens = lens;
 	rebuild_info->freqs = freqs;
-
-	/* Initially, all symbols are equally likely.  */
-	for (unsigned sym = 0; sym < num_syms; sym++)
-		freqs[sym] = 1;
-
+	lzms_init_symbol_frequencies(freqs, num_syms);
 	lzms_build_huffman_code(rebuild_info);
 }
 
@@ -739,17 +713,12 @@ static void
 lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info)
 {
 	lzms_build_huffman_code(rebuild_info);
-
-	/* Dilute the symbol frequencies.  */
-	u32 *freqs = rebuild_info->freqs;
-	for (unsigned sym = 0; sym < rebuild_info->num_syms; sym++)
-		freqs[sym] = (freqs[sym] >> 1) + 1;
+	lzms_dilute_symbol_frequencies(rebuild_info->freqs, rebuild_info->num_syms);
 }
 
 /*
- * Encode a symbol using the specified Huffman code.  If needed, the Huffman
- * code will be rebuilt.  Returns a boolean that indicates whether the Huffman
- * code was rebuilt or not.
+ * Encode a symbol using the specified Huffman code.  Then, if the Huffman code
+ * needs to be rebuilt, rebuild it and return true; otherwise return false.
  */
 static inline bool
 lzms_huffman_encode_symbol(unsigned sym,
@@ -819,13 +788,12 @@ static void
 lzms_encode_length(struct lzms_compressor *c, u32 length)
 {
 	unsigned slot = lzms_comp_get_length_slot(c, length);
-	u32 extra_bits = length - lzms_length_slot_base[slot];
-	unsigned num_extra_bits = lzms_extra_length_bits[slot];
 
 	if (lzms_encode_length_symbol(c, slot))
 		lzms_update_fast_length_costs(c);
 
-	lzms_write_bits(&c->os, extra_bits, num_extra_bits,
+	lzms_write_bits(&c->os, length - lzms_length_slot_base[slot],
+			lzms_extra_length_bits[slot],
 			LZMS_MAX_EXTRA_LENGTH_BITS);
 }
 
@@ -834,24 +802,22 @@ static void
 lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 {
 	unsigned slot = lzms_comp_get_offset_slot(c, offset);
-	u32 extra_bits = offset - lzms_offset_slot_base[slot];
-	unsigned num_extra_bits = lzms_extra_offset_bits[slot];
 
 	lzms_encode_lz_offset_symbol(c, slot);
-	lzms_write_bits(&c->os, extra_bits, num_extra_bits,
+	lzms_write_bits(&c->os, offset - lzms_offset_slot_base[slot],
+			lzms_extra_offset_bits[slot],
 			LZMS_MAX_EXTRA_OFFSET_BITS);
 }
 
 /* Encode the raw offset of a delta match.  */
 static void
-lzms_encode_delta_offset(struct lzms_compressor *c, u32 raw_offset)
+lzms_encode_delta_raw_offset(struct lzms_compressor *c, u32 raw_offset)
 {
 	unsigned slot = lzms_comp_get_offset_slot(c, raw_offset);
-	u32 extra_bits = raw_offset - lzms_offset_slot_base[slot];
-	unsigned num_extra_bits = lzms_extra_offset_bits[slot];
 
 	lzms_encode_delta_offset_symbol(c, slot);
-	lzms_write_bits(&c->os, extra_bits, num_extra_bits,
+	lzms_write_bits(&c->os, raw_offset - lzms_offset_slot_base[slot],
+			lzms_extra_offset_bits[slot],
 			LZMS_MAX_EXTRA_OFFSET_BITS);
 }
 
@@ -912,7 +878,7 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 				u32 raw_offset = (source & DELTA_SOURCE_RAW_OFFSET_MASK) -
 						 (LZMS_NUM_DELTA_REPS - 1);
 				lzms_encode_delta_power_symbol(c, power);
-				lzms_encode_delta_offset(c, raw_offset);
+				lzms_encode_delta_raw_offset(c, raw_offset);
 			} else {
 				/* Repeat offset delta match  */
 				int rep_idx = source;
@@ -933,20 +899,16 @@ static void
 lzms_encode_nonempty_item_list(struct lzms_compressor *c,
 			       struct lzms_optimum_node *end_node)
 {
-	struct lzms_optimum_node *cur_node;
-	struct lzms_item saved_item;
-	struct lzms_item item;
-
-	/* Since we've stored at each node the item we took at arrive at that
+	/* Since we've stored at each node the item we took to arrive at that
 	 * node, we can trace our chosen path in backwards order.  However, for
 	 * encoding we need to trace our chosen path in forwards order.  To make
 	 * this possible, the following loop moves the items from their
 	 * destination nodes to their source nodes, which effectively reverses
 	 * the path.  (Think of it like reversing a singly-linked list.)  */
-	cur_node = end_node;
-	saved_item = cur_node->item;
+	struct lzms_optimum_node *cur_node = end_node;
+	struct lzms_item saved_item = cur_node->item;
 	do {
-		item = saved_item;
+		struct lzms_item item = saved_item;
 		if (cur_node->num_extra_items > 0) {
 			/* Handle an arrival via multi-item lookahead.  */
 			unsigned i = 0;
@@ -983,16 +945,17 @@ lzms_encode_item_list(struct lzms_compressor *c,
 
 /*
  * If p is the predicted probability of the next bit being a 0, then the number
- * of bits required to range encode a 0 bit is the real number -log2(p), and the
- * number of bits required to range encode a 1 bit is the real number
- * -log2(1 - p).  To avoid computing either of these expressions at runtime,
- * lzms_bit_costs is a precomputed table that stores a mapping from probability
- * to cost for each possible probability.  Specifically, the array indices are
- * the numerators of the possible probabilities in LZMS, where the denominators
- * are LZMS_PROBABILITY_DENOMINATOR; and the stored costs are the bit costs
- * multiplied by 1<<COST_SHIFT and rounded down to the nearest integer.
- * Furthermore, the values stored for 0% and 100% probabilities are equal to the
- * adjacent values, since these probabilities are not actually permitted.
+ * of bits required to encode a 0 bit using a binary range encoder is the real
+ * number -log2(p), and the number of bits required to encode a 1 bit is the
+ * real number -log2(1 - p).  To avoid computing either of these expressions at
+ * runtime, 'lzms_bit_costs' is a precomputed table that stores a mapping from
+ * probability to cost for each possible probability.  Specifically, the array
+ * indices are the numerators of the possible probabilities in LZMS, where the
+ * denominators are LZMS_PROBABILITY_DENOMINATOR; and the stored costs are the
+ * bit costs multiplied by 1<<COST_SHIFT and rounded down to the nearest
+ * integer.  Furthermore, the values stored for 0% and 100% probabilities are
+ * equal to the adjacent values, since these probabilities are not actually
+ * permitted.
  */
 static const u32 lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR + 1] = {
 	384, 384, 320, 282, 256, 235, 218, 204,
@@ -1092,8 +1055,7 @@ static inline u32
 lzms_delta_source_cost(const struct lzms_compressor *c, u32 power, u32 raw_offset)
 {
 	unsigned slot = lzms_comp_get_offset_slot(c, raw_offset);
-	u32 num_bits = c->delta_power_lens[power] +
-		       c->delta_offset_lens[slot] +
+	u32 num_bits = c->delta_power_lens[power] + c->delta_offset_lens[slot] +
 		       lzms_extra_offset_bits[slot];
 	return num_bits << COST_SHIFT;
 }
@@ -1206,9 +1168,23 @@ lzms_update_delta_rep_states(struct lzms_adaptive_state *state, int rep_idx)
  *                              Matchfinding                                  *
  ******************************************************************************/
 
-/* Note: most of the matchfinding logic is elsewhere.  The code here just
- * handles delta matches.  */
+/* Note: this code just handles finding delta matches.  The code for finding LZ
+ * matches is elsewhere.  */
 
+
+/* Initialize the delta matchfinder for a new input buffer.  */
+static void
+lzms_init_delta_matchfinder(struct lzms_compressor *c)
+{
+	/* Set all entries to use an invalid power, which will never match.  */
+	BUILD_BUG_ON(NUM_POWERS_TO_CONSIDER >= (1 << (32 - DELTA_SOURCE_POWER_SHIFT)));
+	memset(c->delta_hash_table, 0xFF, sizeof(c->delta_hash_table));
+
+	/* Initialize the next hash code for each power.  We can just use zeroes
+	 * initially; it doesn't really matter.  */
+	for (u32 i = 0; i < NUM_POWERS_TO_CONSIDER; i++)
+		c->next_delta_hashes[i] = 0;
+}
 
 /*
  * Compute a hash code for the first NBYTES_HASHED_FOR_DELTA bytes of the
@@ -1218,6 +1194,12 @@ lzms_update_delta_rep_states(struct lzms_adaptive_state *state, int rep_idx)
 static inline u32
 lzms_delta_hash(const u8 *p, u32 span)
 {
+	/* A delta match must have a certain span and an offset that is a
+	 * multiple of the span.  To reduce wasted space we use a single
+	 * combined hash table, and to minimize collisions we include in the
+	 * hash code computation the span and the low-order bits of the current
+	 * position.  */
+
 	BUILD_BUG_ON(NBYTES_HASHED_FOR_DELTA != 3);
 	u8 d0 = *(p + 0) - *(p + 0 - span);
 	u8 d1 = *(p + 1) - *(p + 1 - span);
@@ -1245,21 +1227,13 @@ lzms_extend_delta_match(const u8 *in_next, const u8 *matchptr,
 	return len;
 }
 
-/*
- * Skip the next @count bytes (don't search for matches at them).  @in_next
- * points to the first byte to skip.  The return value is @in_next + count.
- */
-static const u8 *
-lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
+static void
+lzms_delta_matchfinder_skip_bytes(struct lzms_compressor *c,
+				  const u8 *in_next, u32 count)
 {
-	/* Matchfinder for LZ matches  */
-	lcpit_matchfinder_skip_bytes(&c->mf, count);
-
-	/* Matchfinder for delta matches  */
 	u32 pos = in_next - c->in_buffer;
-	if (!c->use_delta_matches ||
-	    unlikely(c->in_nbytes - (pos + count) <= NBYTES_HASHED_FOR_DELTA + 1))
-		return in_next + count;
+	if (unlikely(c->in_nbytes - (pos + count) <= NBYTES_HASHED_FOR_DELTA + 1))
+		return;
 	do {
 		/* Update the hash table for each power.  */
 		for (u32 power = 0; power < NUM_POWERS_TO_CONSIDER; power++) {
@@ -1268,12 +1242,25 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
 				continue;
 			const u32 next_hash = lzms_delta_hash(in_next + 1, span);
 			const u32 hash = c->next_delta_hashes[power];
-			c->delta_hash_table[hash] = pos | (power << DELTA_SOURCE_POWER_SHIFT);
+			c->delta_hash_table[hash] =
+				(power << DELTA_SOURCE_POWER_SHIFT) | pos;
 			c->next_delta_hashes[power] = next_hash;
 			prefetch(&c->delta_hash_table[next_hash]);
 		}
 	} while (in_next++, pos++, --count);
-	return in_next;
+}
+
+/*
+ * Skip the next @count bytes (don't search for matches at them).  @in_next
+ * points to the first byte to skip.  The return value is @in_next + count.
+ */
+static const u8 *
+lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
+{
+	lcpit_matchfinder_skip_bytes(&c->mf, count);
+	if (c->use_delta_matches)
+		lzms_delta_matchfinder_skip_bytes(c, in_next, count);
+	return in_next + count;
 }
 
 /******************************************************************************
@@ -1300,8 +1287,8 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
  * states, costs are assumed to be constant throughout a single run of the
  * parsing algorithm, which can parse up to NUM_OPTIM_NODES bytes of data.  This
  * introduces a source of non-optimality because the probabilities and Huffman
- * codes can change over this part of the data.  (Of course, besides there are a
- * other reasons why the result isn't optimal in terms of compression ratio.)
+ * codes can change over this part of the data.  And of course, there are many
+ * other reasons why the result isn't optimal in terms of compression ratio.
  */
 static void
 lzms_near_optimal_parse(struct lzms_compressor *c)
@@ -1427,14 +1414,14 @@ begin:
 					unsigned lz_state = cur_node->state.lz_state;
 					unsigned lz_rep0_state = cur_node->state.lz_rep_states[0];
 
-					/* update states for rep match  */
+					/* update states for LZ-rep  */
 					main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_PROBS;
 					match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_PROBS;
 					lz_state = ((lz_state << 1) | 1) % LZMS_NUM_LZ_PROBS;
 					lz_rep0_state = ((lz_rep0_state << 1) | (rep_idx > 0)) %
 								LZMS_NUM_LZ_REP_PROBS;
 
-					/* rep cost  */
+					/* LZ-rep cost  */
 					u32 cost = base_cost + lzms_fast_length_cost(c, rep_len);
 
 					/* add literal cost  */
@@ -1443,7 +1430,7 @@ begin:
 					/* update state for literal  */
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_PROBS;
 
-					/* add rep0 cost  */
+					/* add LZ-rep0 cost  */
 					cost += lzms_bit_1_cost(main_state, c->main_probs) +
 						lzms_bit_0_cost(match_state, c->match_probs) +
 						lzms_bit_1_cost(lz_state, c->lz_probs) +
@@ -1477,7 +1464,7 @@ begin:
 
 		/* Repeat offset delta matches  */
 		if (c->use_delta_matches &&
-		    likely(in_next - c->in_buffer >= LZMS_NUM_DELTA_REPS + (1 << 0) &&
+		    likely(in_next - c->in_buffer >= LZMS_NUM_DELTA_REPS + 1 &&
 			   (in_end - in_next >= 2)))
 		{
 			for (int rep_idx = 0; rep_idx < LZMS_NUM_DELTA_REPS; rep_idx++) {
@@ -1578,10 +1565,8 @@ begin:
 				 * This is necessary because the LCP-interval
 				 * tree matchfinder only reports up to
 				 * nice_match_len bytes.  */
-				best_len = lz_extend(in_next,
-						     in_next - offset,
-						     best_len,
-						     in_end - in_next);
+				best_len = lz_extend(in_next, in_next - offset,
+						     best_len, in_end - in_next);
 
 				in_next = lzms_skip_bytes(c, best_len - 1, in_next + 1);
 
@@ -1640,35 +1625,36 @@ begin:
 					    load_u16_unaligned(in_next + len + 1))
 						continue;
 
-					u32 rep0_len = lz_extend(in_next + len + 1,
-								 matchptr + len + 1,
-								 2,
-								 min(c->mf.nice_match_len,
-								     in_end - (in_next + len + 1)));
+					const u32 rep0_len = lz_extend(in_next + len + 1,
+								       matchptr + len + 1,
+								       2,
+								       min(c->mf.nice_match_len,
+									   in_end - (in_next + len + 1)));
 
 					unsigned main_state = cur_node->state.main_state;
 					unsigned match_state = cur_node->state.match_state;
 					unsigned lz_state = cur_node->state.lz_state;
 
-					/* add cost of LZ-match  */
-					u32 cost = position_cost + lzms_fast_length_cost(c, len);
-
-					/* update state for LZ-match  */
+					/* update states for LZ-match  */
 					main_state = ((main_state << 1) | 1) % LZMS_NUM_MAIN_PROBS;
 					match_state = ((match_state << 1) | 0) % LZMS_NUM_MATCH_PROBS;
 					lz_state = ((lz_state << 1) | 0) % LZMS_NUM_LZ_PROBS;
 
-					/* add cost of literal  */
+					/* LZ-match cost  */
+					u32 cost = position_cost + lzms_fast_length_cost(c, len);
+
+					/* add literal cost  */
 					cost += lzms_literal_cost(c, main_state, *(in_next + len));
 
 					/* update state for literal  */
 					main_state = ((main_state << 1) | 0) % LZMS_NUM_MAIN_PROBS;
 
-					/* add cost of LZ-rep0  */
+					/* add LZ-rep0 cost  */
 					cost += lzms_bit_1_cost(main_state, c->main_probs) +
 						lzms_bit_0_cost(match_state, c->match_probs) +
 						lzms_bit_1_cost(lz_state, c->lz_probs) +
-						lzms_bit_0_cost(cur_node->state.lz_rep_states[0], c->lz_rep_probs[0]) +
+						lzms_bit_0_cost(cur_node->state.lz_rep_states[0],
+								c->lz_rep_probs[0]) +
 						lzms_fast_length_cost(c, rep0_len);
 
 					const u32 total_len = len + 1 + rep0_len;
@@ -1705,7 +1691,8 @@ begin:
 							(cur_node + l)->cost = cost;
 							(cur_node + l)->item = (struct lzms_item) {
 								.length = l,
-								.source = c->matches[i].offset + (LZMS_NUM_LZ_REPS - 1),
+								.source = c->matches[i].offset +
+									  (LZMS_NUM_LZ_REPS - 1),
 							};
 							(cur_node + l)->num_extra_items = 0;
 						}
@@ -1715,8 +1702,9 @@ begin:
 		}
 
 		/* Explicit offset delta matches  */
-		if (c->use_delta_matches && in_end - in_next >= NBYTES_HASHED_FOR_DELTA + 1) {
-
+		if (c->use_delta_matches &&
+		    likely(in_end - in_next >= NBYTES_HASHED_FOR_DELTA + 1))
+		{
 			const u32 pos = in_next - c->in_buffer;
 
 			/* Consider each possible power (log2 of span)  */
@@ -1732,11 +1720,11 @@ begin:
 				const u32 hash = c->next_delta_hashes[power];
 				const u32 cur_match = c->delta_hash_table[hash];
 
-				c->delta_hash_table[hash] = pos | (power << DELTA_SOURCE_POWER_SHIFT);
+				c->delta_hash_table[hash] = (power << DELTA_SOURCE_POWER_SHIFT) | pos;
 				c->next_delta_hashes[power] = next_hash;
 				prefetch(&c->delta_hash_table[next_hash]);
 
-				if ((cur_match >> DELTA_SOURCE_POWER_SHIFT) != power)
+				if (power != cur_match >> DELTA_SOURCE_POWER_SHIFT)
 					continue;
 
 				const u32 offset = pos - (cur_match & DELTA_SOURCE_RAW_OFFSET_MASK);
@@ -1838,17 +1826,18 @@ begin:
 					cur_node->state.prev_lz_offset :
 					cur_node->state.recent_lz_offsets[0];
 
-			if (load_u16_unaligned(in_next + 1) == load_u16_unaligned(in_next + 1 - offset)) {
-
+			if (load_u16_unaligned(in_next + 1) ==
+			    load_u16_unaligned(in_next + 1 - offset))
+			{
 				const u32 rep0_len = lz_extend(in_next + 1,
 							       in_next + 1 - offset,
 							       2,
 							       min(in_end - (in_next + 1),
 								   c->mf.nice_match_len));
 
-				/* Update main_state after literal  */
 				unsigned main_state = cur_node->state.main_state;
 
+				/* Update main_state after literal  */
 				main_state = (main_state << 1 | 0) % LZMS_NUM_MAIN_PROBS;
 
 				/* Add cost of LZ-rep0  */
@@ -2007,18 +1996,30 @@ begin:
 }
 
 static void
-lzms_prepare_encoders(struct lzms_compressor *c, void *out,
-		      size_t out_nbytes_avail, unsigned num_offset_slots)
+lzms_init_states_and_probabilities(struct lzms_compressor *c)
 {
-	/* Initialize the range encoder (writing forwards).  */
-	lzms_range_encoder_init(&c->rc, out, out_nbytes_avail / sizeof(le16));
+	c->main_state = 0;
+	c->match_state = 0;
+	c->lz_state = 0;
+	for (int i = 0; i < LZMS_NUM_LZ_REP_DECISIONS; i++)
+		c->lz_rep_states[i] = 0;
+	c->delta_state = 0;
+	for (int i = 0; i < LZMS_NUM_DELTA_REP_DECISIONS; i++)
+		c->delta_rep_states[i] = 0;
 
-	/* Initialize the output bitstream for Huffman symbols and verbatim bits
-	 * (writing backwards).  */
-	lzms_output_bitstream_init(&c->os, out, out_nbytes_avail / sizeof(le16));
+	lzms_init_probability_entries(c->main_probs, LZMS_NUM_MAIN_PROBS);
+	lzms_init_probability_entries(c->match_probs, LZMS_NUM_MATCH_PROBS);
+	lzms_init_probability_entries(c->lz_probs, LZMS_NUM_LZ_PROBS);
+	for (int i = 0; i < LZMS_NUM_LZ_REP_DECISIONS; i++)
+		lzms_init_probability_entries(c->lz_rep_probs[i], LZMS_NUM_LZ_REP_PROBS);
+	lzms_init_probability_entries(c->delta_probs, LZMS_NUM_DELTA_PROBS);
+	for (int i = 0; i < LZMS_NUM_DELTA_REP_DECISIONS; i++)
+		lzms_init_probability_entries(c->delta_rep_probs[i], LZMS_NUM_DELTA_REP_PROBS);
+}
 
-	/* Initialize the Huffman codes.  */
-
+static void
+lzms_init_huffman_codes(struct lzms_compressor *c, unsigned num_offset_slots)
+{
 	lzms_init_huffman_code(&c->literal_rebuild_info,
 			       LZMS_NUM_LITERAL_SYMS,
 			       LZMS_LITERAL_CODE_REBUILD_FREQ,
@@ -2053,26 +2054,6 @@ lzms_prepare_encoders(struct lzms_compressor *c, void *out,
 			       c->delta_power_codewords,
 			       c->delta_power_lens,
 			       c->delta_power_freqs);
-
-	/* Initialize the states and probability entries.  */
-
-	c->main_state = 0;
-	c->match_state = 0;
-	c->lz_state = 0;
-	for (int i = 0; i < LZMS_NUM_LZ_REP_DECISIONS; i++)
-		c->lz_rep_states[i] = 0;
-	c->delta_state = 0;
-	for (int i = 0; i < LZMS_NUM_DELTA_REP_DECISIONS; i++)
-		c->delta_rep_states[i] = 0;
-
-	lzms_init_probability_entries(c->main_probs, LZMS_NUM_MAIN_PROBS);
-	lzms_init_probability_entries(c->match_probs, LZMS_NUM_MATCH_PROBS);
-	lzms_init_probability_entries(c->lz_probs, LZMS_NUM_LZ_PROBS);
-	for (int i = 0; i < LZMS_NUM_LZ_REP_DECISIONS; i++)
-		lzms_init_probability_entries(c->lz_rep_probs[i], LZMS_NUM_LZ_REP_PROBS);
-	lzms_init_probability_entries(c->delta_probs, LZMS_NUM_DELTA_PROBS);
-	for (int i = 0; i < LZMS_NUM_DELTA_REP_DECISIONS; i++)
-		lzms_init_probability_entries(c->delta_rep_probs[i], LZMS_NUM_DELTA_REP_PROBS);
 }
 
 /*
@@ -2145,25 +2126,25 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 	if (!c)
 		goto oom0;
 
-	c->in_buffer = MALLOC(max_bufsize);
-	if (!c->in_buffer)
-		goto oom1;
-
 	/* Scale nice_match_len with the compression level.  But to allow an
 	 * optimization on length cost calculations, don't allow nice_match_len
 	 * to exceed MAX_FAST_LENGTH.  */
 	nice_match_len = min(((u64)compression_level * 63) / 50, MAX_FAST_LENGTH);
+
+	c->use_delta_matches = (compression_level >= 35);
+	c->try_lzmatch_lit_lzrep0 = (compression_level >= 45);
+	c->try_lit_lzrep0 = (compression_level >= 60);
+	c->try_lzrep_lit_lzrep0 = (compression_level >= 60);
+
+	c->in_buffer = MALLOC(max_bufsize);
+	if (!c->in_buffer)
+		goto oom1;
 
 	if (!lcpit_matchfinder_init(&c->mf, max_bufsize, 2, nice_match_len))
 		goto oom2;
 
 	lzms_init_fast_length_slot_tab(c);
 	lzms_init_offset_slot_tabs(c);
-
-	c->use_delta_matches = (compression_level >= 35);
-	c->try_lzmatch_lit_lzrep0 = (compression_level >= 45);
-	c->try_lit_lzrep0 = (compression_level >= 60);
-	c->try_lzrep_lit_lzrep0 = (compression_level >= 60);
 
 	*c_ret = c;
 	return 0;
@@ -2196,25 +2177,18 @@ lzms_compress(const void *in, size_t in_nbytes,
 	c->in_nbytes = in_nbytes;
 	lzms_x86_filter(c->in_buffer, in_nbytes, c->last_target_usages, false);
 
-	/* Load the buffer into the matchfinder.  */
+	/* Prepare the matchfinders.  */
 	lcpit_matchfinder_load_buffer(&c->mf, c->in_buffer, c->in_nbytes);
-
-	if (c->use_delta_matches) {
-		for (u32 i = 0; i < DELTA_HASH_LENGTH; i++) {
-			BUILD_BUG_ON(NUM_POWERS_TO_CONSIDER + 1 >
-				     1 << (sizeof(c->delta_hash_table[i]) * 8 - DELTA_SOURCE_POWER_SHIFT));
-			c->delta_hash_table[i] = NUM_POWERS_TO_CONSIDER << DELTA_SOURCE_POWER_SHIFT;
-		}
-		for (u32 i = 0; i < NUM_POWERS_TO_CONSIDER; i++)
-			c->next_delta_hashes[i] = 0;
-	}
+	if (c->use_delta_matches)
+		lzms_init_delta_matchfinder(c);
 
 	/* Initialize the encoder structures.  */
-	lzms_prepare_encoders(c, out, out_nbytes_avail,
-			      lzms_get_num_offset_slots(c->in_nbytes));
+	lzms_range_encoder_init(&c->rc, out, out_nbytes_avail / sizeof(le16));
+	lzms_output_bitstream_init(&c->os, out, out_nbytes_avail / sizeof(le16));
+	lzms_init_states_and_probabilities(c);
+	lzms_init_huffman_codes(c, lzms_get_num_offset_slots(in_nbytes));
 
-	/* Compute and encode a literal/match sequence that decompresses to the
-	 * preprocessed data.  */
+	/* The main loop: parse and encode.  */
 	lzms_near_optimal_parse(c);
 
 	/* Return the compressed data size or 0.  */

@@ -88,6 +88,12 @@ lzms_get_probability(const struct lzms_probability_entry *prob_entry)
 	return prob;
 }
 
+extern void
+lzms_init_symbol_frequencies(u32 freqs[], unsigned num_syms);
+
+extern void
+lzms_dilute_symbol_frequencies(u32 freqs[], unsigned num_syms);
+
 /* Pre/post-processing  */
 extern void
 lzms_x86_filter(u8 data[], s32 size, s32 last_target_usages[], bool undo);

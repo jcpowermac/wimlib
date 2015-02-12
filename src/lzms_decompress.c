@@ -304,13 +304,13 @@ struct lzms_input_bitstream {
 /* Bookkeeping information for an adaptive Huffman code  */
 struct lzms_huffman_rebuild_info {
 	unsigned num_syms_until_rebuild;
+	unsigned num_syms;
 	unsigned rebuild_freq;
-	u16 *decode_table;
-	unsigned table_bits;
-	u32 *freqs;
 	u32 *codewords;
 	u8 *lens;
-	unsigned num_syms;
+	u32 *freqs;
+	u16 *decode_table;
+	unsigned table_bits;
 };
 
 struct lzms_decompressor {
@@ -579,48 +579,56 @@ lzms_decode_delta_repeat_match_bit(struct lzms_decompressor *d, int idx)
 }
 
 static void
-lzms_init_huffman_rebuild_info(struct lzms_huffman_rebuild_info *info,
-			       unsigned rebuild_freq,
-			       u16 *decode_table, unsigned table_bits,
-			       u32 *freqs, u32 *codewords, u8 *lens,
-			       unsigned num_syms)
+lzms_build_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info)
 {
-	info->num_syms_until_rebuild = 1;
-	info->rebuild_freq = rebuild_freq;
-	info->decode_table = decode_table;
-	info->table_bits = table_bits;
-	info->freqs = freqs;
-	info->codewords = codewords;
-	info->lens = lens;
-	info->num_syms = num_syms;
-	for (unsigned sym = 0; sym < num_syms; sym++)
-		freqs[sym] = 1;
+	make_canonical_huffman_code(rebuild_info->num_syms,
+				    LZMS_MAX_CODEWORD_LENGTH,
+				    rebuild_info->freqs,
+				    rebuild_info->lens,
+				    rebuild_info->codewords);
+
+	make_huffman_decode_table(rebuild_info->decode_table,
+				  rebuild_info->num_syms,
+				  rebuild_info->table_bits,
+				  rebuild_info->lens,
+				  LZMS_MAX_CODEWORD_LENGTH);
+
+	rebuild_info->num_syms_until_rebuild = rebuild_info->rebuild_freq;
+}
+
+static void
+lzms_init_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info,
+		       unsigned rebuild_freq,
+		       u16 *decode_table, unsigned table_bits,
+		       u32 *freqs, u32 *codewords, u8 *lens,
+		       unsigned num_syms)
+{
+	rebuild_info->num_syms = num_syms;
+	rebuild_info->rebuild_freq = rebuild_freq;
+	rebuild_info->codewords = codewords;
+	rebuild_info->lens = lens;
+	rebuild_info->freqs = freqs;
+	rebuild_info->decode_table = decode_table;
+	rebuild_info->table_bits = table_bits;
+	lzms_init_symbol_frequencies(freqs, num_syms);
+	lzms_build_huffman_code(rebuild_info);
 }
 
 static noinline void
-lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *info)
+lzms_rebuild_huffman_code(struct lzms_huffman_rebuild_info *rebuild_info)
 {
-	make_canonical_huffman_code(info->num_syms, LZMS_MAX_CODEWORD_LENGTH,
-				    info->freqs, info->lens, info->codewords);
-	make_huffman_decode_table(info->decode_table, info->num_syms,
-				  info->table_bits, info->lens,
-				  LZMS_MAX_CODEWORD_LENGTH);
-	for (unsigned i = 0; i < info->num_syms; i++)
-		info->freqs[i] = (info->freqs[i] >> 1) + 1;
-	info->num_syms_until_rebuild = info->rebuild_freq;
+	lzms_build_huffman_code(rebuild_info);
+	lzms_dilute_symbol_frequencies(rebuild_info->freqs, rebuild_info->num_syms);
 }
 
 static inline unsigned
-lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
-			   u16 decode_table[], unsigned table_bits,
+lzms_decode_huffman_symbol(struct lzms_input_bitstream *is, u16 decode_table[],
+			   unsigned table_bits, u32 freqs[],
 			   struct lzms_huffman_rebuild_info *rebuild_info)
 {
 	unsigned key_bits;
 	unsigned entry;
 	unsigned sym;
-
-	if (unlikely(--rebuild_info->num_syms_until_rebuild == 0))
-		lzms_rebuild_huffman_code(rebuild_info);
 
 	lzms_ensure_bits(is, LZMS_MAX_CODEWORD_LENGTH);
 
@@ -646,8 +654,9 @@ lzms_decode_huffman_symbol(struct lzms_input_bitstream *is,
 		sym = entry;
 	}
 
-	/* Tally and return the decoded symbol.  */
-	rebuild_info->freqs[sym]++;
+	freqs[sym]++;
+	if (--rebuild_info->num_syms_until_rebuild == 0)
+		lzms_rebuild_huffman_code(rebuild_info);
 	return sym;
 }
 
@@ -657,6 +666,7 @@ lzms_decode_literal(struct lzms_decompressor *d)
 	return lzms_decode_huffman_symbol(&d->is,
 					  d->literal_decode_table,
 					  LZMS_LITERAL_TABLEBITS,
+					  d->literal_freqs,
 					  &d->literal_rebuild_info);
 }
 
@@ -666,6 +676,7 @@ lzms_decode_length(struct lzms_decompressor *d)
 	unsigned slot = lzms_decode_huffman_symbol(&d->is,
 						   d->length_decode_table,
 						   LZMS_LENGTH_TABLEBITS,
+						   d->length_freqs,
 						   &d->length_rebuild_info);
 	u32 length = lzms_length_slot_base[slot];
 	unsigned num_extra_bits = lzms_extra_length_bits[slot];
@@ -681,6 +692,7 @@ lzms_decode_lz_offset(struct lzms_decompressor *d)
 	unsigned slot = lzms_decode_huffman_symbol(&d->is,
 						   d->lz_offset_decode_table,
 						   LZMS_LZ_OFFSET_TABLEBITS,
+						   d->lz_offset_freqs,
 						   &d->lz_offset_rebuild_info);
 	return lzms_offset_slot_base[slot] +
 	       lzms_read_bits(&d->is, lzms_extra_offset_bits[slot]);
@@ -692,6 +704,7 @@ lzms_decode_delta_offset(struct lzms_decompressor *d)
 	unsigned slot = lzms_decode_huffman_symbol(&d->is,
 						   d->delta_offset_decode_table,
 						   LZMS_DELTA_OFFSET_TABLEBITS,
+						   d->delta_offset_freqs,
 						   &d->delta_offset_rebuild_info);
 	return lzms_offset_slot_base[slot] +
 	       lzms_read_bits(&d->is, lzms_extra_offset_bits[slot]);
@@ -703,6 +716,7 @@ lzms_decode_delta_power(struct lzms_decompressor *d)
 	return lzms_decode_huffman_symbol(&d->is,
 					  d->delta_power_decode_table,
 					  LZMS_DELTA_POWER_TABLEBITS,
+					  d->delta_power_freqs,
 					  &d->delta_power_rebuild_info);
 }
 
@@ -919,50 +933,50 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 
 	lzms_input_bitstream_init(&d->is, in, in_nbytes / sizeof(le16));
 
-	lzms_init_huffman_rebuild_info(&d->literal_rebuild_info,
-				       LZMS_LITERAL_CODE_REBUILD_FREQ,
-				       d->literal_decode_table,
-				       LZMS_LITERAL_TABLEBITS,
-				       d->literal_freqs,
-				       d->codewords,
-				       d->lens,
-				       LZMS_NUM_LITERAL_SYMS);
+	lzms_init_huffman_code(&d->literal_rebuild_info,
+			       LZMS_LITERAL_CODE_REBUILD_FREQ,
+			       d->literal_decode_table,
+			       LZMS_LITERAL_TABLEBITS,
+			       d->literal_freqs,
+			       d->codewords,
+			       d->lens,
+			       LZMS_NUM_LITERAL_SYMS);
 
-	lzms_init_huffman_rebuild_info(&d->length_rebuild_info,
-				       LZMS_LENGTH_CODE_REBUILD_FREQ,
-				       d->length_decode_table,
-				       LZMS_LENGTH_TABLEBITS,
-				       d->length_freqs,
-				       d->codewords,
-				       d->lens,
-				       LZMS_NUM_LENGTH_SYMS);
+	lzms_init_huffman_code(&d->length_rebuild_info,
+			       LZMS_LENGTH_CODE_REBUILD_FREQ,
+			       d->length_decode_table,
+			       LZMS_LENGTH_TABLEBITS,
+			       d->length_freqs,
+			       d->codewords,
+			       d->lens,
+			       LZMS_NUM_LENGTH_SYMS);
 
-	lzms_init_huffman_rebuild_info(&d->lz_offset_rebuild_info,
-				       LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
-				       d->lz_offset_decode_table,
-				       LZMS_LZ_OFFSET_TABLEBITS,
-				       d->lz_offset_freqs,
-				       d->codewords,
-				       d->lens,
-				       num_offset_slots);
+	lzms_init_huffman_code(&d->lz_offset_rebuild_info,
+			       LZMS_LZ_OFFSET_CODE_REBUILD_FREQ,
+			       d->lz_offset_decode_table,
+			       LZMS_LZ_OFFSET_TABLEBITS,
+			       d->lz_offset_freqs,
+			       d->codewords,
+			       d->lens,
+			       num_offset_slots);
 
-	lzms_init_huffman_rebuild_info(&d->delta_offset_rebuild_info,
-				       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
-				       d->delta_offset_decode_table,
-				       LZMS_DELTA_OFFSET_TABLEBITS,
-				       d->delta_offset_freqs,
-				       d->codewords,
-				       d->lens,
-				       num_offset_slots);
+	lzms_init_huffman_code(&d->delta_offset_rebuild_info,
+			       LZMS_DELTA_OFFSET_CODE_REBUILD_FREQ,
+			       d->delta_offset_decode_table,
+			       LZMS_DELTA_OFFSET_TABLEBITS,
+			       d->delta_offset_freqs,
+			       d->codewords,
+			       d->lens,
+			       num_offset_slots);
 
-	lzms_init_huffman_rebuild_info(&d->delta_power_rebuild_info,
-				       LZMS_DELTA_POWER_CODE_REBUILD_FREQ,
-				       d->delta_power_decode_table,
-				       LZMS_DELTA_POWER_TABLEBITS,
-				       d->delta_power_freqs,
-				       d->codewords,
-				       d->lens,
-				       LZMS_NUM_DELTA_POWER_SYMS);
+	lzms_init_huffman_code(&d->delta_power_rebuild_info,
+			       LZMS_DELTA_POWER_CODE_REBUILD_FREQ,
+			       d->delta_power_decode_table,
+			       LZMS_DELTA_POWER_TABLEBITS,
+			       d->delta_power_freqs,
+			       d->codewords,
+			       d->lens,
+			       LZMS_NUM_DELTA_POWER_SYMS);
 }
 
 static int
