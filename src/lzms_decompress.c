@@ -791,7 +791,7 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			u32 raw_offset;
 			u32 span;
 			u32 offset;
-			const u8 *B, *C, *D;
+			const u8 *matchptr;
 			u32 length;
 
 			if (d->pending_delta_pair != 0 &&
@@ -861,12 +861,12 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			if (unlikely(length > out_end - out_next))
 				return -1;
 
-			B = out_next - span;
-			C = out_next - offset;
-			D = C - span;
-
+			matchptr = out_next - offset;
 			do {
-				*out_next++ = *B++ + *C++ - *D++;
+				*out_next = *matchptr + *(out_next - span) -
+					    *(matchptr - span);
+				out_next++;
+				matchptr++;
 			} while (--length);
 
 			d->delta_pair_still_pending = out_next;
@@ -882,7 +882,7 @@ lzms_init_decompressor(struct lzms_decompressor *d, const void *in,
 	/* Match offset LRU queues  */
 	for (int i = 0; i < LZMS_NUM_LZ_REPS + 1; i++)
 		d->recent_lz_offsets[i] = i + 1;
-	for (int i = 0; i < LZMS_NUM_LZ_REPS + 1; i++)
+	for (int i = 0; i < LZMS_NUM_DELTA_REPS + 1; i++)
 		d->recent_delta_pairs[i] = i + 1;
 	d->pending_lz_offset = 0;
 	d->pending_delta_pair = 0;
