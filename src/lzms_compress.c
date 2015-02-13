@@ -312,8 +312,8 @@ struct lzms_compressor {
 	struct lzms_optimum_node optimum_nodes[NUM_OPTIM_NODES + MAX_FAST_LENGTH];
 
 	/* Table: length => current cost for small match lengths  */
+	u32 literal_cost_tab[LZMS_NUM_LITERAL_SYMS];
 	u32 fast_length_cost_tab[MAX_FAST_LENGTH + 1];
-
 	u32 lz_offset_slot_cost_tab[LZMS_MAX_NUM_OFFSET_SYMS];
 
 	/* Range encoder which outputs to the beginning of the compressed data
@@ -745,6 +745,16 @@ lzms_huffman_encode_symbol(unsigned sym,
 	return false;
 }
 
+static void
+lzms_update_literal_costs(struct lzms_compressor *c);
+
+static void
+lzms_update_fast_length_costs(struct lzms_compressor *c);
+
+static void
+lzms_update_lz_offset_slot_costs(struct lzms_compressor *c);
+
+
 /* Helper routines to encode symbols using the various Huffman codes  */
 
 static bool
@@ -786,12 +796,6 @@ lzms_encode_delta_power_symbol(struct lzms_compressor *c, unsigned sym)
 					  c->delta_power_lens, c->delta_power_freqs,
 					  &c->os, &c->delta_power_rebuild_info);
 }
-
-static void
-lzms_update_fast_length_costs(struct lzms_compressor *c);
-
-static void
-lzms_update_lz_offset_slot_costs(struct lzms_compressor *c);
 
 /*
  * Encode a match length.  If this causes the Huffman code for length symbols to
@@ -850,7 +854,8 @@ lzms_encode_item(struct lzms_compressor *c, u32 length, u32 source)
 	if (!main_bit) {
 		/* Literal  */
 		unsigned literal = source;
-		lzms_encode_literal_symbol(c, literal);
+		if (lzms_encode_literal_symbol(c, literal))
+			lzms_update_literal_costs(c);
 	} else {
 		/* Match  */
 
@@ -1031,7 +1036,7 @@ static inline u32
 lzms_literal_cost(struct lzms_compressor *c, unsigned main_state, unsigned literal)
 {
 	return lzms_bit_0_cost(main_state, c->main_probs) +
-		((u32)c->literal_lens[literal] << COST_SHIFT);
+		c->literal_cost_tab[literal];
 }
 
 /* Update 'fast_length_cost_tab' to use the latest Huffman code.  */
@@ -1057,6 +1062,15 @@ lzms_update_lz_offset_slot_costs(struct lzms_compressor *c)
 		u32 num_bits = c->lz_offset_lens[slot] +
 			       lzms_extra_offset_bits[slot];
 		c->lz_offset_slot_cost_tab[slot] = num_bits << COST_SHIFT;
+	}
+}
+
+static void
+lzms_update_literal_costs(struct lzms_compressor *c)
+{
+	for (unsigned literal = 0; literal < 256; literal++) {
+		u32 num_bits = c->literal_lens[literal];
+		c->literal_cost_tab[literal] = num_bits << COST_SHIFT;
 	}
 }
 
@@ -1325,9 +1339,8 @@ lzms_near_optimal_parse(struct lzms_compressor *c)
 	struct lzms_optimum_node *cur_node;
 	struct lzms_optimum_node *end_node;
 
-	/* Set initial length costs for lengths <= MAX_FAST_LENGTH.  */
+	lzms_update_literal_costs(c);
 	lzms_update_fast_length_costs(c);
-
 	lzms_update_lz_offset_slot_costs(c);
 
 	/* Set up the initial adaptive state.  */
