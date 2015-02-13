@@ -234,6 +234,10 @@ struct lzms_optimum_node {
 	struct lzms_item item;
 	struct lzms_item extra_items[2];
 
+	unsigned literal_count;
+	unsigned length_count;
+	unsigned lz_offset_count;
+
 	/*
 	 * The adaptive state that exists at this position.  This is filled in
 	 * lazily, only after the minimum-cost path to this position is found.
@@ -1316,6 +1320,9 @@ begin:
 
 	cur_node = c->optimum_nodes;
 	cur_node->cost = 0;
+	cur_node->literal_count = 0;
+	cur_node->length_count = 0;
+	cur_node->lz_offset_count = 0;
 	end_node = cur_node;
 
 	if (in_next == in_end)
@@ -1399,6 +1406,9 @@ begin:
 							.source = rep_idx,
 						};
 						(cur_node + len)->num_extra_items = 0;
+						(cur_node + len)->literal_count = cur_node->literal_count;
+						(cur_node + len)->length_count = cur_node->length_count + 1;
+						(cur_node + len)->lz_offset_count = cur_node->lz_offset_count;
 					}
 				} while (++len <= rep_len);
 
@@ -1463,6 +1473,9 @@ begin:
 							.source = rep_idx,
 						};
 						(cur_node + total_len)->num_extra_items = 2;
+						(cur_node + total_len)->literal_count = cur_node->literal_count + 1;
+						(cur_node + total_len)->length_count = cur_node->length_count + 2;
+						(cur_node + total_len)->lz_offset_count = cur_node->lz_offset_count;
 					}
 				}
 			}
@@ -1551,6 +1564,9 @@ begin:
 							.source = DELTA_SOURCE_TAG | rep_idx,
 						};
 						(cur_node + len)->num_extra_items = 0;
+						(cur_node + len)->literal_count = cur_node->literal_count;
+						(cur_node + len)->length_count = cur_node->length_count + 1;
+						(cur_node + len)->lz_offset_count = cur_node->lz_offset_count;
 					}
 				} while (++len <= rep_len);
 			}
@@ -1623,6 +1639,9 @@ begin:
 								.source = offset + (LZMS_NUM_LZ_REPS - 1),
 							};
 							(cur_node + l)->num_extra_items = 0;
+							(cur_node + l)->literal_count = cur_node->literal_count;
+							(cur_node + l)->length_count = cur_node->length_count + 1;
+							(cur_node + l)->lz_offset_count = cur_node->lz_offset_count + 1;
 						}
 					} while (++l <= len);
 
@@ -1683,6 +1702,9 @@ begin:
 							.source = offset + LZMS_NUM_LZ_REPS - 1,
 						};
 						(cur_node + total_len)->num_extra_items = 2;
+						(cur_node + total_len)->literal_count = cur_node->literal_count + 1;
+						(cur_node + total_len)->length_count = cur_node->length_count + 2;
+						(cur_node + total_len)->lz_offset_count = cur_node->lz_offset_count + 1;
 					}
 				} while (i--);
 			} else {
@@ -1701,6 +1723,9 @@ begin:
 									  (LZMS_NUM_LZ_REPS - 1),
 							};
 							(cur_node + l)->num_extra_items = 0;
+							(cur_node + l)->literal_count = cur_node->literal_count;
+							(cur_node + l)->length_count = cur_node->length_count + 1;
+							(cur_node + l)->lz_offset_count = cur_node->lz_offset_count + 1;
 						}
 					} while (++l <= c->matches[i].length);
 				} while (i--);
@@ -1807,6 +1832,9 @@ begin:
 							.source = source,
 						};
 						(cur_node + l)->num_extra_items = 0;
+						(cur_node + l)->literal_count = cur_node->literal_count;
+						(cur_node + l)->length_count = cur_node->length_count + 1;
+						(cur_node + l)->lz_offset_count = cur_node->lz_offset_count;
 					}
 				} while (++l <= len);
 			}
@@ -1825,6 +1853,9 @@ begin:
 				.source = *in_next,
 			};
 			(cur_node + 1)->num_extra_items = 0;
+			(cur_node + 1)->literal_count = cur_node->literal_count + 1;
+			(cur_node + 1)->length_count = cur_node->length_count;
+			(cur_node + 1)->lz_offset_count = cur_node->lz_offset_count;
 		} else if (c->try_lit_lzrep0 && in_end - (in_next + 1) >= 2) {
 			/* try lit + LZ-rep0  */
 			const u32 offset =
@@ -1991,8 +2022,14 @@ begin:
 		 * Note: no check for end-of-buffer is needed because
 		 * end-of-buffer will trigger condition (1).
 		 */
+		/*fprintf(stderr, "%zu: %u %u %u\n", cur_node - c->optimum_nodes,*/
+		       /*cur_node->literal_count, cur_node->length_count, cur_node->lz_offset_count);*/
 		if (cur_node == end_node ||
-		    cur_node == &c->optimum_nodes[NUM_OPTIM_NODES])
+		    cur_node == &c->optimum_nodes[NUM_OPTIM_NODES] ||
+		    (cur_node->literal_count >= c->literal_rebuild_info.num_syms_until_rebuild ||
+		     cur_node->length_count >= c->length_rebuild_info.num_syms_until_rebuild ||
+		     cur_node->lz_offset_count >= c->lz_offset_rebuild_info.num_syms_until_rebuild))
+
 		{
 			lzms_encode_nonempty_item_list(c, cur_node);
 			c->optimum_nodes[0].state = cur_node->state;
