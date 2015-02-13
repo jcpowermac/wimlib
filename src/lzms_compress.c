@@ -64,6 +64,7 @@
 /* Length of the hash table for finding delta matches  */
 #define DELTA_HASH_ORDER	17
 #define DELTA_HASH_LENGTH	((u32)1 << DELTA_HASH_ORDER)
+#define DELTA_SEARCH_DEPTH	16
 
 /* The number of bytes to hash when finding delta matches; also taken to be the
  * minimum length of an explicit offset delta match  */
@@ -301,7 +302,7 @@ struct lzms_compressor {
 	struct lz_match matches[MAX_FAST_LENGTH - LZMS_MIN_MATCH_LENGTH + 1];
 
 	/* Hash table for finding delta matches  */
-	u32 delta_hash_table[DELTA_HASH_LENGTH];
+	u32 delta_hash_table[DELTA_HASH_LENGTH][DELTA_SEARCH_DEPTH];
 
 	/* For each delta power, the hash code for the next sequence  */
 	u32 next_delta_hashes[NUM_POWERS_TO_CONSIDER];
@@ -1251,8 +1252,13 @@ lzms_delta_matchfinder_skip_bytes(struct lzms_compressor *c,
 				continue;
 			const u32 next_hash = lzms_delta_hash(in_next + 1, span);
 			const u32 hash = c->next_delta_hashes[power];
-			c->delta_hash_table[hash] =
-				(power << DELTA_SOURCE_POWER_SHIFT) | pos;
+
+			u32 next = (power << DELTA_SOURCE_POWER_SHIFT) | pos;
+			for (u32 i = 0; i < DELTA_SEARCH_DEPTH; i++) {
+				u32 cur_match = c->delta_hash_table[hash][i];
+				c->delta_hash_table[hash][i] = next;
+				next = cur_match;
+			}
 			c->next_delta_hashes[power] = next_hash;
 			prefetch(&c->delta_hash_table[next_hash]);
 		}
@@ -1726,42 +1732,43 @@ begin:
 				if (unlikely(pos < span))
 					continue;
 
+				u32 best_len = 0;
+				u32 best_offset;
+
 				const u32 next_hash = lzms_delta_hash(in_next + 1, span);
 				const u32 hash = c->next_delta_hashes[power];
-				const u32 cur_match = c->delta_hash_table[hash];
 
-				c->delta_hash_table[hash] = (power << DELTA_SOURCE_POWER_SHIFT) | pos;
+				u32 next = (power << DELTA_SOURCE_POWER_SHIFT) | pos;
+				for (u32 i = 0; i < DELTA_SEARCH_DEPTH; i++) {
+					const u32 cur_match = c->delta_hash_table[hash][i];
+					c->delta_hash_table[hash][i] = next;
+
+					if (power == cur_match >> DELTA_SOURCE_POWER_SHIFT) {
+						const u32 offset = pos - (cur_match & DELTA_SOURCE_RAW_OFFSET_MASK);
+						if ((offset & (span - 1)) == 0) {
+							const u32 len = lzms_extend_delta_match(in_next,
+												in_next - offset,
+												0,
+												in_end - in_next,
+												span);
+							if (len > best_len) {
+								best_len = len;
+								best_offset = offset;
+							}
+						}
+					}
+
+					next = cur_match;
+				}
+
 				c->next_delta_hashes[power] = next_hash;
 				prefetch(&c->delta_hash_table[next_hash]);
 
-				if (power != cur_match >> DELTA_SOURCE_POWER_SHIFT)
+				if (best_len < NBYTES_HASHED_FOR_DELTA)
 					continue;
 
-				const u32 offset = pos - (cur_match & DELTA_SOURCE_RAW_OFFSET_MASK);
-
-				/* The offset must be a multiple of span.  */
-				if (offset & (span - 1))
-					continue;
-
-				const u8 * const matchptr = in_next - offset;
-
-				/* Check the first 3 bytes before entering the
-				 * extension loop.  */
-				BUILD_BUG_ON(NBYTES_HASHED_FOR_DELTA != 3);
-				if (((u8)(*(in_next + 0) - *(in_next + 0 - span)) !=
-				     (u8)(*(matchptr + 0) - *(matchptr + 0 - span))) ||
-				    ((u8)(*(in_next + 1) - *(in_next + 1 - span)) !=
-				     (u8)(*(matchptr + 1) - *(matchptr + 1 - span))) ||
-				    ((u8)(*(in_next + 2) - *(in_next + 2 - span)) !=
-				     (u8)(*(matchptr + 2) - *(matchptr + 2 - span))))
-					continue;
-
-				/* Extend the delta match to its full length.  */
-				const u32 len = lzms_extend_delta_match(in_next,
-									matchptr,
-									3,
-									in_end - in_next,
-									span);
+				const u32 offset = best_offset;
+				const u32 len = best_len;
 
 				const u32 raw_offset = offset >> power;
 				const u32 pair = (power << DELTA_SOURCE_POWER_SHIFT) |
