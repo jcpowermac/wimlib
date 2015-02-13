@@ -291,6 +291,8 @@ struct lzms_compressor {
 	 */
 	bool use_delta_matches;
 
+	unsigned num_offset_slots;
+
 	/* 'last_target_usages' is a large array that is only needed for
 	 * preprocessing, so it is in union with fields that don't need to be
 	 * initialized until after preprocessing.  */
@@ -311,6 +313,8 @@ struct lzms_compressor {
 
 	/* Table: length => current cost for small match lengths  */
 	u32 fast_length_cost_tab[MAX_FAST_LENGTH + 1];
+
+	u32 lz_offset_slot_cost_tab[LZMS_MAX_NUM_OFFSET_SYMS];
 
 	/* Range encoder which outputs to the beginning of the compressed data
 	 * buffer, proceeding forwards  */
@@ -786,6 +790,9 @@ lzms_encode_delta_power_symbol(struct lzms_compressor *c, unsigned sym)
 static void
 lzms_update_fast_length_costs(struct lzms_compressor *c);
 
+static void
+lzms_update_lz_offset_slot_costs(struct lzms_compressor *c);
+
 /*
  * Encode a match length.  If this causes the Huffman code for length symbols to
  * be rebuilt, also update the length costs array used by the parser.
@@ -809,7 +816,8 @@ lzms_encode_lz_offset(struct lzms_compressor *c, u32 offset)
 {
 	unsigned slot = lzms_comp_get_offset_slot(c, offset);
 
-	lzms_encode_lz_offset_symbol(c, slot);
+	if (lzms_encode_lz_offset_symbol(c, slot))
+		lzms_update_lz_offset_slot_costs(c);
 	lzms_write_bits(&c->os, offset - lzms_offset_slot_base[slot],
 			lzms_extra_offset_bits[slot],
 			LZMS_MAX_EXTRA_OFFSET_BITS);
@@ -1042,6 +1050,16 @@ lzms_update_fast_length_costs(struct lzms_compressor *c)
 	}
 }
 
+static void
+lzms_update_lz_offset_slot_costs(struct lzms_compressor *c)
+{
+	for (unsigned slot = 0; slot < c->num_offset_slots; slot++) {
+		u32 num_bits = c->lz_offset_lens[slot] +
+			       lzms_extra_offset_bits[slot];
+		c->lz_offset_slot_cost_tab[slot] = num_bits << COST_SHIFT;
+	}
+}
+
 /* Return the cost to encode the specified match length, which must not exceed
  * MAX_FAST_LENGTH.  */
 static inline u32
@@ -1055,8 +1073,7 @@ static inline u32
 lzms_lz_offset_cost(const struct lzms_compressor *c, u32 offset)
 {
 	unsigned slot = lzms_comp_get_offset_slot(c, offset);
-	u32 num_bits = c->lz_offset_lens[slot] + lzms_extra_offset_bits[slot];
-	return num_bits << COST_SHIFT;
+	return c->lz_offset_slot_cost_tab[slot];
 }
 
 /* Return the cost to encode the specified delta power and raw offset.  */
@@ -1310,6 +1327,8 @@ lzms_near_optimal_parse(struct lzms_compressor *c)
 
 	/* Set initial length costs for lengths <= MAX_FAST_LENGTH.  */
 	lzms_update_fast_length_costs(c);
+
+	lzms_update_lz_offset_slot_costs(c);
 
 	/* Set up the initial adaptive state.  */
 	lzms_init_adaptive_state(&c->optimum_nodes[0].state);
@@ -2215,6 +2234,8 @@ lzms_compress(const void *in, size_t in_nbytes,
 	c->in_nbytes = in_nbytes;
 	lzms_x86_filter(c->in_buffer, in_nbytes, c->last_target_usages, false);
 
+	c->num_offset_slots = lzms_get_num_offset_slots(in_nbytes);
+
 	/* Prepare the matchfinders.  */
 	lcpit_matchfinder_load_buffer(&c->mf, c->in_buffer, c->in_nbytes);
 	if (c->use_delta_matches)
@@ -2224,7 +2245,7 @@ lzms_compress(const void *in, size_t in_nbytes,
 	lzms_range_encoder_init(&c->rc, out, out_nbytes_avail / sizeof(le16));
 	lzms_output_bitstream_init(&c->os, out, out_nbytes_avail / sizeof(le16));
 	lzms_init_states_and_probabilities(c);
-	lzms_init_huffman_codes(c, lzms_get_num_offset_slots(in_nbytes));
+	lzms_init_huffman_codes(c, c->num_offset_slots);
 
 	/* The main loop: parse and encode.  */
 	lzms_near_optimal_parse(c);
