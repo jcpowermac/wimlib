@@ -1732,8 +1732,12 @@ begin:
 				if (unlikely(pos < span))
 					continue;
 
-				u32 best_len = 0;
-				u32 best_offset;
+				u32 best_len = 2;
+				u32 num_matches = 0;
+				struct delta_match {
+					u32 length;
+					u32 offset;
+				} matches[DELTA_SEARCH_DEPTH * 2];
 
 				const u32 next_hash = lzms_delta_hash(in_next + 1, span);
 				const u32 hash = c->next_delta_hashes[power];
@@ -1753,7 +1757,10 @@ begin:
 												span);
 							if (len > best_len) {
 								best_len = len;
-								best_offset = offset;
+								matches[num_matches++] = (struct delta_match) {
+									.length = len,
+									.offset = offset,
+								};
 							}
 						}
 					}
@@ -1767,17 +1774,13 @@ begin:
 				if (best_len < NBYTES_HASHED_FOR_DELTA)
 					continue;
 
-				const u32 offset = best_offset;
-				const u32 len = best_len;
-
-				const u32 raw_offset = offset >> power;
-				const u32 pair = (power << DELTA_SOURCE_POWER_SHIFT) |
-						 raw_offset;
-				const u32 source = DELTA_SOURCE_TAG |
-						   (pair + LZMS_NUM_DELTA_REPS - 1);
-
 				/* Early out for long explicit offset delta match  */
-				if (len >= c->mf.nice_match_len) {
+				if (matches[num_matches - 1].length >= c->mf.nice_match_len) {
+					const u32 len = matches[num_matches - 1].length;
+					const u32 raw_offset = matches[num_matches - 1].offset >> power;
+					const u32 pair = (power << DELTA_SOURCE_POWER_SHIFT) | raw_offset;
+					const u32 source = DELTA_SOURCE_TAG |
+							   (pair + LZMS_NUM_DELTA_REPS - 1);
 
 					in_next = lzms_skip_bytes(c, len - 1, in_next + 1);
 
@@ -1796,30 +1799,38 @@ begin:
 					goto begin;
 				}
 
-				while (end_node < cur_node + len)
+				while (end_node < cur_node + matches[num_matches - 1].length)
 					(++end_node)->cost = INFINITE_COST;
 
-				u32 base_cost = cur_node->cost +
+				const u32 base_cost = cur_node->cost +
 						lzms_bit_1_cost(cur_node->state.main_state,
 								c->main_probs) +
 						lzms_bit_1_cost(cur_node->state.match_state,
 								c->match_probs) +
 						lzms_bit_0_cost(cur_node->state.delta_state,
-								c->delta_probs) +
-						lzms_delta_source_cost(c, power, raw_offset);
+								c->delta_probs);
 
 				u32 l = NBYTES_HASHED_FOR_DELTA;
+				u32 i = 0;
 				do {
-					u32 cost = base_cost + lzms_fast_length_cost(c, l);
-					if (cost < (cur_node + l)->cost) {
-						(cur_node + l)->cost = cost;
-						(cur_node + l)->item = (struct lzms_item) {
-							.length = l,
-							.source = source,
-						};
-						(cur_node + l)->num_extra_items = 0;
-					}
-				} while (++l <= len);
+					const u32 raw_offset = matches[i].offset >> power;
+					const u32 pair = (power << DELTA_SOURCE_POWER_SHIFT) | raw_offset;
+					const u32 source = DELTA_SOURCE_TAG |
+							   (pair + LZMS_NUM_DELTA_REPS - 1);
+					const u32 position_cost = base_cost +
+								lzms_delta_source_cost(c, power, raw_offset);
+					do {
+						u32 cost = position_cost + lzms_fast_length_cost(c, l);
+						if (cost < (cur_node + l)->cost) {
+							(cur_node + l)->cost = cost;
+							(cur_node + l)->item = (struct lzms_item) {
+								.length = l,
+								.source = source,
+							};
+							(cur_node + l)->num_extra_items = 0;
+						}
+					} while (++l <= matches[i].length);
+				} while (++i != num_matches);
 			}
 		}
 
