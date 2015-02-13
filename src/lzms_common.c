@@ -349,7 +349,7 @@ void
 lzms_init_probability_entries(struct lzms_probability_entry *entries, size_t count)
 {
 	for (size_t i = 0; i < count; i++) {
-		entries[i].prob = LZMS_INITIAL_PROBABILITY;
+		entries[i].num_recent_zero_bits = LZMS_INITIAL_PROBABILITY;
 		entries[i].recent_bits = LZMS_INITIAL_RECENT_BITS;
 	}
 }

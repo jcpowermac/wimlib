@@ -43,12 +43,12 @@ lzms_get_num_offset_slots(size_t uncompressed_size);
 /* Probability entry for use by the range coder when in a specific state  */
 struct lzms_probability_entry {
 
-	/* The probability value, with an implied denominator of
-	 * LZMS_PROBABILITY_DENOMINATOR.  This is equal to the number of zeroes
-	 * in the most recent LZMS_PROBABILITY_DENOMINATOR bits that have been
-	 * coded using this probability entry.  This is a cached value because
-	 * it can be computed as the number of zeroes in @recent_bits.  */
-	u32 prob;
+	/* The number of zeroes in the most recent LZMS_PROBABILITY_DENOMINATOR
+	 * bits that have been decoded or encoded using this probability entry.
+	 * The probability of the next bit being 0 is this value over
+	 * LZMS_PROBABILITY_DENOMINATOR, except for the cases where this would
+	 * imply 0% or 100% probability.  */
+	u32 num_recent_zero_bits;
 
 	/* The most recent LZMS_PROBABILITY_DENOMINATOR bits that have been
 	 * coded using this probability entry.  The bits are ordered such that
@@ -68,9 +68,8 @@ lzms_update_probability_entry(struct lzms_probability_entry *entry, int bit)
 	s32 delta_zero_bits = (s32)(entry->recent_bits >>
 				    (LZMS_PROBABILITY_DENOMINATOR - 1)) - bit;
 
-	entry->prob += delta_zero_bits;
-	entry->recent_bits <<= 1;
-	entry->recent_bits |= bit;
+	entry->num_recent_zero_bits += delta_zero_bits;
+	entry->recent_bits = (entry->recent_bits << 1) | bit;
 }
 
 /* Given a probability entry, return the chance out of
@@ -78,12 +77,12 @@ lzms_update_probability_entry(struct lzms_probability_entry *entry, int bit)
 static inline u32
 lzms_get_probability(const struct lzms_probability_entry *prob_entry)
 {
-	u32 prob = prob_entry->prob;
+	u32 prob = prob_entry->num_recent_zero_bits;
 
 	/* 0% and 100% probabilities aren't allowed.  */
 	if (prob == 0)
 		prob++;
-	if (prob == LZMS_PROBABILITY_DENOMINATOR)
+	else if (prob == LZMS_PROBABILITY_DENOMINATOR)
 		prob--;
 	return prob;
 }

@@ -30,7 +30,6 @@
 
 #include "wimlib/compress_common.h"
 #include "wimlib/compressor_ops.h"
-#include "wimlib/endianness.h"
 #include "wimlib/error.h"
 #include "wimlib/lcpit_matchfinder.h"
 #include "wimlib/lz_extend.h"
@@ -64,7 +63,7 @@
 
 /* Length of the hash table for finding delta matches  */
 #define DELTA_HASH_ORDER	17
-#define DELTA_HASH_LENGTH	(1 << DELTA_HASH_ORDER)
+#define DELTA_HASH_LENGTH	((u32)1 << DELTA_HASH_ORDER)
 
 /* The number of bytes to hash when finding delta matches; also taken to be the
  * minimum length of an explicit offset delta match  */
@@ -119,7 +118,7 @@ struct lzms_range_encoder {
 	 * unit must be written  */
 	le16 *next;
 
-	/* Pointer just past the end of the output buffer  */
+	/* Pointer to just past the end of the output buffer  */
 	le16 *end;
 };
 
@@ -133,23 +132,24 @@ struct lzms_huffman_rebuild_info {
 	/* The number of symbols in this code  */
 	unsigned num_syms;
 
-	/* The rebuild frequency (in symbols) of this code  */
+	/* The rebuild frequency of this code, in symbols  */
 	unsigned rebuild_freq;
 
-	/* The Huffman codeword for each symbol  */
+	/* The Huffman codeword of each symbol in this code  */
 	u32 *codewords;
 
 	/* The length of each Huffman codeword, in bits  */
 	u8 *lens;
 
-	/* The frequency of each symbol  */
+	/* The frequency of each symbol in this code  */
 	u32 *freqs;
 };
 
 /*
  * The compressor-internal representation of a match or literal.
  *
- * Literals have length=1; matches have length > 1.
+ * Literals have length=1; matches have length > 1.  (We disallow matches of
+ * length 1, even though this is a valid length in LZMS.)
  *
  * The source is encoded as follows:
  *
@@ -176,7 +176,7 @@ check_that_powers_fit_in_bitfield(void)
 	BUILD_BUG_ON(LZMS_NUM_DELTA_POWER_SYMS > (1 << (31 - DELTA_SOURCE_POWER_SHIFT)));
 }
 
-/* A stripped-down version of the adaptive state in LZMS, excluding the
+/* A stripped-down version of the adaptive state in LZMS which excludes the
  * probability entries and Huffman codes  */
 struct lzms_adaptive_state {
 
@@ -244,7 +244,7 @@ struct lzms_optimum_node {
 	 * prefix, ending at a position, where that path prefix is *not* the
 	 * minimum cost path to that position.  This can happen if such a path
 	 * prefix results in a different adaptive state which results in lower
-	 * costs later.  Although this algorithm does do some heuristic
+	 * costs later.  Although the algorithm does do some heuristic
 	 * multi-item lookaheads, it does not solve this problem in general.
 	 *
 	 * Note: this adaptive state structure also does not include the
@@ -271,8 +271,8 @@ struct lzms_compressor {
 	 * Boolean flags to enable consideration of various types of multi-step
 	 * operations during parsing.
 	 *
-	 * Multi-step operations can help with gaps where two matches are
-	 * separated by a non-matching byte.
+	 * Among other cases, multi-step operations can help with gaps where two
+	 * matches are separated by a non-matching byte.
 	 *
 	 * This idea is borrowed from Igor Pavlov's LZMA encoder.
 	 */
@@ -281,9 +281,9 @@ struct lzms_compressor {
 	bool try_lzmatch_lit_lzrep0;
 
 	/*
-	 * If true, the compressor can output delta matches.  This often
-	 * improves the compression ratio slightly, but it slows down
-	 * compression.
+	 * If true, the compressor can use delta matches.  This slows down
+	 * compression.  It improves the compression ratio greatly, slightly, or
+	 * not at all, depending on the input data.
 	 */
 	bool use_delta_matches;
 
@@ -293,7 +293,7 @@ struct lzms_compressor {
 	union {
 	struct {
 
-	/* Temporary space to store matches found by the matchfinder  */
+	/* Temporary space to store matches found by the LZ matchfinder  */
 	struct lz_match matches[MAX_FAST_LENGTH - LZMS_MIN_MATCH_LENGTH + 1];
 
 	/* Hash table for finding delta matches  */
@@ -439,7 +439,7 @@ lzms_comp_get_length_slot(const struct lzms_compressor *c, u32 length)
 
 /*
  * Return the offset slot for the specified match offset, using the compressor's
- * acceleration tables if the offset is small enough.
+ * acceleration tables to speed up the mapping.
  */
 static inline unsigned
 lzms_comp_get_offset_slot(const struct lzms_compressor *c, u32 offset)
@@ -475,16 +475,18 @@ lzms_range_encoder_init(struct lzms_range_encoder *rc, le16 *out, size_t count)
 /*
  * Attempt to flush bits from the range encoder.
  *
- * This is based on the public domain code for LZMA written by Igor Pavlov.  The
- * only differences in this function are that in LZMS the bits must be output in
- * 16-bit coding units instead of 8-bit coding units, and that in LZMS the first
- * coding unit is not ignored by the decompressor, so the encoder cannot output
- * a dummy value to that position.
- *
  * The basic idea is that we're writing bits from @rc->lower_bound to the
- * output.  However, due to carrying, the writing of coding units with value
- * 0xffff, as well as one prior coding unit, must be delayed until it is
+ * output.  However, due to carrying, the writing of coding units with the
+ * maximum value, as well as one prior coding unit, must be delayed until it is
  * determined whether a carry is needed.
+ *
+ * This is based on the public domain code for LZMA written by Igor Pavlov, but
+ * with the following differences:
+ *
+ *	- In LZMS, 16-bit coding units are required rather than 8-bit.
+ *
+ *	- In LZMS, the first coding unit is not ignored by the decompressor, so
+ *	  the encoder cannot output a dummy value to that position.
  */
 static void
 lzms_range_encoder_shift_low(struct lzms_range_encoder *rc)
@@ -525,8 +527,8 @@ lzms_range_encoder_flush(struct lzms_range_encoder *rc)
 /*
  * Encode the next bit using the range encoder.
  *
- * @prob is the probability (out of LZMS_PROBABILITY_DENOMINATOR) that the next
- * bit is a 0.
+ * @prob is the probability out of LZMS_PROBABILITY_DENOMINATOR that the next
+ * bit is 0 rather than 1.
  */
 static inline void
 lzms_range_encode_bit(struct lzms_range_encoder *rc, int bit, u32 prob)
@@ -955,7 +957,9 @@ lzms_encode_item_list(struct lzms_compressor *c,
  * bit costs multiplied by 1<<COST_SHIFT and rounded down to the nearest
  * integer.  Furthermore, the values stored for 0% and 100% probabilities are
  * equal to the adjacent values, since these probabilities are not actually
- * permitted.
+ * permitted.  This allows us to use the num_recent_zero_bits value from the
+ * lzms_probability_entry as the array index without fixing up these two special
+ * cases.
  */
 static const u32 lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR + 1] = {
 	384, 384, 320, 282, 256, 235, 218, 204,
@@ -986,7 +990,7 @@ lzms_compute_bit_costs(void)
 		u32 prob = i;
 		if (prob == 0)
 			prob++;
-		if (prob == LZMS_PROBABILITY_DENOMINATOR)
+		else if (prob == LZMS_PROBABILITY_DENOMINATOR)
 			prob--;
 
 		lzms_bit_costs[i] = -log2((double)prob / LZMS_PROBABILITY_DENOMINATOR) *
@@ -999,14 +1003,15 @@ lzms_compute_bit_costs(void)
 static inline u32
 lzms_bit_0_cost(unsigned state, const struct lzms_probability_entry *probs)
 {
-	return lzms_bit_costs[probs[state].prob];
+	return lzms_bit_costs[probs[state].num_recent_zero_bits];
 }
 
 /* Return the cost to encode a 1 bit in the specified context.  */
 static inline u32
 lzms_bit_1_cost(unsigned state, const struct lzms_probability_entry *probs)
 {
-	return lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR - probs[state].prob];
+	return lzms_bit_costs[LZMS_PROBABILITY_DENOMINATOR -
+			      probs[state].num_recent_zero_bits];
 }
 
 /* Return the cost to encode a literal, including the main bit.  */
@@ -1187,18 +1192,18 @@ lzms_init_delta_matchfinder(struct lzms_compressor *c)
 }
 
 /*
- * Compute a hash code for the first NBYTES_HASHED_FOR_DELTA bytes of the
- * sequence beginning at @p when taken in a delta context with the specified
- * @span.
+ * Compute a DELTA_HASH_ORDER-bit hash code for the first
+ * NBYTES_HASHED_FOR_DELTA bytes of the sequence beginning at @p when taken in a
+ * delta context with the specified @span.
  */
 static inline u32
 lzms_delta_hash(const u8 *p, u32 span)
 {
-	/* A delta match must have a certain span and an offset that is a
-	 * multiple of the span.  To reduce wasted space we use a single
-	 * combined hash table, and to minimize collisions we include in the
-	 * hash code computation the span and the low-order bits of the current
-	 * position.  */
+	/* A delta match has a certain span and an offset that is a multiple of
+	 * that span.  To reduce wasted space we use a single combined hash
+	 * table for all spans and positions, but to minimize collisions we
+	 * include in the hash code computation the span and the low-order bits
+	 * of the current position.  */
 
 	BUILD_BUG_ON(NBYTES_HASHED_FOR_DELTA != 3);
 	u8 d0 = *(p + 0) - *(p + 0 - span);
@@ -1287,8 +1292,9 @@ lzms_skip_bytes(struct lzms_compressor *c, u32 count, const u8 *in_next)
  * states, costs are assumed to be constant throughout a single run of the
  * parsing algorithm, which can parse up to NUM_OPTIM_NODES bytes of data.  This
  * introduces a source of non-optimality because the probabilities and Huffman
- * codes can change over this part of the data.  And of course, there are many
- * other reasons why the result isn't optimal in terms of compression ratio.
+ * codes can change over this part of the data.  And of course, there are
+ * various other reasons why the result isn't optimal in terms of compression
+ * ratio.
  */
 static void
 lzms_near_optimal_parse(struct lzms_compressor *c)
@@ -1905,8 +1911,8 @@ begin:
 					source &= ~DELTA_SOURCE_TAG;
 
 					if (source >= LZMS_NUM_DELTA_REPS) {
-						u32 pair = source - (LZMS_NUM_DELTA_REPS - 1);
 						/* Explicit offset delta match  */
+						u32 pair = source - (LZMS_NUM_DELTA_REPS - 1);
 						lzms_update_delta_state(&cur_node->state, 0);
 						cur_node->state.upcoming_delta_pair = pair;
 					} else {
@@ -2064,10 +2070,10 @@ lzms_init_huffman_codes(struct lzms_compressor *c, unsigned num_offset_slots)
  * the available space.
  */
 static size_t
-lzms_finalize(struct lzms_compressor *c, u8 *out, size_t out_nbytes_avail)
+lzms_finalize(struct lzms_compressor *c)
 {
-	size_t num_forwards_bytes;
-	size_t num_backwards_bytes;
+	size_t num_forwards_units;
+	size_t num_backwards_units;
 
 	/* Flush both the forwards and backwards streams, and make sure they
 	 * didn't cross each other and start overwriting each other's data.  */
@@ -2085,12 +2091,12 @@ lzms_finalize(struct lzms_compressor *c, u8 *out, size_t out_nbytes_avail)
 	 * bitstream.  Move the data output by the backwards bitstream to be
 	 * adjacent to the data output by the forward bitstream, and calculate
 	 * the compressed size that this results in.  */
-	num_forwards_bytes = (u8 *)c->rc.next - out;
-	num_backwards_bytes = (out + out_nbytes_avail) - (u8 *)c->os.next;
+	num_forwards_units = c->rc.next - c->rc.begin;
+	num_backwards_units = c->rc.end - c->os.next;
 
-	memmove(out + num_forwards_bytes, c->os.next, num_backwards_bytes);
+	memmove(c->rc.next, c->os.next, num_backwards_units * sizeof(le16));
 
-	return num_forwards_bytes + num_backwards_bytes;
+	return (num_forwards_units + num_backwards_units) * sizeof(le16);
 }
 
 static u64
@@ -2127,7 +2133,7 @@ lzms_create_compressor(size_t max_bufsize, unsigned compression_level,
 		goto oom0;
 
 	/* Scale nice_match_len with the compression level.  But to allow an
-	 * optimization on length cost calculations, don't allow nice_match_len
+	 * optimization for length cost calculations, don't allow nice_match_len
 	 * to exceed MAX_FAST_LENGTH.  */
 	nice_match_len = min(((u64)compression_level * 63) / 50, MAX_FAST_LENGTH);
 
@@ -2167,11 +2173,6 @@ lzms_compress(const void *in, size_t in_nbytes,
 	if (in_nbytes < 4)
 		return 0;
 
-	/* Cap the available compressed size to a 32-bit integer and it round
-	 * down to the nearest multiple of 2 so it can be evenly divided into
-	 * 16-bit integers.  */
-	out_nbytes_avail = min(out_nbytes_avail, UINT32_MAX) & ~1;
-
 	/* Copy the input data into the internal buffer and preprocess it.  */
 	memcpy(c->in_buffer, in, in_nbytes);
 	c->in_nbytes = in_nbytes;
@@ -2192,7 +2193,7 @@ lzms_compress(const void *in, size_t in_nbytes,
 	lzms_near_optimal_parse(c);
 
 	/* Return the compressed data size or 0.  */
-	return lzms_finalize(c, out, out_nbytes_avail);
+	return lzms_finalize(c);
 }
 
 static void
