@@ -55,7 +55,7 @@
  * step forward before forcing the pending items to be encoded.  If this value
  * is increased, then there will be fewer forced flushes, but the probability
  * entries and Huffman codes will be more likely to become outdated.  */
-#define NUM_OPTIM_NODES		2048
+#define NUM_OPTIM_NODES		4096
 
 /* COST_SHIFT is a scaling factor that makes it possible to consider fractional
  * bit costs.  A single bit has a cost of (1 << COST_SHIFT).  */
@@ -366,6 +366,10 @@ struct lzms_compressor {
 	u32 delta_power_codewords[LZMS_NUM_DELTA_POWER_SYMS];
 	u8 delta_power_lens[LZMS_NUM_DELTA_POWER_SYMS];
 	u32 delta_power_freqs[LZMS_NUM_DELTA_POWER_SYMS];
+
+	u32 tmp_freqs[LZMS_MAX_NUM_SYMS];
+	u32 tmp_codewords[LZMS_MAX_NUM_SYMS];
+	u8 tmp_lens[LZMS_MAX_NUM_SYMS];
 
 	}; /* struct */
 
@@ -2057,15 +2061,171 @@ begin:
 		/*fprintf(stderr, "%zu: %u %u %u\n", cur_node - c->optimum_nodes,*/
 		       /*cur_node->literal_count, cur_node->length_count, cur_node->lz_offset_count);*/
 		if (cur_node == end_node ||
-		    cur_node == &c->optimum_nodes[NUM_OPTIM_NODES] ||
-		    (cur_node->literal_count >= c->literal_rebuild_info.num_syms_until_rebuild ||
-		     cur_node->length_count >= c->length_rebuild_info.num_syms_until_rebuild ||
-		     cur_node->lz_offset_count >= c->lz_offset_rebuild_info.num_syms_until_rebuild))
-
+		    cur_node == &c->optimum_nodes[NUM_OPTIM_NODES])
 		{
 			lzms_encode_nonempty_item_list(c, cur_node);
 			c->optimum_nodes[0].state = cur_node->state;
 			goto begin;
+		}
+
+		if (cur_node->literal_count >= c->literal_rebuild_info.num_syms_until_rebuild ||
+		    cur_node->length_count >= c->length_rebuild_info.num_syms_until_rebuild ||
+		    cur_node->lz_offset_count >= c->lz_offset_rebuild_info.num_syms_until_rebuild)
+		{
+			struct lzms_optimum_node *p;
+
+			if (cur_node->literal_count >= c->literal_rebuild_info.num_syms_until_rebuild) {
+
+				/*fprintf(stderr, "%tu, %tu; early update of literal costs\n",*/
+					/*in_next - c->in_buffer, cur_node - c->optimum_nodes);*/
+
+				memcpy(c->tmp_freqs, c->literal_freqs,
+				       sizeof(c->tmp_freqs[0]) * LZMS_NUM_LITERAL_SYMS);
+
+				unsigned num_literals_updated = 0;
+				
+				p = cur_node;
+				do {
+					struct lzms_item item = p->item;
+					if (p->num_extra_items > 0) {
+						/* Handle an arrival via multi-item lookahead.  */
+						unsigned i = 0;
+						struct lzms_optimum_node *orig_node = p;
+						do {
+							p -= item.length;
+
+							if (item.length == 1) {
+								c->tmp_freqs[item.source]++;
+								num_literals_updated++;
+							}
+
+							item = orig_node->extra_items[i];
+						} while (++i != orig_node->num_extra_items);
+					}
+					p -= item.length;
+
+					if (item.length == 1) {
+						c->tmp_freqs[item.source]++;
+						num_literals_updated++;
+					}
+				} while (p != c->optimum_nodes);
+
+				/*fprintf(stderr, "num_literals_updated=%u\n", num_literals_updated);*/
+
+				make_canonical_huffman_code(LZMS_NUM_LITERAL_SYMS,
+							    LZMS_MAX_CODEWORD_LENGTH,
+							    c->tmp_freqs,
+							    c->tmp_lens,
+							    c->tmp_codewords);
+				for (u32 i = 0; i < LZMS_NUM_LITERAL_SYMS; i++)
+					c->literal_cost_tab[i] = (u32)c->tmp_lens[i] << COST_SHIFT;
+
+				for (unsigned i = 0; i < c->mf.nice_match_len; i++)
+					(cur_node + i)->literal_count = 0;
+			}
+
+			if (cur_node->length_count >= c->length_rebuild_info.num_syms_until_rebuild) {
+
+				/*fprintf(stderr, "%tu, %tu; early update of length costs\n",*/
+					/*in_next - c->in_buffer, cur_node - c->optimum_nodes);*/
+
+				memcpy(c->tmp_freqs, c->length_freqs,
+				       sizeof(c->tmp_freqs[0]) * LZMS_NUM_LENGTH_SYMS);
+				
+				p = cur_node;
+				do {
+					struct lzms_item item = p->item;
+					if (p->num_extra_items > 0) {
+						/* Handle an arrival via multi-item lookahead.  */
+						unsigned i = 0;
+						struct lzms_optimum_node *orig_node = p;
+						do {
+							p -= item.length;
+
+							if (item.length > 1)
+								c->tmp_freqs[lzms_comp_get_length_slot(c, item.length)]++;
+
+							item = orig_node->extra_items[i];
+						} while (++i != orig_node->num_extra_items);
+					}
+					p -= item.length;
+
+					if (item.length > 1)
+						c->tmp_freqs[lzms_comp_get_length_slot(c, item.length)]++;
+				} while (p != c->optimum_nodes);
+
+				make_canonical_huffman_code(LZMS_NUM_LENGTH_SYMS,
+							    LZMS_MAX_CODEWORD_LENGTH,
+							    c->tmp_freqs,
+							    c->tmp_lens,
+							    c->tmp_codewords);
+				int slot = -1;
+				u32 cost = 0;
+				for (u32 len = LZMS_MIN_MATCH_LENGTH; len <= MAX_FAST_LENGTH; len++) {
+					if (len >= lzms_length_slot_base[slot + 1]) {
+						slot++;
+						cost = (u32)(c->tmp_lens[slot] +
+							     lzms_extra_length_bits[slot]) << COST_SHIFT;
+					}
+					c->fast_length_cost_tab[len] = cost;
+				}
+
+				for (unsigned i = 0; i < c->mf.nice_match_len; i++)
+					(cur_node + i)->length_count = 0;
+			}
+
+			if (cur_node->lz_offset_count >= c->lz_offset_rebuild_info.num_syms_until_rebuild) {
+
+				/*fprintf(stderr, "%tu, %tu; early update of lz offset costs\n",*/
+					/*in_next - c->in_buffer, cur_node - c->optimum_nodes);*/
+
+				memcpy(c->tmp_freqs, c->lz_offset_freqs,
+				       sizeof(c->tmp_freqs[0]) * c->num_offset_slots);
+				
+				p = cur_node;
+				do {
+					struct lzms_item item = p->item;
+					if (p->num_extra_items > 0) {
+						/* Handle an arrival via multi-item lookahead.  */
+						unsigned i = 0;
+						struct lzms_optimum_node *orig_node = p;
+						do {
+							p -= item.length;
+
+							if (!(item.source & DELTA_SOURCE_TAG) &&
+							    item.source >= LZMS_NUM_LZ_REPS)
+							{
+								c->tmp_freqs[lzms_comp_get_offset_slot(c, item.source -
+												       (LZMS_NUM_LZ_REPS - 1))]++;
+							}
+
+							item = orig_node->extra_items[i];
+						} while (++i != orig_node->num_extra_items);
+					}
+					p -= item.length;
+
+					if (!(item.source & DELTA_SOURCE_TAG) &&
+					    item.source >= LZMS_NUM_LZ_REPS)
+					{
+						c->tmp_freqs[lzms_comp_get_offset_slot(c, item.source -
+										       (LZMS_NUM_LZ_REPS - 1))]++;
+					}
+				} while (p != c->optimum_nodes);
+
+				make_canonical_huffman_code(c->num_offset_slots,
+							    LZMS_MAX_CODEWORD_LENGTH,
+							    c->tmp_freqs,
+							    c->tmp_lens,
+							    c->tmp_codewords);
+				for (unsigned slot = 0; slot < c->num_offset_slots; slot++) {
+					u32 num_bits = c->tmp_lens[slot] +
+						       lzms_extra_offset_bits[slot];
+					c->lz_offset_slot_cost_tab[slot] = num_bits << COST_SHIFT;
+				}
+
+				for (unsigned i = 0; i < c->mf.nice_match_len; i++)
+					(cur_node + i)->lz_offset_count = 0;
+			}
 		}
 	}
 }
