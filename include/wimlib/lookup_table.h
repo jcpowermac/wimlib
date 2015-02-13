@@ -23,7 +23,7 @@ enum resource_location {
 	 * `struct wim_resource_spec' pointed to by @rspec.  @offset_in_res
 	 * identifies the offset at which this particular stream begins in the
 	 * uncompressed data of the resource; this is normally 0, but in general
-	 * a WIM resource may be "packed" and potentially contain multiple
+	 * a WIM resource may be "solid" and potentially contain multiple
 	 * streams.  */
 	RESOURCE_IN_WIM,
 
@@ -200,9 +200,9 @@ struct wim_lookup_table_entry {
 				/* List node used for stream size table.  */
 				struct hlist_node hash_list_2;
 
-				/* Metadata for the underlying packed resource
-				 * in the WIM being written (only valid if
-				 * WIM_RESHDR_FLAG_PACKED_STREAMS set in
+				/* Metadata for the underlying solid resource in
+				 * the WIM being written (only valid if
+				 * WIM_RESHDR_FLAG_SOLID set in
 				 * out_reshdr.flags).  */
 				struct {
 					u64 out_res_offset_in_wim;
