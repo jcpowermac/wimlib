@@ -795,7 +795,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 	new_blob->staging_dir_fd	   = ctx->staging_dir_fd;
 	new_blob->size		   = size;
 
-	add_unhashed_stream(new_blob, inode, stream_id,
+	add_unhashed_blob(new_blob, inode, stream_id,
 			    &wim_get_current_image_metadata(ctx->wim)->unhashed_blobs);
 	if (stream_idx == 0)
 		inode->i_blob = new_blob;

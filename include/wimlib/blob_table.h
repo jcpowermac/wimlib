@@ -385,7 +385,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 			    struct blob_table *blob_table);
 
 static inline void
-add_unhashed_stream(struct blob_info *blob,
+add_unhashed_blob(struct blob_info *blob,
 		    struct wim_inode *back_inode,
 		    u32 back_stream_id,
 		    struct list_head *unhashed_blobs)

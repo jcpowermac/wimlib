@@ -124,7 +124,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 	blob->file_inode = inode;
 	blob->resource_location = RESOURCE_IN_FILE_ON_DISK;
 	blob->size = size;
-	add_unhashed_stream(blob, inode, 0, unhashed_blobs);
+	add_unhashed_blob(blob, inode, 0, unhashed_blobs);
 	inode->i_blob = blob;
 	return 0;
 }
