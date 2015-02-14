@@ -56,7 +56,7 @@
 
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/progress.h"
@@ -392,7 +392,7 @@ wim_pathname_to_stream(const struct wimfs_context *ctx, const char *path,
 
 	inode = dentry->d_inode;
 
-	if (inode_resolve_streams(inode, wim->lookup_table, false))
+	if (inode_resolve_streams(inode, wim->blob_table, false))
 		return -EIO;
 
 	if (!(lookup_flags & LOOKUP_FLAG_DIRECTORY_OK)
@@ -505,10 +505,10 @@ create_dentry(struct fuse_context *fuse_ctx, const char *path,
  */
 static void
 remove_dentry(struct wim_dentry *dentry,
-	      struct wim_lookup_table *lookup_table)
+	      struct wim_blob_table *blob_table)
 {
 	/* Drop the reference to each stream the inode contains.  */
-	inode_unref_blobs(dentry->d_inode, lookup_table);
+	inode_unref_blobs(dentry->d_inode, blob_table);
 
 	/* Unlink the dentry from the image's dentry tree.  */
 	unlink_dentry(dentry);
@@ -734,7 +734,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 		 * we're opening.  Therefore, all the references to the lookup
 		 * table entry correspond to the stream we're trying to extract,
 		 * so the lookup table entry can be re-used.  */
-		lookup_table_unlink(ctx->wim->lookup_table, old_blob);
+		blob_table_unlink(ctx->wim->blob_table, old_blob);
 		blob_put_resource(old_blob);
 		new_blob = old_blob;
 	} else {
@@ -742,7 +742,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 		 * has other references.  Or, there was no old lookup table
 		 * entry, so we need to create a new one anyway.  */
 
-		new_blob = new_lookup_table_entry();
+		new_blob = new_blob_table_entry();
 		if (unlikely(!new_blob)) {
 			ret = -ENOMEM;
 			goto out_delete_staging_file;
@@ -816,7 +816,7 @@ out_revert_fd_changes:
 			new_blob->num_opened_fds--;
 		}
 	}
-	free_lookup_table_entry(new_blob);
+	free_blob_table_entry(new_blob);
 out_delete_staging_file:
 	unlinkat(ctx->staging_dir_fd, staging_file_name, 0);
 	FREE(staging_file_name);
@@ -972,13 +972,13 @@ static void
 release_extra_refcnts(struct wimfs_context *ctx)
 {
 	struct list_head *list = &ctx->orig_stream_list;
-	struct wim_lookup_table *lookup_table = ctx->wim->lookup_table;
+	struct wim_blob_table *blob_table = ctx->wim->blob_table;
 	struct blob_info *blob, *tmp;
 
 	list_for_each_entry_safe(blob, tmp, list, orig_stream_list) {
 		u32 n = blob->out_refcnt;
 		while (n--)
-			blob_decrement_refcnt(blob, lookup_table);
+			blob_decrement_refcnt(blob, blob_table);
 	}
 }
 
@@ -996,7 +996,7 @@ delete_empty_streams(struct wimfs_context *ctx)
                 if (!blob->size) {
                         *retrieve_blob_pointer(blob) = NULL;
                         list_del(&blob->unhashed_list);
-                        free_lookup_table_entry(blob);
+                        free_blob_table_entry(blob);
                 }
         }
 }
@@ -1052,7 +1052,7 @@ renew_current_image(struct wimfs_context *ctx)
 	/* Create new stream reference for the modified image's metadata
 	 * resource, which doesn't exist yet.  */
 	ret = WIMLIB_ERR_NOMEM;
-	new_blob = new_lookup_table_entry();
+	new_blob = new_blob_table_entry();
 	if (!new_blob)
 		goto err_put_replace_imd;
 	new_blob->flags = WIM_RESHDR_FLAG_METADATA;
@@ -1078,7 +1078,7 @@ renew_current_image(struct wimfs_context *ctx)
 err_undo_append:
 	wim->hdr.image_count--;
 err_free_new_blob:
-	free_lookup_table_entry(new_blob);
+	free_blob_table_entry(new_blob);
 err_put_replace_imd:
 	put_image_metadata(replace_imd, NULL);
 err:
@@ -1780,7 +1780,7 @@ wimfs_removexattr(const char *path, const char *name)
 	if (!ads_entry)
 		return (errno == ENOENT) ? -ENOATTR : -errno;
 
-	inode_remove_ads(inode, ads_entry, ctx->wim->lookup_table);
+	inode_remove_ads(inode, ads_entry, ctx->wim->blob_table);
 	return 0;
 }
 
@@ -1808,7 +1808,7 @@ wimfs_rmdir(const char *path)
 		return -ENOTEMPTY;
 
 	touch_parent(dentry);
-	remove_dentry(dentry, wim->lookup_table);
+	remove_dentry(dentry, wim->blob_table);
 	return 0;
 }
 
@@ -1863,10 +1863,10 @@ wimfs_setxattr(const char *path, const char *name,
 	}
 
 	if (!inode_add_ads_with_data(inode, name, value,
-				     size, ctx->wim->lookup_table))
+				     size, ctx->wim->blob_table))
 		return -errno;
 	if (existing_entry)
-		inode_remove_ads(inode, existing_entry, ctx->wim->lookup_table);
+		inode_remove_ads(inode, existing_entry, ctx->wim->blob_table);
 	return 0;
 }
 
@@ -1884,9 +1884,9 @@ wimfs_symlink(const char *to, const char *from)
 		return ret;
 	dentry->d_inode->i_reparse_tag = WIM_IO_REPARSE_TAG_SYMLINK;
 	ret = wim_inode_set_symlink(dentry->d_inode, to,
-				    wimfs_ctx->wim->lookup_table);
+				    wimfs_ctx->wim->blob_table);
 	if (ret) {
-		remove_dentry(dentry, wimfs_ctx->wim->lookup_table);
+		remove_dentry(dentry, wimfs_ctx->wim->blob_table);
 		if (ret == WIMLIB_ERR_NOMEM)
 			ret = -ENOMEM;
 		else
@@ -1946,11 +1946,11 @@ wimfs_unlink(const char *path)
 
 	if (inode_stream_name_nbytes(dentry->d_inode, stream_idx) == 0) {
 		touch_parent(dentry);
-		remove_dentry(dentry, ctx->wim->lookup_table);
+		remove_dentry(dentry, ctx->wim->blob_table);
 	} else {
 		inode_remove_ads(dentry->d_inode,
 				 &dentry->d_inode->i_ads_entries[stream_idx - 1],
-				 ctx->wim->lookup_table);
+				 ctx->wim->blob_table);
 	}
 	return 0;
 }
@@ -2153,7 +2153,7 @@ wimlib_mount_image(WIMStruct *wim, int image, const char *dir,
 		image_for_each_inode(inode, imd) {
 			for (i = 0; i <= inode->i_num_ads; i++) {
 				blob = inode_get_blob_for_stream(inode, i,
-						       wim->lookup_table);
+						       wim->blob_table);
 				if (blob)
 					blob->out_refcnt = 0;
 			}
@@ -2162,7 +2162,7 @@ wimlib_mount_image(WIMStruct *wim, int image, const char *dir,
 		image_for_each_inode(inode, imd) {
 			for (i = 0; i <= inode->i_num_ads; i++) {
 				blob = inode_get_blob_for_stream(inode, i,
-						       wim->lookup_table);
+						       wim->blob_table);
 				if (blob) {
 					if (blob->out_refcnt == 0)
 						list_add(&blob->orig_stream_list,

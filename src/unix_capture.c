@@ -35,7 +35,7 @@
 #include "wimlib/capture.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/reparse.h"
 #include "wimlib/timestamp.h"
 #include "wimlib/unix_data.h"
@@ -115,7 +115,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 	file_on_disk = STRDUP(path);
 	if (!file_on_disk)
 		return WIMLIB_ERR_NOMEM;
-	blob = new_lookup_table_entry();
+	blob = new_blob_table_entry();
 	if (!blob) {
 		FREE(file_on_disk);
 		return WIMLIB_ERR_NOMEM;
@@ -307,7 +307,7 @@ unix_scan_symlink(const char *full_path, int dirfd, const char *relpath,
 		if (ret)
 			return ret;
 	}
-	ret = wim_inode_set_symlink(inode, dest, params->lookup_table);
+	ret = wim_inode_set_symlink(inode, dest, params->blob_table);
 	if (ret)
 		return ret;
 
@@ -438,7 +438,7 @@ out_progress:
 		ret = do_capture_progress(params, WIMLIB_SCAN_DENTRY_EXCLUDED, NULL);
 out:
 	if (unlikely(ret)) {
-		free_dentry_tree(tree, params->lookup_table);
+		free_dentry_tree(tree, params->blob_table);
 		tree = NULL;
 		ret = report_capture_error(params, ret, full_path);
 	}

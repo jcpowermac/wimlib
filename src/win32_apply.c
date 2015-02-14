@@ -32,7 +32,7 @@
 #include "wimlib/capture.h" /* for mangle_pat() and match_pattern_list()  */
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/reparse.h"
@@ -52,7 +52,7 @@ struct win32_apply_ctx {
 		u64 data_source_id;
 		struct string_set *prepopulate_pats;
 		void *mem_prepopulate_pats;
-		u8 wim_lookup_table_hash[SHA1_HASH_SIZE];
+		u8 wim_blob_table_hash[SHA1_HASH_SIZE];
 		bool wof_running;
 		bool tried_to_load_prepopulate_list;
 	} wimboot;
@@ -290,7 +290,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 	    (dentry->d_inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 					      FILE_ATTRIBUTE_REPARSE_POINT |
 					      FILE_ATTRIBUTE_ENCRYPTED)) ||
-	    !(blob = inode_get_blob_for_unnamed_stream(dentry->d_inode, ctx->common.wim->lookup_table)))
+	    !(blob = inode_get_blob_for_unnamed_stream(dentry->d_inode, ctx->common.wim->blob_table)))
 	{
 		WARNING("%ls does not exist in WIM image!", path);
 		return WIMLIB_ERR_PATH_DOES_NOT_EXIST;
@@ -474,7 +474,7 @@ set_external_backing(HANDLE h, struct wim_inode *inode, struct win32_apply_ctx *
 		if (unlikely(!wimboot_set_pointer(h,
 						  inode_get_blob_for_unnamed_stream_resolved(inode),
 						  ctx->wimboot.data_source_id,
-						  ctx->wimboot.wim_lookup_table_hash,
+						  ctx->wimboot.wim_blob_table_hash,
 						  ctx->wimboot.wof_running)))
 		{
 			const DWORD err = GetLastError();
@@ -490,9 +490,9 @@ set_external_backing(HANDLE h, struct wim_inode *inode, struct win32_apply_ctx *
 
 /* Calculates the SHA-1 message digest of the WIM's lookup table.  */
 static int
-hash_lookup_table(WIMStruct *wim, u8 hash[SHA1_HASH_SIZE])
+hash_blob_table(WIMStruct *wim, u8 hash[SHA1_HASH_SIZE])
 {
-	return wim_reshdr_to_hash(&wim->hdr.lookup_table_reshdr, wim, hash);
+	return wim_reshdr_to_hash(&wim->hdr.blob_table_reshdr, wim, hash);
 }
 
 /* Prepare for doing a "WIMBoot" extraction by loading patterns from
@@ -511,8 +511,8 @@ start_wimboot_extraction(struct win32_apply_ctx *ctx)
 	if (!wim_info_get_wimboot(wim->wim_info, wim->current_image))
 		WARNING("Image is not marked as WIMBoot compatible!");
 
-	ret = hash_lookup_table(ctx->common.wim,
-				ctx->wimboot.wim_lookup_table_hash);
+	ret = hash_blob_table(ctx->common.wim,
+				ctx->wimboot.wim_blob_table_hash);
 	if (ret)
 		return ret;
 

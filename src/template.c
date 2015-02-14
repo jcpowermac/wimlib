@@ -29,7 +29,7 @@
 #include "wimlib/assert.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/util.h"
 
@@ -38,7 +38,7 @@
 static bool
 inode_metadata_consistent(const struct wim_inode *inode,
 			  const struct wim_inode *template_inode,
-			  const struct wim_lookup_table *template_lookup_table)
+			  const struct wim_blob_table *template_blob_table)
 {
 	/* Must have exact same creation time and last write time.  */
 	if (inode->i_creation_time != template_inode->i_creation_time ||
@@ -66,7 +66,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
 
 		blob = inode_get_blob_for_stream_resolved(inode, i);
 		template_blob = inode_get_blob_for_stream(template_inode, i,
-						template_lookup_table);
+						template_blob_table);
 
 		/* Compare stream sizes.  */
 		if (blob && template_blob) {
@@ -112,7 +112,7 @@ inode_copy_checksums(struct wim_inode *inode,
 
 		blob = inode_get_blob_for_stream_resolved(inode, i);
 		template_blob = inode_get_blob_for_stream(template_inode, i,
-						template_wim->lookup_table);
+						template_wim->blob_table);
 
 		/* Only take action if both entries exist, the entry for @inode
 		 * has no checksum calculated, but the entry for @template_inode
@@ -133,16 +133,16 @@ inode_copy_checksums(struct wim_inode *inode,
 		if (wim == template_wim)
 			replace_blob = template_blob;
 		else
-			replace_blob = lookup_stream(wim->lookup_table,
+			replace_blob = lookup_stream(wim->blob_table,
 						    template_blob->hash);
 
 		list_del(&blob->unhashed_list);
 		if (replace_blob) {
-			free_lookup_table_entry(blob);
+			free_blob_table_entry(blob);
 		} else {
 			copy_hash(blob->hash, template_blob->hash);
 			blob->unhashed = 0;
-			lookup_table_insert(wim->lookup_table, blob);
+			blob_table_insert(wim->blob_table, blob);
 			blob->refcnt = 0;
 			replace_blob = blob;
 		}
@@ -190,7 +190,7 @@ dentry_reference_template(struct wim_dentry *dentry, void *_args)
 	template_inode = template_dentry->d_inode;
 
 	if (inode_metadata_consistent(inode, template_inode,
-				      template_wim->lookup_table)) {
+				      template_wim->blob_table)) {
 		/*DEBUG("\"%"TS"\": No change detected", dentry->_full_path);*/
 		ret = inode_copy_checksums(inode, template_inode,
 					   wim, template_wim);

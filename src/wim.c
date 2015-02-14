@@ -38,7 +38,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/file_io.h"
 #include "wimlib/integrity.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #ifdef WITH_NTFS_3G
 #  include "wimlib/ntfs_3g.h" /* for do_ntfs_umount() */
@@ -182,7 +182,7 @@ WIMLIBAPI int
 wimlib_create_new_wim(int ctype, WIMStruct **wim_ret)
 {
 	WIMStruct *wim;
-	struct wim_lookup_table *table;
+	struct wim_blob_table *table;
 	int ret;
 
 	ret = wimlib_global_init(WIMLIB_INIT_FLAG_ASSUME_UTF8);
@@ -197,12 +197,12 @@ wimlib_create_new_wim(int ctype, WIMStruct **wim_ret)
 	if (ret)
 		goto out_free_wim;
 
-	table = new_lookup_table(9001);
+	table = new_blob_table(9001);
 	if (!table) {
 		ret = WIMLIB_ERR_NOMEM;
 		goto out_free_wim;
 	}
-	wim->lookup_table = table;
+	wim->blob_table = table;
 	wim->compression_type = ctype;
 	wim->out_compression_type = ctype;
 	wim->chunk_size = wim->hdr.chunk_size;
@@ -217,7 +217,7 @@ out_free_wim:
 
 static void
 destroy_image_metadata(struct wim_image_metadata *imd,
-		       struct wim_lookup_table *table,
+		       struct wim_blob_table *table,
 		       bool free_metadata_blob)
 {
 	free_dentry_tree(imd->root_dentry, table);
@@ -226,13 +226,13 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 	imd->security_data = NULL;
 
 	if (free_metadata_blob) {
-		free_lookup_table_entry(imd->metadata_blob);
+		free_blob_table_entry(imd->metadata_blob);
 		imd->metadata_blob = NULL;
 	}
 	if (!table) {
 		struct blob_info *blob, *tmp;
 		list_for_each_entry_safe(blob, tmp, &imd->unhashed_streams, unhashed_list)
-			free_lookup_table_entry(blob);
+			free_blob_table_entry(blob);
 	}
 	INIT_LIST_HEAD(&imd->unhashed_streams);
 	INIT_LIST_HEAD(&imd->inode_list);
@@ -246,7 +246,7 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 
 void
 put_image_metadata(struct wim_image_metadata *imd,
-		   struct wim_lookup_table *table)
+		   struct wim_blob_table *table)
 {
 	if (imd && --imd->refcnt == 0) {
 		destroy_image_metadata(imd, table, true);
@@ -726,8 +726,8 @@ begin_read(WIMStruct *wim, const void *wim_filename_or_fd, int open_flags)
 	}
 
 	if (open_flags & WIMLIB_OPEN_FLAG_FROM_PIPE) {
-		wim->lookup_table = new_lookup_table(9001);
-		if (!wim->lookup_table)
+		wim->blob_table = new_blob_table(9001);
+		if (!wim->blob_table)
 			return WIMLIB_ERR_NOMEM;
 	} else {
 
@@ -743,7 +743,7 @@ begin_read(WIMStruct *wim, const void *wim_filename_or_fd, int open_flags)
 			return WIMLIB_ERR_IMAGE_COUNT;
 		}
 
-		ret = read_wim_lookup_table(wim);
+		ret = read_wim_blob_table(wim);
 		if (ret)
 			return ret;
 	}
@@ -821,11 +821,11 @@ wim_checksum_unhashed_streams(WIMStruct *wim)
 		struct wim_image_metadata *imd = wim->image_metadata[i];
 		image_for_each_unhashed_stream_safe(blob, tmp, imd) {
 			struct blob_info *new_blob;
-			ret = hash_unhashed_stream(blob, wim->lookup_table, &new_blob);
+			ret = hash_unhashed_stream(blob, wim->blob_table, &new_blob);
 			if (ret)
 				return ret;
 			if (new_blob != blob)
-				free_lookup_table_entry(blob);
+				free_blob_table_entry(blob);
 		}
 	}
 	return 0;
@@ -883,7 +883,7 @@ wimlib_free(WIMStruct *wim)
 	if (filedes_valid(&wim->out_fd))
 		filedes_close(&wim->out_fd);
 
-	free_lookup_table(wim->lookup_table);
+	free_blob_table(wim->blob_table);
 
 	wimlib_free_decompressor(wim->decompressor);
 

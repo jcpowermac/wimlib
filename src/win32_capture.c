@@ -35,7 +35,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/paths.h"
 #include "wimlib/reparse.h"
 
@@ -819,7 +819,7 @@ static int
 winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path,
 				 struct list_head *unhashed_streams)
 {
-	struct blob_info *blob = new_lookup_table_entry();
+	struct blob_info *blob = new_blob_table_entry();
 	int ret;
 
 	if (unlikely(!blob))
@@ -827,7 +827,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 
 	blob->file_on_disk = WCSDUP(nt_path);
 	if (unlikely(!blob->file_on_disk)) {
-		free_lookup_table_entry(blob);
+		free_blob_table_entry(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
 	blob->resource_location = RESOURCE_WIN32_ENCRYPTED;
@@ -838,7 +838,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 
 	ret = win32_get_encrypted_file_size(blob->file_on_disk, &blob->size);
 	if (unlikely(ret)) {
-		free_lookup_table_entry(blob);
+		free_blob_table_entry(blob);
 		return ret;
 	}
 
@@ -955,7 +955,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		return WIMLIB_ERR_NOMEM;
 
 	/* Set up the lookup table entry for the stream.  */
-	blob = new_lookup_table_entry();
+	blob = new_blob_table_entry();
 	if (!blob) {
 		FREE(stream_path);
 		return WIMLIB_ERR_NOMEM;
@@ -1362,7 +1362,7 @@ retry_open:
 			inode->i_not_rpfixed = not_rpfixed;
 			inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
 			ret = inode_set_unnamed_stream(inode, rpbuf + 8, rpbuflen - 8,
-						       params->lookup_table);
+						       params->blob_table);
 			if (ret)
 				goto out;
 		}
@@ -1409,7 +1409,7 @@ out:
 	if (likely(h))
 		(*func_NtClose)(h);
 	if (unlikely(ret)) {
-		free_dentry_tree(root, params->lookup_table);
+		free_dentry_tree(root, params->blob_table);
 		root = NULL;
 		ret = report_capture_error(params, ret, full_path);
 	}

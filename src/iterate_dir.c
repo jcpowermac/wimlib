@@ -29,7 +29,7 @@
 #include "wimlib.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/security.h"
@@ -88,7 +88,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 		wdentry->unix_rdev = unix_data.rdev;
 	}
 
-	blob = inode_get_blob_for_unnamed_stream(inode, wim->lookup_table);
+	blob = inode_get_blob_for_unnamed_stream(inode, wim->blob_table);
 	if (blob) {
 		blob_to_wimlib_resource_entry(blob, &wdentry->streams[0].resource);
 	} else if (!is_zero_hash(hash = inode_unnamed_stream_hash(inode))) {
@@ -101,7 +101,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	for (unsigned i = 0; i < inode->i_num_ads; i++) {
 		if (!inode->i_ads_entries[i].stream_name_nbytes)
 			continue;
-		blob = inode_get_blob_for_stream(inode, i + 1, wim->lookup_table);
+		blob = inode_get_blob_for_stream(inode, i + 1, wim->blob_table);
 		wdentry->num_named_streams++;
 		if (blob) {
 			blob_to_wimlib_resource_entry(blob, &wdentry->streams[

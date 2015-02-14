@@ -36,7 +36,7 @@
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
 #include "wimlib/inode.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/security.h"
 #include "wimlib/timestamp.h"
 
@@ -306,7 +306,7 @@ inode_add_ads(struct wim_inode *inode, const tchar *stream_name)
 struct wim_ads_entry *
 inode_add_ads_with_data(struct wim_inode *inode, const tchar *name,
 			const void *value, size_t size,
-			struct wim_lookup_table *lookup_table)
+			struct wim_blob_table *blob_table)
 {
 	struct wim_ads_entry *new_entry;
 
@@ -316,7 +316,7 @@ inode_add_ads_with_data(struct wim_inode *inode, const tchar *name,
 	if (unlikely(!new_entry))
 		return NULL;
 
-	new_entry->blob = new_stream_from_data_buffer(value, size, lookup_table);
+	new_entry->blob = new_stream_from_data_buffer(value, size, blob_table);
 	if (unlikely(!new_entry->blob)) {
 		inode_remove_ads(inode, new_entry, NULL);
 		return NULL;
@@ -327,7 +327,7 @@ inode_add_ads_with_data(struct wim_inode *inode, const tchar *name,
 /* Remove an alternate data stream from a WIM inode.  */
 void
 inode_remove_ads(struct wim_inode *inode, struct wim_ads_entry *entry,
-		 struct wim_lookup_table *lookup_table)
+		 struct wim_blob_table *blob_table)
 {
 	struct blob_info *blob;
 	unsigned idx = entry - inode->i_ads_entries;
@@ -337,7 +337,7 @@ inode_remove_ads(struct wim_inode *inode, struct wim_ads_entry *entry,
 
 	blob = entry->blob;
 	if (blob)
-		blob_decrement_refcnt(blob, lookup_table);
+		blob_decrement_refcnt(blob, blob_table);
 
 	destroy_ads_entry(entry);
 
@@ -362,12 +362,12 @@ inode_has_named_stream(const struct wim_inode *inode)
  * unnamed stream.  */
 int
 inode_set_unnamed_stream(struct wim_inode *inode, const void *data, size_t len,
-			 struct wim_lookup_table *lookup_table)
+			 struct wim_blob_table *blob_table)
 {
 	wimlib_assert(inode->i_resolved);
 	wimlib_assert(!inode->i_blob);
 
-	inode->i_blob = new_stream_from_data_buffer(data, len, lookup_table);
+	inode->i_blob = new_stream_from_data_buffer(data, len, blob_table);
 	if (!inode->i_blob)
 		return WIMLIB_ERR_NOMEM;
 	return 0;
@@ -397,7 +397,7 @@ inode_set_unnamed_stream(struct wim_inode *inode, const void *data, size_t len,
  * single-instance stream referenced by the inode was missing.
  */
 int
-inode_resolve_streams(struct wim_inode *inode, struct wim_lookup_table *table,
+inode_resolve_streams(struct wim_inode *inode, struct wim_blob_table *table,
 		      bool force)
 {
 	const u8 *hash;
@@ -415,11 +415,11 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_lookup_table *table,
 		blob = lookup_stream(table, hash);
 		if (!blob) {
 			if (force) {
-				blob = new_lookup_table_entry();
+				blob = new_blob_table_entry();
 				if (!blob)
 					return WIMLIB_ERR_NOMEM;
 				copy_hash(blob->hash, hash);
-				lookup_table_insert(table, blob);
+				blob_table_insert(table, blob);
 			} else {
 				goto stream_not_found;
 			}
@@ -437,11 +437,11 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_lookup_table *table,
 			ads_blob = lookup_stream(table, hash);
 			if (!ads_blob) {
 				if (force) {
-					ads_blob = new_lookup_table_entry();
+					ads_blob = new_blob_table_entry();
 					if (!ads_blob)
 						return WIMLIB_ERR_NOMEM;
 					copy_hash(ads_blob->hash, hash);
-					lookup_table_insert(table, ads_blob);
+					blob_table_insert(table, ads_blob);
 				} else {
 					goto stream_not_found;
 				}
@@ -510,7 +510,7 @@ stream_not_found_error(const struct wim_inode *inode, const u8 *hash)
  */
 struct blob_info *
 inode_get_blob_for_stream(const struct wim_inode *inode, unsigned stream_idx,
-		 const struct wim_lookup_table *table)
+		 const struct wim_blob_table *table)
 {
 	if (inode->i_resolved)
 		return inode_get_blob_for_stream_resolved(inode, stream_idx);
@@ -554,7 +554,7 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
  */
 struct blob_info *
 inode_get_blob_for_unnamed_stream(const struct wim_inode *inode,
-		  const struct wim_lookup_table *table)
+		  const struct wim_blob_table *table)
 {
 	struct blob_info *blob;
 
@@ -630,14 +630,14 @@ inode_ref_blobs(struct wim_inode *inode)
  * This is necessary when deleting a hard link to this inode.  */
 void
 inode_unref_blobs(struct wim_inode *inode,
-		    struct wim_lookup_table *lookup_table)
+		    struct wim_blob_table *blob_table)
 {
 	for (unsigned i = 0; i <= inode->i_num_ads; i++) {
 		struct blob_info *blob;
 
-		blob = inode_get_blob_for_stream(inode, i, lookup_table);
+		blob = inode_get_blob_for_stream(inode, i, blob_table);
 		if (blob)
-			blob_decrement_refcnt(blob, lookup_table);
+			blob_decrement_refcnt(blob, blob_table);
 	}
 }
 

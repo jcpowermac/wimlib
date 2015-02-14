@@ -85,7 +85,7 @@ wim_get_current_security_data(WIMStruct *wim)
 
 extern void
 put_image_metadata(struct wim_image_metadata *imd,
-		   struct wim_lookup_table *table);
+		   struct wim_blob_table *table);
 
 extern int
 append_image_metadata(WIMStruct *wim, struct wim_image_metadata *imd);

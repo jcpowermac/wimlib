@@ -88,7 +88,7 @@ struct wim_header_disk {
 	u32 image_count;
 
 	/* +0x30: Location and size of the WIM's lookup table.  */
-	struct wim_reshdr_disk lookup_table_reshdr;
+	struct wim_reshdr_disk blob_table_reshdr;
 
 	/* +0x48: Location and size of the WIM's XML data.  */
 	struct wim_reshdr_disk xml_data_reshdr;
@@ -128,7 +128,7 @@ struct wim_header {
 	u16 part_number;
 	u16 total_parts;
 	u32 image_count;
-	struct wim_reshdr lookup_table_reshdr;
+	struct wim_reshdr blob_table_reshdr;
 	struct wim_reshdr xml_data_reshdr;
 	struct wim_reshdr boot_metadata_reshdr;
 	u32 boot_idx;

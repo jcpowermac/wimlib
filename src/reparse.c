@@ -32,7 +32,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/error.h"
 #include "wimlib/inode.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/reparse.h"
 #include "wimlib/resource.h"
 
@@ -397,7 +397,7 @@ out_free_link_target:
 int
 wim_inode_set_symlink(struct wim_inode *inode,
 		      const char *target,
-		      struct wim_lookup_table *lookup_table)
+		      struct wim_blob_table *blob_table)
 
 {
 	struct reparse_buffer_disk rpbuf_disk _aligned_attribute(8);
@@ -495,7 +495,7 @@ wim_inode_set_symlink(struct wim_inode *inode,
 		ret = inode_set_unnamed_stream(inode,
 					       (u8*)&rpbuf_disk + 8,
 					       rpbuflen - 8,
-					       lookup_table);
+					       blob_table);
 	}
 	FREE(name_utf16le);
 	return ret;

@@ -37,7 +37,7 @@
 
 #include "wimlib/assert.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/util.h"
 #include "wimlib/wimboot.h"
 #include "wimlib/win32.h"
@@ -1061,7 +1061,7 @@ out:
  *	Unnamed data stream of the file.
  * @data_source_id
  *	Allocated identifier for the WIM data source on the destination volume.
- * @lookup_table_hash
+ * @blob_table_hash
  *	SHA-1 message digest of the WIM's lookup table.
  * @wof_running
  *	%true if the WOF driver appears to be available and working; %false if
@@ -1073,7 +1073,7 @@ bool
 wimboot_set_pointer(HANDLE h,
 		    const struct blob_info *blob,
 		    u64 data_source_id,
-		    const u8 lookup_table_hash[SHA1_HASH_SIZE],
+		    const u8 blob_table_hash[SHA1_HASH_SIZE],
 		    bool wof_running)
 {
 	DWORD bytes_returned;
@@ -1098,7 +1098,7 @@ wimboot_set_pointer(HANDLE h,
 		in.wim_info.data_source_id = data_source_id;
 		copy_hash(in.wim_info.resource_hash, blob->hash);
 
-		/* lookup_table_hash is not necessary  */
+		/* blob_table_hash is not necessary  */
 
 		if (!DeviceIoControl(h, FSCTL_SET_EXTERNAL_BACKING,
 				     &in, sizeof(in), NULL, 0,
@@ -1149,7 +1149,7 @@ wimboot_set_pointer(HANDLE h,
 		in.wim_info.flags = 0;
 		in.wim_info.data_source_id = data_source_id;
 		copy_hash(in.wim_info.resource_hash, blob->hash);
-		copy_hash(in.wim_info.wim_lookup_table_hash, lookup_table_hash);
+		copy_hash(in.wim_info.wim_blob_table_hash, blob_table_hash);
 		in.wim_info.stream_uncompressed_size = blob->size;
 		in.wim_info.stream_compressed_size = blob->rspec->size_in_wim;
 		in.wim_info.stream_offset_in_wim = blob->rspec->offset_in_wim;

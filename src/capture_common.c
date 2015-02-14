@@ -28,7 +28,7 @@
 #include "wimlib/capture.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/paths.h"
 #include "wimlib/progress.h"
 #include "wimlib/textfile.h"

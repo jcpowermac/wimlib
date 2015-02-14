@@ -29,7 +29,7 @@
 #include "wimlib/alloca.h"
 #include "wimlib/error.h"
 #include "wimlib/list.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/progress.h"
 #include "wimlib/resource.h"
@@ -228,7 +228,7 @@ wimlib_split(WIMStruct *wim, const tchar *swm_name,
 			goto out_free_swm_info;
 	}
 
-	ret = for_lookup_table_entry_pos_sorted(wim->lookup_table,
+	ret = for_blob_table_entry_pos_sorted(wim->blob_table,
 						add_stream_to_swm,
 						&swm_info);
 	if (ret)

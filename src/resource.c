@@ -35,7 +35,7 @@
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
 #include "wimlib/file_io.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/resource.h"
 #include "wimlib/sha1.h"
 #include "wimlib/wim.h"
@@ -181,7 +181,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 		/* Alternate chunk table format.  Its header specifies the chunk
 		 * size and compression format.  Note: it could be read here;
 		 * however, the relevant data was already loaded into @rspec by
-		 * read_wim_lookup_table().  */
+		 * read_wim_blob_table().  */
 		cur_read_offset += sizeof(struct alt_chunk_table_header_disk);
 	}
 
@@ -918,7 +918,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	int ret;
 	struct blob_info *blob;
 
-	blob = new_lookup_table_entry();
+	blob = new_blob_table_entry();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -930,7 +930,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	ret = read_full_stream_into_alloc_buf(blob, buf_ret);
 
 	blob_unbind_wim_resource_spec(blob);
-	free_lookup_table_entry(blob);
+	free_blob_table_entry(blob);
 	return ret;
 }
 
@@ -960,7 +960,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 
 	wim_res_hdr_to_spec(reshdr, wim, &rspec);
 
-	blob = new_lookup_table_entry();
+	blob = new_blob_table_entry();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -974,7 +974,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 
 	blob_unbind_wim_resource_spec(blob);
 	copy_hash(hash, blob->hash);
-	free_lookup_table_entry(blob);
+	free_blob_table_entry(blob);
 	return ret;
 }
 

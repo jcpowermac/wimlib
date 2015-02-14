@@ -36,6 +36,7 @@ wimlib.pc: config.status
 libwim_la_SOURCES =		\
 	src/add_image.c		\
 	src/avl_tree.c		\
+	src/blob_table.c	\
 	src/capture_common.c	\
 	src/compress.c		\
 	src/compress_common.c	\
@@ -60,7 +61,6 @@ libwim_la_SOURCES =		\
 	src/join.c		\
 	src/lcpit_matchfinder.c	\
 	src/lcpit_matchfinder_templates.h	\
-	src/lookup_table.c	\
 	src/lzms_common.c	\
 	src/lzms_compress.c	\
 	src/lzms_decompress.c	\
@@ -96,6 +96,7 @@ libwim_la_SOURCES =		\
 	include/wimlib/assert.h		\
 	include/wimlib/avl_tree.h	\
 	include/wimlib/bitops.h		\
+	include/wimlib/blob_table.h	\
 	include/wimlib/bt_matchfinder.h	\
 	include/wimlib/callback.h	\
 	include/wimlib/capture.h	\
@@ -121,7 +122,6 @@ libwim_la_SOURCES =		\
 	include/wimlib/integrity.h	\
 	include/wimlib/lcpit_matchfinder.h
 	include/wimlib/list.h		\
-	include/wimlib/lookup_table.h	\
 	include/wimlib/lz_extend.h	\
 	include/wimlib/lz_hash.h	\
 	include/wimlib/lzms_common.h	\

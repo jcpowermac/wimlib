@@ -50,7 +50,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/pathlist.h"
 #include "wimlib/paths.h"
@@ -226,11 +226,11 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 {
 	struct blob_info *found_blob = NULL;
 	struct wim_resource_spec *rspec = NULL;
-	struct wim_lookup_table *lookup_table;
+	struct wim_blob_table *blob_table;
 	int ret;
 
 	ret = WIMLIB_ERR_NOMEM;
-	found_blob = new_lookup_table_entry();
+	found_blob = new_blob_table_entry();
 	if (!found_blob)
 		goto out;
 
@@ -238,7 +238,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 	if (!rspec)
 		goto out;
 
-	lookup_table = ctx->wim->lookup_table;
+	blob_table = ctx->wim->blob_table;
 	memcpy(ctx->progress.extract.guid, ctx->wim->hdr.guid, WIM_GUID_LEN);
 	ctx->progress.extract.part_number = ctx->wim->hdr.part_number;
 	ctx->progress.extract.total_parts = ctx->wim->hdr.total_parts;
@@ -259,7 +259,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 
 		if ((found_blob->resource_location != RESOURCE_NONEXISTENT)
 		    && !(found_blob->flags & WIM_RESHDR_FLAG_METADATA)
-		    && (needed_blob = lookup_stream(lookup_table, found_blob->hash))
+		    && (needed_blob = lookup_stream(blob_table, found_blob->hash))
 		    && (needed_blob->out_refcnt))
 		{
 			needed_blob->offset_in_res = found_blob->offset_in_res;
@@ -314,7 +314,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 out:
 	if (found_blob && found_blob->resource_location != RESOURCE_IN_WIM)
 		FREE(rspec);
-	free_lookup_table_entry(found_blob);
+	free_blob_table_entry(found_blob);
 	return ret;
 }
 
@@ -573,7 +573,7 @@ extract_stream_list(struct apply_ctx *ctx,
  * unnamed data stream only.  */
 static int
 extract_dentry_to_stdout(struct wim_dentry *dentry,
-			 const struct wim_lookup_table *lookup_table)
+			 const struct wim_blob_table *blob_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct blob_info *blob;
@@ -587,7 +587,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 		return WIMLIB_ERR_NOT_A_REGULAR_FILE;
 	}
 
-	blob = inode_get_blob_for_unnamed_stream(inode, lookup_table);
+	blob = inode_get_blob_for_unnamed_stream(inode, blob_table);
 	if (!blob) {
 		const u8 *hash = inode_unnamed_stream_hash(inode);
 		if (!is_zero_hash(hash))
@@ -601,10 +601,10 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 
 static int
 extract_dentries_to_stdout(struct wim_dentry **dentries, size_t num_dentries,
-			   const struct wim_lookup_table *lookup_table)
+			   const struct wim_blob_table *blob_table)
 {
 	for (size_t i = 0; i < num_dentries; i++) {
-		int ret = extract_dentry_to_stdout(dentries[i], lookup_table);
+		int ret = extract_dentry_to_stdout(dentries[i], blob_table);
 		if (ret)
 			return ret;
 	}
@@ -965,7 +965,7 @@ dentry_list_calculate_extraction_names(struct list_head *dentry_list,
 
 static int
 dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
-		       struct wim_lookup_table *lookup_table)
+		       struct wim_blob_table *blob_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct blob_info *blob;
@@ -979,7 +979,7 @@ dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
 	 * "resolve" the inode's streams anyway by allocating new entries.  */
 	if (extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE)
 		force = true;
-	ret = inode_resolve_streams(inode, lookup_table, force);
+	ret = inode_resolve_streams(inode, blob_table, force);
 	if (ret)
 		return ret;
 	for (u32 i = 0; i <= inode->i_num_ads; i++) {
@@ -1006,7 +1006,7 @@ dentry_list_resolve_streams(struct list_head *dentry_list,
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 		ret = dentry_resolve_streams(dentry,
 					     ctx->extract_flags,
-					     ctx->wim->lookup_table);
+					     ctx->wim->blob_table);
 		if (ret)
 			return ret;
 	}
@@ -1415,7 +1415,7 @@ extract_trees(WIMStruct *wim, struct wim_dentry **trees, size_t num_trees,
 
 	if (extract_flags & WIMLIB_EXTRACT_FLAG_TO_STDOUT) {
 		ret = extract_dentries_to_stdout(trees, num_trees,
-						 wim->lookup_table);
+						 wim->blob_table);
 		goto out;
 	}
 
@@ -1995,7 +1995,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 		struct wim_image_metadata *imd;
 		struct wim_resource_spec *metadata_rspec;
 
-		metadata_blob = new_lookup_table_entry();
+		metadata_blob = new_blob_table_entry();
 		if (metadata_blob == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_wimlib_free;
@@ -2003,7 +2003,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 		metadata_rspec = MALLOC(sizeof(struct wim_resource_spec));
 		if (metadata_rspec == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
-			free_lookup_table_entry(metadata_blob);
+			free_blob_table_entry(metadata_blob);
 			goto out_wimlib_free;
 		}
 

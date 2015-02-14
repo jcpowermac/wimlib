@@ -18,7 +18,7 @@ extern bool
 wimboot_set_pointer(HANDLE h,
 		    const struct blob_info *blob,
 		    u64 data_source_id,
-		    const u8 lookup_table_hash[SHA1_HASH_SIZE],
+		    const u8 blob_table_hash[SHA1_HASH_SIZE],
 		    bool wof_running);
 
 

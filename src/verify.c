@@ -27,7 +27,7 @@
 
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/progress.h"
 #include "wimlib/security.h"
@@ -94,13 +94,13 @@ end_verify_stream(struct blob_info *blob, int status, void *_ctx)
 
 static int
 verify_image_streams_present(struct wim_image_metadata *imd,
-			     struct wim_lookup_table *lookup_table)
+			     struct wim_blob_table *blob_table)
 {
 	struct wim_inode *inode;
 	int ret;
 
 	image_for_each_inode(inode, imd) {
-		ret = inode_resolve_streams(inode, lookup_table, false);
+		ret = inode_resolve_streams(inode, blob_table, false);
 		if (ret)
 			return ret;
 	}
@@ -151,7 +151,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 				return ret;
 
 			ret = verify_image_streams_present(wim_get_current_image_metadata(wim),
-							   wim->lookup_table);
+							   wim->blob_table);
 			if (ret)
 				return ret;
 
@@ -167,7 +167,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 
 	/* Verify the streams  */
 
-	for_lookup_table_entry(wim->lookup_table, append_lte_to_list, &stream_list);
+	for_blob_table_entry(wim->blob_table, append_lte_to_list, &stream_list);
 
 	memset(&progress, 0, sizeof(progress));
 

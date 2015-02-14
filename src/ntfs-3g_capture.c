@@ -42,7 +42,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/ntfs_3g.h"
 #include "wimlib/paths.h"
 #include "wimlib/security.h"
@@ -209,7 +209,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 				ntfs_loc->stream_name_nchars = name_length;
 			}
 
-			blob = new_lookup_table_entry();
+			blob = new_blob_table_entry();
 			if (!blob) {
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
@@ -222,14 +222,14 @@ capture_ntfs_streams(struct wim_inode *inode,
 					ERROR("Invalid reparse data on \"%s\" "
 					      "(only %u bytes)!", path, (unsigned)data_size);
 					ret = WIMLIB_ERR_NTFS_3G;
-					goto out_free_lte;
+					goto out_free_blob;
 				}
 				blob->ntfs_loc->is_reparse_point = true;
 				blob->size = data_size - 8;
 				ret = read_reparse_tag(ni, blob->ntfs_loc,
 						       &inode->i_reparse_tag);
 				if (ret)
-					goto out_free_lte;
+					goto out_free_blob;
 			} else {
 				blob->ntfs_loc->is_reparse_point = false;
 				blob->size = data_size;
@@ -251,7 +251,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 							inode->i_blob->size,
 							blob->size);
 					}
-					free_lookup_table_entry(blob);
+					free_blob_table_entry(blob);
 					continue;
 				}
 			} else {
@@ -268,7 +268,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 							      name_length * 2);
 			if (!new_ads_entry) {
 				ret = WIMLIB_ERR_NOMEM;
-				goto out_free_lte;
+				goto out_free_blob;
 			}
 			wimlib_assert(new_ads_entry->stream_name_nbytes == name_length * 2);
 			stream_id = new_ads_entry->stream_id;
@@ -286,8 +286,8 @@ capture_ntfs_streams(struct wim_inode *inode,
 		ret = WIMLIB_ERR_NTFS_3G;
 	}
 	goto out_put_actx;
-out_free_lte:
-	free_lookup_table_entry(blob);
+out_free_blob:
+	free_blob_table_entry(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {
 		FREE(ntfs_loc->path);
@@ -702,7 +702,7 @@ out_progress:
 		ret = do_capture_progress(params, WIMLIB_SCAN_DENTRY_OK, inode);
 out:
 	if (unlikely(ret)) {
-		free_dentry_tree(root, params->lookup_table);
+		free_dentry_tree(root, params->blob_table);
 		root = NULL;
 		ret = report_capture_error(params, ret, path);
 	}

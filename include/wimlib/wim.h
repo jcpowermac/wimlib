@@ -12,7 +12,7 @@
 
 struct wim_image_metadata;
 struct wim_info;
-struct wim_lookup_table;
+struct wim_blob_table;
 
 /*
  * WIMStruct - represents a WIM, or a part of a non-standalone WIM
@@ -61,7 +61,7 @@ struct WIMStruct {
 	 * file, then this table will index the streams contained in that file.
 	 * In addition, this table may index streams that were added by updates
 	 * or referenced from other WIMStructs.  */
-	struct wim_lookup_table *lookup_table;
+	struct wim_blob_table *blob_table;
 
 	/*
 	 * The 1-based index of the currently selected image in this WIMStruct,
