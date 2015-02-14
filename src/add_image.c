@@ -49,7 +49,7 @@ add_empty_image_metadata(WIMStruct *wim)
 	if (!metadata_blob)
 		goto out;
 
-	metadata_blob->flags = WIM_RESHDR_FLAG_METADATA;
+	metadata_blob->b_flags = WIM_RESHDR_FLAG_METADATA;
 	metadata_blob->unhashed = 1;
 
 	/* Create empty security data (no security descriptors).  */

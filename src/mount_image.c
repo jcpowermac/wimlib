@@ -1055,7 +1055,7 @@ renew_current_image(struct wimfs_context *ctx)
 	new_blob = new_blob_info();
 	if (!new_blob)
 		goto err_put_replace_imd;
-	new_blob->flags = WIM_RESHDR_FLAG_METADATA;
+	new_blob->b_flags = WIM_RESHDR_FLAG_METADATA;
 	new_blob->unhashed = 1;
 
 	/* Make the image being moved available at a new index.  Increments the

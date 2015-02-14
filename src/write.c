@@ -226,7 +226,7 @@ stream_set_out_reshdr_for_reuse(struct blob_info *blob)
 
 	if (rspec->flags & WIM_RESHDR_FLAG_SOLID) {
 
-		wimlib_assert(blob->flags & WIM_RESHDR_FLAG_SOLID);
+		wimlib_assert(blob->b_flags & WIM_RESHDR_FLAG_SOLID);
 
 		blob->out_reshdr.offset_in_wim = blob->offset_in_res;
 		blob->out_reshdr.uncompressed_size = 0;
@@ -236,13 +236,13 @@ stream_set_out_reshdr_for_reuse(struct blob_info *blob)
 		blob->out_res_size_in_wim = rspec->size_in_wim;
 		blob->out_res_uncompressed_size = rspec->uncompressed_size;
 	} else {
-		wimlib_assert(!(blob->flags & WIM_RESHDR_FLAG_SOLID));
+		wimlib_assert(!(blob->b_flags & WIM_RESHDR_FLAG_SOLID));
 
 		blob->out_reshdr.offset_in_wim = rspec->offset_in_wim;
 		blob->out_reshdr.uncompressed_size = rspec->uncompressed_size;
 		blob->out_reshdr.size_in_wim = rspec->size_in_wim;
 	}
-	blob->out_reshdr.flags = blob->flags;
+	blob->out_reshdr.flags = blob->b_flags;
 }
 
 
@@ -265,7 +265,7 @@ write_pwm_stream_header(const struct blob_info *blob,
 		copy_hash(stream_hdr.hash, blob->hash);
 	}
 
-	reshdr_flags = filter_resource_flags(blob->flags);
+	reshdr_flags = filter_resource_flags(blob->b_flags);
 	reshdr_flags |= additional_reshdr_flags;
 	stream_hdr.flags = cpu_to_le32(reshdr_flags);
 	ret = full_write(out_fd, &stream_hdr, sizeof(stream_hdr));
@@ -890,7 +890,7 @@ should_rewrite_stream_uncompressed(const struct write_streams_ctx *ctx,
 	 * obtain the uncompressed data by decompressing the compressed data we
 	 * wrote to the output file.
 	 */
-	if ((blob->flags & WIM_RESHDR_FLAG_SOLID) &&
+	if ((blob->b_flags & WIM_RESHDR_FLAG_SOLID) &&
 	    (blob->out_reshdr.size_in_wim != blob->out_reshdr.uncompressed_size))
 		return false;
 
@@ -1021,7 +1021,7 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 			if (ret)
 				return ret;
 
-			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
+			blob->out_reshdr.flags = filter_resource_flags(blob->b_flags);
 			if (ctx->compressor != NULL)
 				blob->out_reshdr.flags |= WIM_RESHDR_FLAG_COMPRESSED;
 
@@ -1395,7 +1395,7 @@ remove_zero_length_streams(struct list_head *blob_list)
 			blob->out_reshdr.offset_in_wim = 0;
 			blob->out_reshdr.size_in_wim = 0;
 			blob->out_reshdr.uncompressed_size = 0;
-			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
+			blob->out_reshdr.flags = filter_resource_flags(blob->b_flags);
 		}
 	}
 }
@@ -1711,7 +1711,7 @@ write_blob_list(struct list_head *blob_list,
 		offset_in_res = 0;
 		list_for_each_entry(blob, &ctx.solid_streams, write_streams_list) {
 			blob->out_reshdr.size_in_wim = blob->b_size;
-			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
+			blob->out_reshdr.flags = filter_resource_flags(blob->b_flags);
 			blob->out_reshdr.flags |= WIM_RESHDR_FLAG_SOLID;
 			blob->out_reshdr.uncompressed_size = 0;
 			blob->out_reshdr.offset_in_wim = offset_in_res;
@@ -1839,7 +1839,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	blob->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
 	blob->attached_buffer    = (void*)buf;
 	blob->b_size               = buf_size;
-	blob->flags              = reshdr_flags;
+	blob->b_flags              = reshdr_flags;
 
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_PIPABLE) {
 		sha1_buffer(buf, buf_size, blob->hash);

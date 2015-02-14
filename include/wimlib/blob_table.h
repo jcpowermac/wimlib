@@ -79,13 +79,13 @@ struct stream_owner {
 struct blob_info {
 
 	/* List node for a hash bucket of the lookup table.  */
-	struct hlist_node hash_list;
+	struct hlist_node b_hash_list;
 
 	/* Uncompressed size of this stream.  */
 	u64 b_size;
 
 	/* Stream flags (WIM_RESHDR_FLAG_*).  */
-	u32 flags : 8;
+	u32 b_flags : 8;
 
 	/* One of the `enum resource_location' values documented above.  */
 	u32 resource_location : 4;

@@ -168,7 +168,7 @@ add_stream_to_swm(struct blob_info *blob, void *_swm_info)
 	if (swm_info->num_parts == 0 ||
 	    ((swm_info->parts[swm_info->num_parts - 1].size +
 			stream_size >= swm_info->max_part_size)
-	     && !((blob->flags & WIM_RESHDR_FLAG_METADATA) ||
+	     && !((blob->b_flags & WIM_RESHDR_FLAG_METADATA) ||
 		   swm_info->parts[swm_info->num_parts - 1].size == 0)))
 	{
 		if (swm_info->num_parts == swm_info->num_alloc_parts) {
@@ -192,7 +192,7 @@ add_stream_to_swm(struct blob_info *blob, void *_swm_info)
 		swm_info->parts[swm_info->num_parts - 1].size = 0;
 	}
 	swm_info->parts[swm_info->num_parts - 1].size += stream_size;
-	if (!(blob->flags & WIM_RESHDR_FLAG_METADATA)) {
+	if (!(blob->b_flags & WIM_RESHDR_FLAG_METADATA)) {
 		list_add_tail(&blob->write_streams_list,
 			      &swm_info->parts[swm_info->num_parts - 1].blob_list);
 	}

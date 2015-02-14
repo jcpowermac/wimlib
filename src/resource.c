@@ -742,7 +742,7 @@ int
 skip_wim_stream(struct blob_info *blob)
 {
 	wimlib_assert(blob->resource_location == RESOURCE_IN_WIM);
-	wimlib_assert(!(blob->flags & WIM_RESHDR_FLAG_SOLID));
+	wimlib_assert(!(blob->b_flags & WIM_RESHDR_FLAG_SOLID));
 	DEBUG("Skipping stream (size=%"PRIu64")", blob->b_size);
 	return read_partial_wim_resource(blob->rspec,
 					 0,
@@ -923,7 +923,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 		return WIMLIB_ERR_NOMEM;
 
 	blob_bind_wim_resource_spec(blob, rspec);
-	blob->flags = rspec->flags;
+	blob->b_flags = rspec->flags;
 	blob->b_size = rspec->uncompressed_size;
 	blob->offset_in_res = 0;
 
@@ -965,7 +965,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 		return WIMLIB_ERR_NOMEM;
 
 	blob_bind_wim_resource_spec(blob, &rspec);
-	blob->flags = rspec.flags;
+	blob->b_flags = rspec.flags;
 	blob->b_size = rspec.uncompressed_size;
 	blob->offset_in_res = 0;
 	blob->unhashed = 1;
@@ -1344,7 +1344,7 @@ read_blob_list(struct list_head *blob_list,
 	{
 		blob = (struct blob_info*)((u8*)cur - list_head_offset);
 
-		if (blob->flags & WIM_RESHDR_FLAG_SOLID &&
+		if (blob->b_flags & WIM_RESHDR_FLAG_SOLID &&
 		    blob->b_size != blob->rspec->uncompressed_size)
 		{
 

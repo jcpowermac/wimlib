@@ -318,7 +318,7 @@ blob_table_insert_raw(struct blob_table *table,
 {
 	size_t i = blob->hash_short % table->capacity;
 
-	hlist_add_head(&blob->hash_list, &table->array[i]);
+	hlist_add_head(&blob->b_hash_list, &table->array[i]);
 }
 
 static void
@@ -340,8 +340,8 @@ enlarge_blob_table(struct blob_table *table)
 	table->capacity = new_capacity;
 
 	for (i = 0; i < old_capacity; i++) {
-		hlist_for_each_entry_safe(blob, cur, tmp, &old_array[i], hash_list) {
-			hlist_del(&blob->hash_list);
+		hlist_for_each_entry_safe(blob, cur, tmp, &old_array[i], b_hash_list) {
+			hlist_del(&blob->b_hash_list);
 			blob_table_insert_raw(table, blob);
 		}
 	}
@@ -366,7 +366,7 @@ blob_table_unlink(struct blob_table *table,
 	wimlib_assert(!blob->unhashed);
 	wimlib_assert(table->num_entries != 0);
 
-	hlist_del(&blob->hash_list);
+	hlist_del(&blob->b_hash_list);
 	table->num_entries--;
 }
 
@@ -380,7 +380,7 @@ lookup_blob(const struct blob_table *table, const u8 hash[])
 	struct hlist_node *pos;
 
 	i = load_size_t_unaligned(hash) % table->capacity;
-	hlist_for_each_entry(blob, pos, &table->array[i], hash_list)
+	hlist_for_each_entry(blob, pos, &table->array[i], b_hash_list)
 		if (hashes_equal(hash, blob->hash))
 			return blob;
 	return NULL;
@@ -399,7 +399,7 @@ for_blob_info(struct blob_table *table,
 
 	for (size_t i = 0; i < table->capacity; i++) {
 		hlist_for_each_entry_safe(blob, pos, tmp, &table->array[i],
-					  hash_list)
+					  b_hash_list)
 		{
 			ret = visitor(blob, arg);
 			if (ret)
@@ -743,7 +743,7 @@ bind_stream_to_solid_resource(const struct wim_reshdr *reshdr,
 	/* XXX: This linear search will be slow in the degenerate case where the
 	 * number of solid resources in the run is huge.  */
 	stream->b_size = reshdr->size_in_wim;
-	stream->flags = reshdr->flags;
+	stream->b_flags = reshdr->flags;
 	for (size_t i = 0; i < num_rspecs; i++) {
 		if (offset + stream->b_size <= rspecs[i]->uncompressed_size) {
 			stream->offset_in_res = offset;
@@ -1026,7 +1026,7 @@ read_blob_table(WIMStruct *wim)
 
 			cur_entry->offset_in_res = 0;
 			cur_entry->b_size = reshdr.uncompressed_size;
-			cur_entry->flags = reshdr.flags;
+			cur_entry->b_flags = reshdr.flags;
 
 			blob_bind_wim_resource_spec(cur_entry, rspec);
 		}
@@ -1375,7 +1375,7 @@ blob_to_wimlib_resource_entry(const struct blob_info *blob,
 	wentry->uncompressed_size = blob->b_size;
 	if (blob->resource_location == RESOURCE_IN_WIM) {
 		wentry->part_number = blob->rspec->wim->hdr.part_number;
-		if (blob->flags & WIM_RESHDR_FLAG_SOLID) {
+		if (blob->b_flags & WIM_RESHDR_FLAG_SOLID) {
 			wentry->compressed_size = 0;
 			wentry->offset = blob->offset_in_res;
 		} else {
@@ -1388,11 +1388,11 @@ blob_to_wimlib_resource_entry(const struct blob_info *blob,
 	}
 	copy_hash(wentry->sha1_hash, blob->hash);
 	wentry->reference_count = blob->refcnt;
-	wentry->is_compressed = (blob->flags & WIM_RESHDR_FLAG_COMPRESSED) != 0;
-	wentry->is_metadata = (blob->flags & WIM_RESHDR_FLAG_METADATA) != 0;
-	wentry->is_free = (blob->flags & WIM_RESHDR_FLAG_FREE) != 0;
-	wentry->is_spanned = (blob->flags & WIM_RESHDR_FLAG_SPANNED) != 0;
-	wentry->packed = (blob->flags & WIM_RESHDR_FLAG_SOLID) != 0;
+	wentry->is_compressed = (blob->b_flags & WIM_RESHDR_FLAG_COMPRESSED) != 0;
+	wentry->is_metadata = (blob->b_flags & WIM_RESHDR_FLAG_METADATA) != 0;
+	wentry->is_free = (blob->b_flags & WIM_RESHDR_FLAG_FREE) != 0;
+	wentry->is_spanned = (blob->b_flags & WIM_RESHDR_FLAG_SPANNED) != 0;
+	wentry->packed = (blob->b_flags & WIM_RESHDR_FLAG_SOLID) != 0;
 }
 
 struct iterate_blob_context {
