@@ -212,7 +212,7 @@ struct blob_info {
 			};
 
 			/* Links streams being written to the WIM.  */
-			struct list_head write_streams_list;
+			struct list_head b_write_blobs_list;
 
 			/* Metadata for this stream in the WIM being written.
 			 */
