@@ -992,10 +992,10 @@ delete_empty_streams(struct wimfs_context *ctx)
 
 	imd = wim_get_current_image_metadata(ctx->wim);
 
-        image_for_each_unhashed_stream_safe(blob, tmp, imd) {
+        image_for_each_unhashed_blob_safe(blob, tmp, imd) {
                 if (!blob->b_size) {
                         *retrieve_blob_pointer(blob) = NULL;
-                        list_del(&blob->unhashed_list);
+                        list_del(&blob->b_unhashed_list);
                         free_blob_info(blob);
                 }
         }
@@ -1056,7 +1056,7 @@ renew_current_image(struct wimfs_context *ctx)
 	if (!new_blob)
 		goto err_put_replace_imd;
 	new_blob->b_flags = WIM_RESHDR_FLAG_METADATA;
-	new_blob->unhashed = 1;
+	new_blob->b_unhashed = 1;
 
 	/* Make the image being moved available at a new index.  Increments the
 	 * WIM's image count, but does not increment the reference count of the

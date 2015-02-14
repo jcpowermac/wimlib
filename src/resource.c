@@ -968,7 +968,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 	blob->b_flags = rspec.flags;
 	blob->b_size = rspec.uncompressed_size;
 	blob->offset_in_res = 0;
-	blob->unhashed = 1;
+	blob->b_unhashed = 1;
 
 	ret = sha1_stream(blob);
 
@@ -1109,7 +1109,7 @@ hasher_end_stream(struct blob_info *blob, int status, void *_ctx)
 	/* Retrieve the final SHA1 message digest.  */
 	sha1_final(hash, &ctx->sha_ctx);
 
-	if (blob->unhashed) {
+	if (blob->b_unhashed) {
 		if (ctx->flags & COMPUTE_MISSING_STREAM_HASHES) {
 			/* No SHA1 message digest was previously present for the
 			 * stream.  Set it to the one just calculated.  */
@@ -1460,7 +1460,7 @@ extract_full_stream_to_fd(struct blob_info *blob,
 int
 sha1_stream(struct blob_info *blob)
 {
-	wimlib_assert(blob->unhashed);
+	wimlib_assert(blob->b_unhashed);
 	struct read_blob_list_callbacks cbs = {
 	};
 	return read_full_stream_with_sha1(blob, &cbs);

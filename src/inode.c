@@ -822,7 +822,7 @@ check_inode(struct wim_inode *inode, const struct wim_security_data *sd)
 struct blob_info **
 retrieve_blob_pointer(struct blob_info *blob)
 {
-	wimlib_assert(blob->unhashed);
+	wimlib_assert(blob->b_unhashed);
 	struct wim_inode *inode = blob->back_inode;
 	u32 stream_id = blob->back_stream_id;
 	if (stream_id == 0)

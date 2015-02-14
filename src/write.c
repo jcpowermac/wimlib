@@ -261,7 +261,7 @@ write_pwm_stream_header(const struct blob_info *blob,
 	if (additional_reshdr_flags & PWM_RESHDR_FLAG_UNHASHED) {
 		zero_out_hash(stream_hdr.hash);
 	} else {
-		wimlib_assert(!blob->unhashed);
+		wimlib_assert(!blob->b_unhashed);
 		copy_hash(stream_hdr.hash, blob->hash);
 	}
 
@@ -743,7 +743,7 @@ write_stream_begin_read(struct blob_info *blob, void *_ctx)
 	 * still provide the data again to write_stream_process_chunk().  This
 	 * is okay because an unhashed stream cannot be in a WIM resource, which
 	 * might be costly to decompress.  */
-	if (ctx->blob_table != NULL && blob->unhashed && !blob->unique_size) {
+	if (ctx->blob_table != NULL && blob->b_unhashed && !blob->unique_size) {
 
 		struct blob_info *blob_new;
 
@@ -1177,14 +1177,14 @@ write_stream_end_read(struct blob_info *blob, int status, void *_ctx)
 		if (!status)
 			status = done_with_stream(blob, ctx);
 		free_blob_info(blob);
-	} else if (!status && blob->unhashed && ctx->blob_table != NULL) {
+	} else if (!status && blob->b_unhashed && ctx->blob_table != NULL) {
 		/* The 'blob' stream was not a duplicate and was previously
 		 * unhashed.  Since we passed COMPUTE_MISSING_STREAM_HASHES to
 		 * read_blob_list(), blob->hash is now computed and valid.  So
 		 * turn this stream into a "hashed" stream.  */
-		list_del(&blob->unhashed_list);
+		list_del(&blob->b_unhashed_list);
 		blob_table_insert(ctx->blob_table, blob);
-		blob->unhashed = 0;
+		blob->b_unhashed = 0;
 	}
 	return status;
 }
@@ -1843,9 +1843,9 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_PIPABLE) {
 		sha1_buffer(buf, buf_size, blob->hash);
-		blob->unhashed = 0;
+		blob->b_unhashed = 0;
 	} else {
-		blob->unhashed = 1;
+		blob->b_unhashed = 1;
 	}
 
 	ret = write_wim_resource(blob, out_fd, out_ctype, out_chunk_size,
@@ -1978,7 +1978,7 @@ image_find_streams_to_reference(WIMStruct *wim)
 
 	imd = wim_get_current_image_metadata(wim);
 
-	image_for_each_unhashed_stream(blob, imd)
+	image_for_each_unhashed_blob(blob, imd)
 		blob->will_be_in_output_wim = 0;
 
 	blob_list = wim->private;
@@ -2017,7 +2017,7 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 
 		for (i = 0; i < wim->hdr.image_count; i++) {
 			imd = wim->image_metadata[i];
-			image_for_each_unhashed_stream(blob, imd)
+			image_for_each_unhashed_blob(blob, imd)
 				fully_reference_stream_for_write(blob, blob_list_ret);
 		}
 	} else {

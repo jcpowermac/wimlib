@@ -92,7 +92,7 @@ struct blob_info {
 
 	/* 1 if this stream has not had a SHA1 message digest calculated for it
 	 * yet.  */
-	u32 unhashed : 1;
+	u32 b_unhashed : 1;
 
 	/* Temoorary fields used when writing streams; set as documented for
 	 * prepare_blob_list_for_write().  */
@@ -250,7 +250,7 @@ struct blob_info {
 
 	/* Links streams that are still unhashed after being been added to a
 	 * WIM.  */
-	struct list_head unhashed_list;
+	struct list_head b_unhashed_list;
 };
 
 /* Functions to allocate and free lookup tables  */
@@ -390,10 +390,10 @@ add_unhashed_blob(struct blob_info *blob,
 		    u32 back_stream_id,
 		    struct list_head *unhashed_blobs)
 {
-	blob->unhashed = 1;
+	blob->b_unhashed = 1;
 	blob->back_inode = back_inode;
 	blob->back_stream_id = back_stream_id;
-	list_add_tail(&blob->unhashed_list, unhashed_blobs);
+	list_add_tail(&blob->b_unhashed_list, unhashed_blobs);
 }
 
 extern int

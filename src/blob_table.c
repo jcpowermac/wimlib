@@ -42,12 +42,7 @@
 #include "wimlib/write.h"
 
 /*
- * WIM blob table:
- *
- * This is a logical mapping from SHA1 message digests to the data streams
- * contained in a WIM.
- *
- * Here it is implemented as a hash table.
+ * Mapping: SHA-1 message digest to "blobs" of data.
  *
  * Note: Everything will break horribly if there is a SHA1 collision.
  */
@@ -79,7 +74,7 @@ new_blob_table(size_t capacity)
 	return table;
 
 oom:
-	ERROR("Failed to allocate memory for lookup table "
+	ERROR("Failed to allocate memory for blob table "
 	      "with capacity %zu", capacity);
 	return NULL;
 }
@@ -275,8 +270,8 @@ blob_decrement_refcnt(struct blob_info *blob,
 		return;
 
 	if (--blob->refcnt == 0) {
-		if (blob->unhashed) {
-			list_del(&blob->unhashed_list);
+		if (blob->b_unhashed) {
+			list_del(&blob->b_unhashed_list);
 		#ifdef WITH_FUSE
 			/* If the stream has been extracted to a staging file
 			 * for a FUSE mount, unlink the staging file.  (Note
@@ -363,7 +358,7 @@ void
 blob_table_unlink(struct blob_table *table,
 		    struct blob_info *blob)
 {
-	wimlib_assert(!blob->unhashed);
+	wimlib_assert(!blob->b_unhashed);
 	wimlib_assert(table->num_entries != 0);
 
 	hlist_del(&blob->b_hash_list);
@@ -390,8 +385,8 @@ lookup_blob(const struct blob_table *table, const u8 hash[])
  * return nonzero if any call to the function returns nonzero. */
 int
 for_blob_info(struct blob_table *table,
-		       int (*visitor)(struct blob_info *, void *),
-		       void *arg)
+	      int (*visitor)(struct blob_info *, void *),
+	      void *arg)
 {
 	struct blob_info *blob;
 	struct hlist_node *pos, *tmp;
@@ -1330,7 +1325,7 @@ hash_unhashed_blob(struct blob_info *blob,
 	struct blob_info *duplicate_blob;
 	struct blob_info **back_ptr;
 
-	wimlib_assert(blob->unhashed);
+	wimlib_assert(blob->b_unhashed);
 
 	/* back_ptr must be saved because @back_inode and @back_stream_id are in
 	 * union with the SHA1 message digest and will no longer be valid once
@@ -1343,14 +1338,14 @@ hash_unhashed_blob(struct blob_info *blob,
 
 	/* Look for a duplicate stream */
 	duplicate_blob = lookup_blob(blob_table, blob->hash);
-	list_del(&blob->unhashed_list);
+	list_del(&blob->b_unhashed_list);
 	if (duplicate_blob) {
 		/* We have a duplicate stream.  Transfer the reference counts
 		 * from this stream to the duplicate and update the reference to
 		 * this stream (in an inode or ads_entry) to point to the
 		 * duplicate.  The caller is responsible for freeing @blob if
 		 * needed.  */
-		wimlib_assert(!(duplicate_blob->unhashed));
+		wimlib_assert(!(duplicate_blob->b_unhashed));
 		wimlib_assert(duplicate_blob->b_size == blob->b_size);
 		duplicate_blob->refcnt += blob->refcnt;
 		blob->refcnt = 0;
@@ -1360,7 +1355,7 @@ hash_unhashed_blob(struct blob_info *blob,
 		/* No duplicate stream, so we need to insert this stream into
 		 * the lookup table and treat it as a hashed stream. */
 		blob_table_insert(blob_table, blob);
-		blob->unhashed = 0;
+		blob->b_unhashed = 0;
 	}
 	*blob_ret = blob;
 	return 0;

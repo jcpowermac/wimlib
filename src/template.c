@@ -74,7 +74,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
 				return false;
 
 			/* If hash happens to be available, compare with template.  */
-			if (!blob->unhashed && !template_blob->unhashed &&
+			if (!blob->b_unhashed && !template_blob->b_unhashed &&
 			    !hashes_equal(blob->hash, template_blob->hash))
 				return false;
 
@@ -118,7 +118,7 @@ inode_copy_checksums(struct wim_inode *inode,
 		 * has no checksum calculated, but the entry for @template_inode
 		 * does.  */
 		if (blob == NULL || template_blob == NULL ||
-		    !blob->unhashed || template_blob->unhashed)
+		    !blob->b_unhashed || template_blob->b_unhashed)
 			continue;
 
 		wimlib_assert(blob->refcnt == inode->i_nlink);
@@ -136,12 +136,12 @@ inode_copy_checksums(struct wim_inode *inode,
 			replace_blob = lookup_blob(wim->blob_table,
 						    template_blob->hash);
 
-		list_del(&blob->unhashed_list);
+		list_del(&blob->b_unhashed_list);
 		if (replace_blob) {
 			free_blob_info(blob);
 		} else {
 			copy_hash(blob->hash, template_blob->hash);
-			blob->unhashed = 0;
+			blob->b_unhashed = 0;
 			blob_table_insert(wim->blob_table, blob);
 			blob->refcnt = 0;
 			replace_blob = blob;
