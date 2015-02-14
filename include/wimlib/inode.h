@@ -27,7 +27,7 @@ struct wim_inode {
 	 *	of this inode.
 	 *
 	 * If i_resolved == 1:
-	 *	Pointer to the lookup table entry for the unnamed data stream
+	 *	Pointer to the blob table entry for the unnamed data stream
 	 *	of this inode, or NULL.
 	 *
 	 * i_hash corresponds to the 'unnamed_stream_hash' field of the `struct
@@ -217,7 +217,7 @@ struct wim_ads_entry {
 		/* SHA-1 message digest of stream contents */
 		u8 hash[SHA1_HASH_SIZE];
 
-		/* The corresponding lookup table entry (only for resolved
+		/* The corresponding blob table entry (only for resolved
 		 * inodes) */
 		struct blob_info *blob;
 	};

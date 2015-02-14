@@ -77,7 +77,7 @@ rollback_reference_info(struct reference_info *info)
 				       blob_table_list);
 		list_del(&blob->blob_table_list);
 		blob_table_unlink(info->dest_wim->blob_table, blob);
-		free_blob_table_entry(blob);
+		free_blob_info(blob);
 	}
 }
 
@@ -169,7 +169,7 @@ blob_gift(struct blob_info *blob, void *_info)
 	if (need_stream(info, blob))
 		reference_stream(info, blob);
 	else
-		free_blob_table_entry(blob);
+		free_blob_info(blob);
 	return 0;
 }
 

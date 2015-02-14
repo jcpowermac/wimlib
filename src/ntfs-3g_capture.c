@@ -184,7 +184,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 		u32 stream_id;
 
 		if (data_size == 0) {
-			/* Empty stream.  No lookup table entry is needed. */
+			/* Empty stream.  No blob table entry is needed. */
 			blob = NULL;
 			ntfs_loc = NULL;
 		} else {
@@ -209,7 +209,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 				ntfs_loc->stream_name_nchars = name_length;
 			}
 
-			blob = new_blob_table_entry();
+			blob = new_blob_info();
 			if (!blob) {
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
@@ -251,7 +251,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 							inode->i_blob->size,
 							blob->size);
 					}
-					free_blob_table_entry(blob);
+					free_blob_info(blob);
 					continue;
 				}
 			} else {
@@ -287,7 +287,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 	}
 	goto out_put_actx;
 out_free_blob:
-	free_blob_table_entry(blob);
+	free_blob_info(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {
 		FREE(ntfs_loc->path);

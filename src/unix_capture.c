@@ -108,14 +108,14 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 
 	inode->i_attributes = FILE_ATTRIBUTE_NORMAL;
 
-	/* Empty files do not have to have a lookup table entry. */
+	/* Empty files do not have to have a blob table entry. */
 	if (!size)
 		return 0;
 
 	file_on_disk = STRDUP(path);
 	if (!file_on_disk)
 		return WIMLIB_ERR_NOMEM;
-	blob = new_blob_table_entry();
+	blob = new_blob_info();
 	if (!blob) {
 		FREE(file_on_disk);
 		return WIMLIB_ERR_NOMEM;

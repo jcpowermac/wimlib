@@ -230,7 +230,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 	int ret;
 
 	ret = WIMLIB_ERR_NOMEM;
-	found_blob = new_blob_table_entry();
+	found_blob = new_blob_info();
 	if (!found_blob)
 		goto out;
 
@@ -314,7 +314,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 out:
 	if (found_blob && found_blob->resource_location != RESOURCE_IN_WIM)
 		FREE(rspec);
-	free_blob_table_entry(found_blob);
+	free_blob_info(found_blob);
 	return ret;
 }
 
@@ -1995,7 +1995,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 		struct wim_image_metadata *imd;
 		struct wim_resource_spec *metadata_rspec;
 
-		metadata_blob = new_blob_table_entry();
+		metadata_blob = new_blob_info();
 		if (metadata_blob == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_wimlib_free;
@@ -2003,7 +2003,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 		metadata_rspec = MALLOC(sizeof(struct wim_resource_spec));
 		if (metadata_rspec == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
-			free_blob_table_entry(metadata_blob);
+			free_blob_info(metadata_blob);
 			goto out_wimlib_free;
 		}
 

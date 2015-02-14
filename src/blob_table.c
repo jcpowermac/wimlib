@@ -84,9 +84,9 @@ oom:
 }
 
 static int
-do_free_blob_table_entry(struct blob_info *entry, void *ignore)
+do_free_blob_info(struct blob_info *entry, void *ignore)
 {
-	free_blob_table_entry(entry);
+	free_blob_info(entry);
 	return 0;
 }
 
@@ -94,14 +94,14 @@ void
 free_blob_table(struct wim_blob_table *table)
 {
 	if (table) {
-		for_blob_table_entry(table, do_free_blob_table_entry, NULL);
+		for_blob_table_entry(table, do_free_blob_info, NULL);
 		FREE(table->array);
 		FREE(table);
 	}
 }
 
 struct blob_info *
-new_blob_table_entry(void)
+new_blob_info(void)
 {
 	struct blob_info *blob;
 
@@ -178,7 +178,7 @@ clone_blob_table_entry(const struct blob_info *old)
 	return new;
 
 out_free:
-	free_blob_table_entry(new);
+	free_blob_info(new);
 	return NULL;
 }
 
@@ -221,7 +221,7 @@ blob_put_resource(struct blob_info *blob)
 }
 
 void
-free_blob_table_entry(struct blob_info *blob)
+free_blob_info(struct blob_info *blob)
 {
 	if (blob) {
 		blob_put_resource(blob);
@@ -240,7 +240,7 @@ static void
 finalize_blob(struct blob_info *blob)
 {
 	if (!should_retain_blob(blob))
-		free_blob_table_entry(blob);
+		free_blob_info(blob);
 }
 
 /*
@@ -357,7 +357,7 @@ blob_table_insert(struct wim_blob_table *table,
 		enlarge_blob_table(table);
 }
 
-/* Unlinks a lookup table entry from the table; does not free it.  */
+/* Unlinks a blob table entry from the table; does not free it.  */
 void
 blob_table_unlink(struct wim_blob_table *table,
 		    struct blob_info *blob)
@@ -570,7 +570,7 @@ for_blob_table_entry_pos_sorted(struct wim_blob_table *table,
 	return ret;
 }
 
-/* On-disk format of a WIM lookup table entry (stream entry). */
+/* On-disk format of a WIM blob table entry (stream entry). */
 struct blob_info_disk {
 	/* Size, offset, and flags of the stream.  */
 	struct wim_reshdr_disk reshdr;
@@ -863,7 +863,7 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
  * table entries that all have flag WIM_RESHDR_FLAG_SOLID (0x10) set is a "solid
  * run".  A solid run logically contains zero or more resources, each of which
  * logically contains zero or more streams.  Physically, in such a run, a
- * "lookup table entry" with uncompressed size SOLID_RESOURCE_MAGIC_NUMBER
+ * "blob table entry" with uncompressed size SOLID_RESOURCE_MAGIC_NUMBER
  * (0x100000000) specifies a resource, whereas any other entry specifies a
  * stream.  Within such a run, stream entries and resource entries need not be
  * in any particular order, except that the order of the resource entries is
@@ -941,7 +941,7 @@ read_wim_blob_table(WIMStruct *wim)
 			reshdr.flags &= ~WIM_RESHDR_FLAG_SOLID;
 
 		/* Allocate a new 'struct blob_info'.  */
-		cur_entry = new_blob_table_entry();
+		cur_entry = new_blob_info();
 		if (!cur_entry)
 			goto oom;
 
@@ -1110,7 +1110,7 @@ read_wim_blob_table(WIMStruct *wim)
 		if (cur_solid_rspecs &&
 		    cur_entry->resource_location == RESOURCE_IN_WIM)
 			blob_unbind_wim_resource_spec(cur_entry);
-		free_blob_table_entry(cur_entry);
+		free_blob_info(cur_entry);
 	}
 	cur_entry = NULL;
 
@@ -1149,7 +1149,7 @@ oom:
 	ret = WIMLIB_ERR_NOMEM;
 out:
 	free_solid_rspec_info(cur_solid_rspecs, cur_num_solid_rspecs);
-	free_blob_table_entry(cur_entry);
+	free_blob_info(cur_entry);
 	free_blob_table(table);
 out_free_buf:
 	FREE(buf);
@@ -1289,12 +1289,12 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 		blob->refcnt++;
 	} else {
 		void *buffer_copy;
-		blob = new_blob_table_entry();
+		blob = new_blob_info();
 		if (blob == NULL)
 			return NULL;
 		buffer_copy = memdup(buffer, size);
 		if (buffer_copy == NULL) {
-			free_blob_table_entry(blob);
+			free_blob_info(blob);
 			return NULL;
 		}
 		blob->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
@@ -1308,9 +1308,9 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 
 /* Calculate the SHA1 message digest of a stream and move it from the list of
  * unhashed streams to the stream lookup table, possibly joining it with an
- * existing lookup table entry for an identical stream.
+ * existing blob table entry for an identical stream.
  *
- * @blob:  An unhashed lookup table entry.
+ * @blob:  An unhashed blob table entry.
  * @blob_table:  Lookup table for the WIM.
  * @blob_ret:  On success, write a pointer to the resulting lookup table
  *            entry to this location.  This will be the same as @blob

@@ -819,7 +819,7 @@ static int
 winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path,
 				 struct list_head *unhashed_streams)
 {
-	struct blob_info *blob = new_blob_table_entry();
+	struct blob_info *blob = new_blob_info();
 	int ret;
 
 	if (unlikely(!blob))
@@ -827,7 +827,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 
 	blob->file_on_disk = WCSDUP(nt_path);
 	if (unlikely(!blob->file_on_disk)) {
-		free_blob_table_entry(blob);
+		free_blob_info(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
 	blob->resource_location = RESOURCE_WIN32_ENCRYPTED;
@@ -838,7 +838,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 
 	ret = win32_get_encrypted_file_size(blob->file_on_disk, &blob->size);
 	if (unlikely(ret)) {
-		free_blob_table_entry(blob);
+		free_blob_info(blob);
 		return ret;
 	}
 
@@ -942,7 +942,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		ads_entry = NULL;
 	}
 
-	/* If the stream is empty, no lookup table entry is needed. */
+	/* If the stream is empty, no blob table entry is needed. */
 	if (stream_size == 0)
 		return 0;
 
@@ -954,8 +954,8 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 	if (!stream_path)
 		return WIMLIB_ERR_NOMEM;
 
-	/* Set up the lookup table entry for the stream.  */
-	blob = new_blob_table_entry();
+	/* Set up the blob table entry for the stream.  */
+	blob = new_blob_info();
 	if (!blob) {
 		FREE(stream_path);
 		return WIMLIB_ERR_NOMEM;

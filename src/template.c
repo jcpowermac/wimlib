@@ -138,7 +138,7 @@ inode_copy_checksums(struct wim_inode *inode,
 
 		list_del(&blob->unhashed_list);
 		if (replace_blob) {
-			free_blob_table_entry(blob);
+			free_blob_info(blob);
 		} else {
 			copy_hash(blob->hash, template_blob->hash);
 			blob->unhashed = 0;

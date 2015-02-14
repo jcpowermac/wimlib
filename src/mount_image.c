@@ -312,7 +312,7 @@ close_wimfs_fd(struct wimfs_fd *fd)
 		 if (filedes_close(&fd->f_staging_fd))
 			 ret = -errno;
 
-	/* Release this file descriptor from its lookup table entry.  */
+	/* Release this file descriptor from its blob table entry.  */
 	if (fd->f_blob)
 		blob_decrement_num_opened_fds(fd->f_blob);
 
@@ -353,7 +353,7 @@ wim_pathname_to_inode(WIMStruct *wim, const char *path)
 #define LOOKUP_FLAG_DIRECTORY_OK	0x02
 
 /*
- * Translate a path into the corresponding dentry, lookup table entry, and
+ * Translate a path into the corresponding dentry, blob table entry, and
  * stream index in the mounted WIM image.
  *
  * Returns 0 or a -errno code.  All of @dentry_ret, @blob_ret, and
@@ -654,10 +654,10 @@ retry:
  *	The index of the stream in @inode being opened for writing.
  *
  * @blob_ptr
- *	*blob_ptr is the lookup table entry for the stream being extracted, or
- *	NULL if the stream does not have a lookup table entry (which is possible
+ *	*blob_ptr is the blob table entry for the stream being extracted, or
+ *	NULL if the stream does not have a blob table entry (which is possible
  *	if the stream is empty).  On success, *blob_ptr will be set to point to a
- *	lookup table entry that represents the resource in its new location in a
+ *	blob table entry that represents the resource in its new location in a
  *	staging file.  This may be the same as the old entry in the case that it
  *	was reused, or it may be a new entry.
  *
@@ -729,20 +729,20 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 	stream_id = inode_stream_idx_to_id(inode, stream_idx);
 
 	if (old_blob && inode->i_nlink == old_blob->refcnt) {
-		/* The reference count of the existing lookup table entry is the
+		/* The reference count of the existing blob table entry is the
 		 * same as the link count of the inode that contains the stream
 		 * we're opening.  Therefore, all the references to the lookup
 		 * table entry correspond to the stream we're trying to extract,
-		 * so the lookup table entry can be re-used.  */
+		 * so the blob table entry can be re-used.  */
 		blob_table_unlink(ctx->wim->blob_table, old_blob);
 		blob_put_resource(old_blob);
 		new_blob = old_blob;
 	} else {
-		/* We need to split the old lookup table entry because it also
+		/* We need to split the old blob table entry because it also
 		 * has other references.  Or, there was no old lookup table
 		 * entry, so we need to create a new one anyway.  */
 
-		new_blob = new_blob_table_entry();
+		new_blob = new_blob_info();
 		if (unlikely(!new_blob)) {
 			ret = -ENOMEM;
 			goto out_delete_staging_file;
@@ -751,13 +751,13 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 		/* There may already be open file descriptors to this stream if
 		 * it's previously been opened read-only, but just now we're
 		 * opening it read-write.  Identify those file descriptors and
-		 * change their lookup table entry pointers to point to the new
-		 * lookup table entry, and open staging file descriptors for
+		 * change their blob table entry pointers to point to the new
+		 * blob table entry, and open staging file descriptors for
 		 * them.
 		 *
 		 * At the same time, we need to count the number of these opened
-		 * file descriptors to the new lookup table entry.  If there's
-		 * an old lookup table entry, this number needs to be subtracted
+		 * file descriptors to the new blob table entry.  If there's
+		 * an old blob table entry, this number needs to be subtracted
 		 * from the fd's opened to the old entry.  */
 		for (u16 i = 0, j = 0; j < inode->i_num_opened_fds; i++) {
 			struct wimfs_fd *fd;
@@ -816,7 +816,7 @@ out_revert_fd_changes:
 			new_blob->num_opened_fds--;
 		}
 	}
-	free_blob_table_entry(new_blob);
+	free_blob_info(new_blob);
 out_delete_staging_file:
 	unlinkat(ctx->staging_dir_fd, staging_file_name, 0);
 	FREE(staging_file_name);
@@ -996,7 +996,7 @@ delete_empty_streams(struct wimfs_context *ctx)
                 if (!blob->size) {
                         *retrieve_blob_pointer(blob) = NULL;
                         list_del(&blob->unhashed_list);
-                        free_blob_table_entry(blob);
+                        free_blob_info(blob);
                 }
         }
 }
@@ -1052,7 +1052,7 @@ renew_current_image(struct wimfs_context *ctx)
 	/* Create new stream reference for the modified image's metadata
 	 * resource, which doesn't exist yet.  */
 	ret = WIMLIB_ERR_NOMEM;
-	new_blob = new_blob_table_entry();
+	new_blob = new_blob_info();
 	if (!new_blob)
 		goto err_put_replace_imd;
 	new_blob->flags = WIM_RESHDR_FLAG_METADATA;
@@ -1078,7 +1078,7 @@ renew_current_image(struct wimfs_context *ctx)
 err_undo_append:
 	wim->hdr.image_count--;
 err_free_new_blob:
-	free_blob_table_entry(new_blob);
+	free_blob_info(new_blob);
 err_put_replace_imd:
 	put_image_metadata(replace_imd, NULL);
 err:

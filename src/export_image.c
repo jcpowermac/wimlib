@@ -46,7 +46,7 @@ blob_rollback_export(struct blob_info *blob, void *_blob_table)
 	blob->refcnt -= blob->out_refcnt;
 	if (blob->was_exported) {
 		blob_table_unlink(blob_table, blob);
-		free_blob_table_entry(blob);
+		free_blob_info(blob);
 	}
 	return 0;
 }

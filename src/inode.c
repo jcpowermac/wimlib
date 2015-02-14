@@ -415,7 +415,7 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_blob_table *table,
 		blob = lookup_stream(table, hash);
 		if (!blob) {
 			if (force) {
-				blob = new_blob_table_entry();
+				blob = new_blob_info();
 				if (!blob)
 					return WIMLIB_ERR_NOMEM;
 				copy_hash(blob->hash, hash);
@@ -437,7 +437,7 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_blob_table *table,
 			ads_blob = lookup_stream(table, hash);
 			if (!ads_blob) {
 				if (force) {
-					ads_blob = new_blob_table_entry();
+					ads_blob = new_blob_info();
 					if (!ads_blob)
 						return WIMLIB_ERR_NOMEM;
 					copy_hash(ads_blob->hash, hash);
@@ -502,7 +502,7 @@ stream_not_found_error(const struct wim_inode *inode, const u8 *hash)
 }
 
 /*
- * Return the lookup table entry for the specified stream of the inode, or NULL
+ * Return the blob table entry for the specified stream of the inode, or NULL
  * if the specified stream is empty or not available.
  *
  * stream_idx = 0: default data stream
@@ -520,7 +520,7 @@ inode_get_blob_for_stream(const struct wim_inode *inode, unsigned stream_idx,
 }
 
 /*
- * Return the lookup table entry for the unnamed data stream of a *resolved*
+ * Return the blob table entry for the unnamed data stream of a *resolved*
  * inode, or NULL if the inode's unnamed data stream is empty.  Also return the
  * 0-based index of the unnamed data stream in *stream_idx_ret.
  */
@@ -546,7 +546,7 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
 }
 
 /*
- * Return the lookup table entry for the unnamed data stream of an inode, or
+ * Return the blob table entry for the unnamed data stream of an inode, or
  * NULL if the inode's unnamed data stream is empty or not available.
  *
  * Note: this is complicated by the fact that WIMGAPI may put the unnamed data

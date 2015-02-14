@@ -775,7 +775,7 @@ write_stream_begin_read(struct blob_info *blob, void *_ctx)
 					ctx->cur_write_res_size -= blob->size;
 				if (!ret)
 					ret = done_with_stream(blob, ctx);
-				free_blob_table_entry(blob);
+				free_blob_info(blob);
 				if (ret)
 					return ret;
 				return BEGIN_STREAM_STATUS_SKIP_STREAM;
@@ -1176,7 +1176,7 @@ write_stream_end_read(struct blob_info *blob, int status, void *_ctx)
 		 * it does not compress to less than its original size.  */
 		if (!status)
 			status = done_with_stream(blob, ctx);
-		free_blob_table_entry(blob);
+		free_blob_info(blob);
 	} else if (!status && blob->unhashed && ctx->blob_table != NULL) {
 		/* The 'blob' stream was not a duplicate and was previously
 		 * unhashed.  Since we passed COMPUTE_MISSING_STREAM_HASHES to
@@ -1829,10 +1829,10 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	int ret;
 	struct blob_info *blob;
 
-	/* Set up a temporary lookup table entry to provide to
+	/* Set up a temporary blob table entry to provide to
 	 * write_wim_resource().  */
 
-	blob = new_blob_table_entry();
+	blob = new_blob_info();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -1860,7 +1860,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	ret = 0;
 out_free_lte:
 	blob->resource_location = RESOURCE_NONEXISTENT;
-	free_blob_table_entry(blob);
+	free_blob_info(blob);
 	return ret;
 }
 

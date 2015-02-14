@@ -22,7 +22,7 @@ struct wim_image_metadata {
 	/* Pointer to the security data of the image. */
 	struct wim_security_data *security_data;
 
-	/* Pointer to the lookup table entry for this image's metadata resource
+	/* Pointer to the blob table entry for this image's metadata resource
 	 */
 	struct blob_info *metadata_blob;
 

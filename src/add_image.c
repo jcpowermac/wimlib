@@ -42,10 +42,10 @@ add_empty_image_metadata(WIMStruct *wim)
 	struct wim_security_data *sd;
 	struct wim_image_metadata *imd;
 
-	/* Create lookup table entry for this metadata resource (for now really
+	/* Create blob table entry for this metadata resource (for now really
 	 * just a dummy entry).  */
 	ret = WIMLIB_ERR_NOMEM;
-	metadata_blob = new_blob_table_entry();
+	metadata_blob = new_blob_info();
 	if (!metadata_blob)
 		goto out;
 
@@ -77,7 +77,7 @@ add_empty_image_metadata(WIMStruct *wim)
 out_free_security_data:
 	free_wim_security_data(sd);
 out_free_metadata_blob:
-	free_blob_table_entry(metadata_blob);
+	free_blob_info(metadata_blob);
 out:
 	return ret;
 }

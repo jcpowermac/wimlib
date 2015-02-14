@@ -7,7 +7,7 @@
 #include "wimlib/types.h"
 
 /* An enumerated type that identifies where the stream corresponding to this
- * lookup table entry is actually located.
+ * blob table entry is actually located.
  *
  * If we open a WIM and read its lookup table, the location is set to
  * RESOURCE_IN_WIM since all the streams will initially be located in the WIM.
@@ -15,7 +15,7 @@
  * the actual location of the stream to be somewhere else, such as an external
  * file.  */
 enum resource_location {
-	/* The lookup table entry does not yet correspond to a stream; this is a
+	/* The blob table entry does not yet correspond to a stream; this is a
 	 * temporary state only.  */
 	RESOURCE_NONEXISTENT = 0,
 
@@ -113,7 +113,7 @@ struct blob_info {
 
 	union {
 		/* (On-disk field) SHA1 message digest of the stream referenced
-		 * by this lookup table entry.  */
+		 * by this blob table entry.  */
 		u8  hash[SHA1_HASH_SIZE];
 
 		/* First 4 or 8 bytes of the SHA1 message digest, used for
@@ -135,7 +135,7 @@ struct blob_info {
 		};
 	};
 
-	/* Number of times this lookup table entry is referenced by dentries in
+	/* Number of times this blob table entry is referenced by dentries in
 	 * the WIM.  When a WIM's lookup table is read, this field is
 	 * initialized from a corresponding entry.
 	 *
@@ -276,7 +276,7 @@ write_wim_blob_table_from_stream_list(struct list_head *stream_list,
 /* Functions to create, clone, print, and free lookup table entries  */
 
 extern struct blob_info *
-new_blob_table_entry(void) _malloc_attribute;
+new_blob_info(void) _malloc_attribute;
 
 extern struct blob_info *
 clone_blob_table_entry(const struct blob_info *blob)
@@ -291,7 +291,7 @@ blob_decrement_num_opened_fds(struct blob_info *blob);
 #endif
 
 extern void
-free_blob_table_entry(struct blob_info *blob);
+free_blob_info(struct blob_info *blob);
 
 /* Functions to insert and delete entries from a lookup table  */
 
