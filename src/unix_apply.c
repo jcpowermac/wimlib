@@ -394,7 +394,7 @@ unix_extract_if_empty_file(const struct wim_dentry *dentry,
 	/* Is this a directory, a symbolic link, or any type of nonempty file?
 	 */
 	if (inode_is_directory(inode) || inode_is_symlink(inode) ||
-	    inode_unnamed_lte_resolved(inode))
+	    inode_get_blob_for_unnamed_stream_resolved(inode))
 		return 0;
 
 	/* Recognize special files in UNIX_DATA mode  */
@@ -485,7 +485,7 @@ unix_count_dentries(const struct list_head *dentry_list,
 		if (inode_is_directory(inode))
 			dir_count++;
 		else if ((dentry == inode_first_extraction_dentry(inode)) &&
-			 !inode_unnamed_lte_resolved(inode))
+			 !inode_get_blob_for_unnamed_stream_resolved(inode))
 			empty_file_count++;
 	}
 
@@ -500,14 +500,14 @@ unix_create_symlink(const struct wim_inode *inode, const char *path,
 {
 	char link_target[REPARSE_DATA_MAX_SIZE];
 	int ret;
-	struct wim_lookup_table_entry lte_override;
+	struct blob_info blob_override;
 
-	lte_override.resource_location = RESOURCE_IN_ATTACHED_BUFFER;
-	lte_override.attached_buffer = (void *)rpdata;
-	lte_override.size = rpdatalen;
+	blob_override.resource_location = RESOURCE_IN_ATTACHED_BUFFER;
+	blob_override.attached_buffer = (void *)rpdata;
+	blob_override.size = rpdatalen;
 
 	ret = wim_inode_readlink(inode, link_target,
-				 sizeof(link_target) - 1, &lte_override);
+				 sizeof(link_target) - 1, &blob_override);
 	if (ret < 0) {
 		errno = -ret;
 		return WIMLIB_ERR_READLINK;
@@ -546,7 +546,7 @@ unix_cleanup_open_fds(struct unix_apply_ctx *ctx, unsigned offset)
 }
 
 static int
-unix_begin_extract_stream_instance(const struct wim_lookup_table_entry *stream,
+unix_begin_extract_stream_instance(const struct blob_info *stream,
 				   const struct wim_inode *inode,
 				   struct unix_apply_ctx *ctx)
 {
@@ -587,7 +587,7 @@ retry_create:
 
 /* Called when starting to read a single-instance stream for extraction  */
 static int
-unix_begin_extract_stream(struct wim_lookup_table_entry *stream, void *_ctx)
+unix_begin_extract_stream(struct blob_info *stream, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
 	const struct stream_owner *owners = stream_owners(stream);
@@ -628,7 +628,7 @@ unix_extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a single-instance stream has been fully read for extraction  */
 static int
-unix_end_extract_stream(struct wim_lookup_table_entry *stream, int status,
+unix_end_extract_stream(struct blob_info *stream, int status,
 			void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;

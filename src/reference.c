@@ -62,7 +62,7 @@ static void
 rollback_reference_info(struct reference_info *info)
 {
 	WIMStruct *subwim;
-	struct wim_lookup_table_entry *lte;
+	struct blob_info *blob;
 
 	while (!list_empty(&info->new_subwims)) {
 		subwim = list_first_entry(&info->new_subwims,
@@ -72,12 +72,12 @@ rollback_reference_info(struct reference_info *info)
 	}
 
 	while (!list_empty(&info->new_streams)) {
-		lte = list_first_entry(&info->new_streams,
-				       struct wim_lookup_table_entry,
+		blob = list_first_entry(&info->new_streams,
+				       struct blob_info,
 				       lookup_table_list);
-		list_del(&lte->lookup_table_list);
-		lookup_table_unlink(info->dest_wim->lookup_table, lte);
-		free_lookup_table_entry(lte);
+		list_del(&blob->lookup_table_list);
+		lookup_table_unlink(info->dest_wim->lookup_table, blob);
+		free_lookup_table_entry(blob);
 	}
 }
 
@@ -93,17 +93,17 @@ commit_or_rollback_reference_info(struct reference_info *info, int ret)
 
 static bool
 need_stream(const struct reference_info *info,
-	    const struct wim_lookup_table_entry *lte)
+	    const struct blob_info *blob)
 {
-	return !lookup_stream(info->dest_wim->lookup_table, lte->hash);
+	return !lookup_stream(info->dest_wim->lookup_table, blob->hash);
 }
 
 static void
 reference_stream(struct reference_info *info,
-		 struct wim_lookup_table_entry *lte)
+		 struct blob_info *blob)
 {
-	lookup_table_insert(info->dest_wim->lookup_table, lte);
-	list_add(&lte->lookup_table_list, &info->new_streams);
+	lookup_table_insert(info->dest_wim->lookup_table, blob);
+	list_add(&blob->lookup_table_list, &info->new_streams);
 }
 
 static void
@@ -113,15 +113,15 @@ reference_subwim(struct reference_info *info, WIMStruct *subwim)
 }
 
 static int
-lte_clone_if_new(struct wim_lookup_table_entry *lte, void *_info)
+blob_clone_if_new(struct blob_info *blob, void *_info)
 {
 	struct reference_info *info = _info;
 
-	if (need_stream(info, lte)) {
-		lte = clone_lookup_table_entry(lte);
-		if (unlikely(!lte))
+	if (need_stream(info, blob)) {
+		blob = clone_lookup_table_entry(blob);
+		if (unlikely(!blob))
 			return WIMLIB_ERR_NOMEM;
-		reference_stream(info, lte);
+		reference_stream(info, blob);
 	}
 	return 0;
 }
@@ -152,7 +152,7 @@ wimlib_reference_resources(WIMStruct *wim, WIMStruct **resource_wims,
 
 	for (i = 0; i < num_resource_wims; i++) {
 		ret = for_lookup_table_entry(resource_wims[i]->lookup_table,
-					     lte_clone_if_new, &info);
+					     blob_clone_if_new, &info);
 		if (ret)
 			break;
 	}
@@ -161,15 +161,15 @@ wimlib_reference_resources(WIMStruct *wim, WIMStruct **resource_wims,
 }
 
 static int
-lte_gift(struct wim_lookup_table_entry *lte, void *_info)
+blob_gift(struct blob_info *blob, void *_info)
 {
 	struct reference_info *info = _info;
 
-	lookup_table_unlink(info->src_table, lte);
-	if (need_stream(info, lte))
-		reference_stream(info, lte);
+	lookup_table_unlink(info->src_table, blob);
+	if (need_stream(info, blob))
+		reference_stream(info, blob);
 	else
-		free_lookup_table_entry(lte);
+		free_lookup_table_entry(blob);
 	return 0;
 }
 
@@ -187,7 +187,7 @@ reference_resource_path(struct reference_info *info, const tchar *path,
 		return ret;
 
 	info->src_table = src_wim->lookup_table;
-	for_lookup_table_entry(src_wim->lookup_table, lte_gift, info);
+	for_lookup_table_entry(src_wim->lookup_table, blob_gift, info);
 	reference_subwim(info, src_wim);
 	return 0;
 }

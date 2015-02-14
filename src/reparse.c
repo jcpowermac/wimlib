@@ -165,33 +165,33 @@ int
 wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 			   u8 * restrict rpbuf,
 			   u16 * restrict rpbuflen_ret,
-			   struct wim_lookup_table_entry *lte_override)
+			   struct blob_info *blob_override)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob_info *blob;
 	int ret;
 	struct reparse_buffer_disk *rpbuf_disk;
 	u16 rpdatalen;
 
 	wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 
-	if (!lte_override) {
-		lte = inode_unnamed_lte_resolved(inode);
-		if (!lte) {
+	if (!blob_override) {
+		blob = inode_get_blob_for_unnamed_stream_resolved(inode);
+		if (!blob) {
 			ERROR("Reparse point has no reparse data!");
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
 		}
 	} else {
-		lte = lte_override;
+		blob = blob_override;
 	}
 
-	if (lte->size > REPARSE_POINT_MAX_SIZE - 8) {
+	if (blob->size > REPARSE_POINT_MAX_SIZE - 8) {
 		ERROR("Reparse data is too long!");
 		return WIMLIB_ERR_INVALID_REPARSE_DATA;
 	}
-	rpdatalen = lte->size;
+	rpdatalen = blob->size;
 
 	/* Read the data from the WIM file */
-	ret = read_full_stream_into_buf(lte, rpbuf + 8);
+	ret = read_full_stream_into_buf(blob, rpbuf + 8);
 	if (ret)
 		return ret;
 
@@ -318,7 +318,7 @@ parse_substitute_name(const utf16lechar *substitute_name,
  * @bufsize
  *	Available space in @buf, in bytes.
  *
- * @lte_override
+ * @blob_override
  *	If not NULL, the stream from which to read the reparse data.  Otherwise,
  *	the reparse data will be read from the unnamed stream of @inode.
  *
@@ -332,7 +332,7 @@ parse_substitute_name(const utf16lechar *substitute_name,
 ssize_t
 wim_inode_readlink(const struct wim_inode * restrict inode,
 		   char * restrict buf, size_t bufsize,
-		   struct wim_lookup_table_entry *lte_override)
+		   struct blob_info *blob_override)
 {
 	int ret;
 	struct reparse_buffer_disk rpbuf_disk _aligned_attribute(8);
@@ -345,7 +345,7 @@ wim_inode_readlink(const struct wim_inode * restrict inode,
 	wimlib_assert(inode_is_symlink(inode));
 
 	if (wim_inode_get_reparse_data(inode, (u8*)&rpbuf_disk, &rpbuflen,
-				       lte_override))
+				       blob_override))
 		return -EIO;
 
 	if (parse_reparse_data((const u8*)&rpbuf_disk, rpbuflen, &rpdata))

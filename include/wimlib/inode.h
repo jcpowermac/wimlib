@@ -9,7 +9,7 @@ struct avl_tree_node;
 struct wim_ads_entry;
 struct wim_dentry;
 struct wim_lookup_table;
-struct wim_lookup_table_entry;
+struct blob_info;
 struct wim_security_data;
 struct wimfs_fd;
 
@@ -36,7 +36,7 @@ struct wim_inode {
 	 */
 	union {
 		u8 i_hash[SHA1_HASH_SIZE];
-		struct wim_lookup_table_entry *i_lte;
+		struct blob_info *i_lte;
 	};
 
 	/* Corresponds to the 'attributes' field of `struct wim_dentry_on_disk';
@@ -84,10 +84,10 @@ struct wim_inode {
 	 * "resolved".  By default, the inode starts as "unresolved", meaning
 	 * that the i_hash field, along with the hash field of any associated
 	 * wim_ads_entry's, are valid and should be used as keys in the WIM
-	 * lookup table to find the associated `struct wim_lookup_table_entry'.
-	 * But if the inode has been resolved, then each of these fields is
-	 * replaced with a pointer directly to the appropriate `struct
-	 * wim_lookup_table_entry', or NULL if the stream is empty.  */
+	 * lookup table to find the associated `struct blob_info'.  But if the
+	 * inode has been resolved, then each of these fields is replaced with a
+	 * pointer directly to the appropriate `struct blob_info', or NULL if
+	 * the stream is empty.  */
 	u8 i_resolved : 1;
 
 	/* Flag used to mark this inode as visited; this is used when visiting
@@ -218,8 +218,8 @@ struct wim_ads_entry {
 		u8 hash[SHA1_HASH_SIZE];
 
 		/* The corresponding lookup table entry (only for resolved
-		 * streams) */
-		struct wim_lookup_table_entry *lte;
+		 * inodes) */
+		struct blob_info *blob;
 	};
 
 	/* Length of UTF16-encoded stream name, in bytes, not including the
@@ -408,31 +408,31 @@ inode_unresolve_streams(struct wim_inode *inode);
 extern int
 stream_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
-static inline struct wim_lookup_table_entry *
-inode_stream_lte_resolved(const struct wim_inode *inode, unsigned stream_idx)
+static inline struct blob_info *
+inode_get_blob_for_stream_resolved(const struct wim_inode *inode, unsigned stream_idx)
 {
 	if (stream_idx == 0)
 		return inode->i_lte;
-	return inode->i_ads_entries[stream_idx - 1].lte;
+	return inode->i_ads_entries[stream_idx - 1].blob;
 }
 
-extern struct wim_lookup_table_entry *
-inode_stream_lte(const struct wim_inode *inode, unsigned stream_idx,
+extern struct blob_info *
+inode_get_blob_for_stream(const struct wim_inode *inode, unsigned stream_idx,
 		 const struct wim_lookup_table *table);
 
-extern struct wim_lookup_table_entry *
+extern struct blob_info *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
 			      unsigned *stream_idx_ret);
 
-static inline struct wim_lookup_table_entry *
-inode_unnamed_lte_resolved(const struct wim_inode *inode)
+static inline struct blob_info *
+inode_get_blob_for_unnamed_stream_resolved(const struct wim_inode *inode)
 {
 	unsigned stream_idx;
 	return inode_unnamed_stream_resolved(inode, &stream_idx);
 }
 
-extern struct wim_lookup_table_entry *
-inode_unnamed_lte(const struct wim_inode *inode,
+extern struct blob_info *
+inode_get_blob_for_unnamed_stream(const struct wim_inode *inode,
 		  const struct wim_lookup_table *table);
 
 extern const u8 *
@@ -458,10 +458,10 @@ inode_stream_idx_to_id(const struct wim_inode *inode, unsigned stream_idx)
 }
 
 extern void
-inode_ref_streams(struct wim_inode *inode);
+inode_ref_blobs(struct wim_inode *inode);
 
 extern void
-inode_unref_streams(struct wim_inode *inode,
+inode_unref_blobs(struct wim_inode *inode,
 		    struct wim_lookup_table *lookup_table);
 
 extern int

@@ -31,22 +31,22 @@
 #include "wimlib/xml.h"
 
 static int
-lte_set_not_exported(struct wim_lookup_table_entry *lte, void *_ignore)
+blob_set_not_exported(struct blob_info *blob, void *_ignore)
 {
-	lte->out_refcnt = 0;
-	lte->was_exported = 0;
+	blob->out_refcnt = 0;
+	blob->was_exported = 0;
 	return 0;
 }
 
 static int
-lte_rollback_export(struct wim_lookup_table_entry *lte, void *_lookup_table)
+blob_rollback_export(struct blob_info *blob, void *_lookup_table)
 {
 	struct wim_lookup_table *lookup_table = _lookup_table;
 
-	lte->refcnt -= lte->out_refcnt;
-	if (lte->was_exported) {
-		lookup_table_unlink(lookup_table, lte);
-		free_lookup_table_entry(lte);
+	blob->refcnt -= blob->out_refcnt;
+	if (blob->was_exported) {
+		lookup_table_unlink(lookup_table, blob);
+		free_lookup_table_entry(blob);
 	}
 	return 0;
 }
@@ -59,7 +59,7 @@ inode_export_streams(struct wim_inode *inode,
 {
 	unsigned i;
 	const u8 *hash;
-	struct wim_lookup_table_entry *src_lte, *dest_lte;
+	struct blob_info *src_lte, *dest_lte;
 
 	inode_unresolve_streams(inode);
 	for (i = 0; i <= inode->i_num_ads; i++) {
@@ -164,7 +164,7 @@ wimlib_export_image(WIMStruct *src_wim,
 		return ret;
 
 	/* Enable rollbacks  */
-	for_lookup_table_entry(dest_wim->lookup_table, lte_set_not_exported, NULL);
+	for_lookup_table_entry(dest_wim->lookup_table, blob_set_not_exported, NULL);
 
 	/* Export each requested image.  */
 	for (src_image = start_src_image;
@@ -275,7 +275,7 @@ out_rollback:
 		put_image_metadata(dest_wim->image_metadata[
 					--dest_wim->hdr.image_count], NULL);
 	}
-	for_lookup_table_entry(dest_wim->lookup_table, lte_rollback_export,
+	for_lookup_table_entry(dest_wim->lookup_table, blob_rollback_export,
 			       dest_wim->lookup_table);
 	return ret;
 }

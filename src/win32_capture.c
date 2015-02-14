@@ -103,9 +103,9 @@ retry:
 }
 
 /* Read the first @size bytes from the file, or named data stream of a file,
- * from which the stream entry @lte was created.  */
+ * from which the stream entry @blob was created.  */
 int
-read_winnt_file_prefix(const struct wim_lookup_table_entry *lte, u64 size,
+read_winnt_file_prefix(const struct blob_info *blob, u64 size,
 		       consume_data_callback_t cb, void *cb_ctx)
 {
 	const wchar_t *path;
@@ -116,7 +116,7 @@ read_winnt_file_prefix(const struct wim_lookup_table_entry *lte, u64 size,
 	int ret;
 
 	/* This is an NT namespace path.  */
-	path = lte->file_on_disk;
+	path = blob->file_on_disk;
 
 	status = winnt_openat(NULL, path, wcslen(path),
 			      FILE_READ_DATA | SYNCHRONIZE, &h);
@@ -184,7 +184,7 @@ win32_encrypted_export_cb(unsigned char *data, void *_ctx, unsigned long len)
 }
 
 int
-read_win32_encrypted_file_prefix(const struct wim_lookup_table_entry *lte,
+read_win32_encrypted_file_prefix(const struct blob_info *blob,
 				 u64 size,
 				 consume_data_callback_t cb, void *cb_ctx)
 {
@@ -198,11 +198,11 @@ read_win32_encrypted_file_prefix(const struct wim_lookup_table_entry *lte,
 	export_ctx.wimlib_err_code = 0;
 	export_ctx.bytes_remaining = size;
 
-	err = OpenEncryptedFileRaw(lte->file_on_disk, 0, &file_ctx);
+	err = OpenEncryptedFileRaw(blob->file_on_disk, 0, &file_ctx);
 	if (err != ERROR_SUCCESS) {
 		win32_error(err,
 			    L"Failed to open encrypted file \"%ls\" for raw read",
-			    printable_path(lte->file_on_disk));
+			    printable_path(blob->file_on_disk));
 		return WIMLIB_ERR_OPEN;
 	}
 	err = ReadEncryptedFileRaw(win32_encrypted_export_cb,
@@ -212,14 +212,14 @@ read_win32_encrypted_file_prefix(const struct wim_lookup_table_entry *lte,
 		if (ret == 0) {
 			win32_error(err,
 				    L"Failed to read encrypted file \"%ls\"",
-				    printable_path(lte->file_on_disk));
+				    printable_path(blob->file_on_disk));
 			ret = WIMLIB_ERR_READ;
 		}
 	} else if (export_ctx.bytes_remaining != 0) {
 		ERROR("Only could read %"PRIu64" of %"PRIu64" bytes from "
 		      "encrypted file \"%ls\"",
 		      size - export_ctx.bytes_remaining, size,
-		      printable_path(lte->file_on_disk));
+		      printable_path(blob->file_on_disk));
 		ret = WIMLIB_ERR_READ;
 	} else {
 		ret = 0;
@@ -819,32 +819,32 @@ static int
 winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path,
 				 struct list_head *unhashed_streams)
 {
-	struct wim_lookup_table_entry *lte = new_lookup_table_entry();
+	struct blob_info *blob = new_lookup_table_entry();
 	int ret;
 
-	if (unlikely(!lte))
+	if (unlikely(!blob))
 		return WIMLIB_ERR_NOMEM;
 
-	lte->file_on_disk = WCSDUP(nt_path);
-	if (unlikely(!lte->file_on_disk)) {
-		free_lookup_table_entry(lte);
+	blob->file_on_disk = WCSDUP(nt_path);
+	if (unlikely(!blob->file_on_disk)) {
+		free_lookup_table_entry(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
-	lte->resource_location = RESOURCE_WIN32_ENCRYPTED;
+	blob->resource_location = RESOURCE_WIN32_ENCRYPTED;
 
 	/* OpenEncryptedFileRaw() expects a Win32 name.  */
-	wimlib_assert(!wmemcmp(lte->file_on_disk, L"\\??\\", 4));
-	lte->file_on_disk[1] = L'\\';
+	wimlib_assert(!wmemcmp(blob->file_on_disk, L"\\??\\", 4));
+	blob->file_on_disk[1] = L'\\';
 
-	ret = win32_get_encrypted_file_size(lte->file_on_disk, &lte->size);
+	ret = win32_get_encrypted_file_size(blob->file_on_disk, &blob->size);
 	if (unlikely(ret)) {
-		free_lookup_table_entry(lte);
+		free_lookup_table_entry(blob);
 		return ret;
 	}
 
-	lte->file_inode = inode;
-	add_unhashed_stream(lte, inode, 0, unhashed_streams);
-	inode->i_lte = lte;
+	blob->file_inode = inode;
+	add_unhashed_stream(blob, inode, 0, unhashed_streams);
+	inode->i_lte = blob;
 	return 0;
 }
 
@@ -915,7 +915,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 	size_t stream_name_nchars;
 	struct wim_ads_entry *ads_entry;
 	wchar_t *stream_path;
-	struct wim_lookup_table_entry *lte;
+	struct blob_info *blob;
 	u32 stream_id;
 
 	/* Given the raw stream name (which is something like
@@ -955,23 +955,23 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		return WIMLIB_ERR_NOMEM;
 
 	/* Set up the lookup table entry for the stream.  */
-	lte = new_lookup_table_entry();
-	if (!lte) {
+	blob = new_lookup_table_entry();
+	if (!blob) {
 		FREE(stream_path);
 		return WIMLIB_ERR_NOMEM;
 	}
-	lte->file_on_disk = stream_path;
-	lte->resource_location = RESOURCE_IN_WINNT_FILE_ON_DISK;
-	lte->size = stream_size;
+	blob->file_on_disk = stream_path;
+	blob->resource_location = RESOURCE_IN_WINNT_FILE_ON_DISK;
+	blob->size = stream_size;
 	if (ads_entry) {
 		stream_id = ads_entry->stream_id;
-		ads_entry->lte = lte;
+		ads_entry->blob = blob;
 	} else {
 		stream_id = 0;
-		inode->i_lte = lte;
+		inode->i_lte = blob;
 	}
-	lte->file_inode = inode;
-	add_unhashed_stream(lte, inode, stream_id, unhashed_streams);
+	blob->file_inode = inode;
+	add_unhashed_stream(blob, inode, stream_id, unhashed_streams);
 	return 0;
 }
 

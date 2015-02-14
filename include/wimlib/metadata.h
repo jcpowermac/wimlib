@@ -24,12 +24,12 @@ struct wim_image_metadata {
 
 	/* Pointer to the lookup table entry for this image's metadata resource
 	 */
-	struct wim_lookup_table_entry *metadata_lte;
+	struct blob_info *metadata_blob;
 
 	/* Linked list of 'struct wim_inode's for this image. */
 	struct list_head inode_list;
 
-	/* Linked list of 'struct wim_lookup_table_entry's for this image that
+	/* Linked list of 'struct blob_info's for this image that
 	 * are referred to in the dentry tree, but have not had a SHA1 message
 	 * digest calculated yet and therefore have not been inserted into the
 	 * WIM's lookup table.  This list is added to during wimlib_add_image()
@@ -75,13 +75,13 @@ wim_get_current_security_data(WIMStruct *wim)
 	list_for_each_entry(inode, &(imd)->inode_list, i_list)
 
 /* Iterate over each stream in a WIM image that has not yet been hashed */
-#define image_for_each_unhashed_stream(lte, imd) \
-	list_for_each_entry(lte, &(imd)->unhashed_streams, unhashed_list)
+#define image_for_each_unhashed_stream(blob, imd) \
+	list_for_each_entry(blob, &(imd)->unhashed_streams, unhashed_list)
 
 /* Iterate over each stream in a WIM image that has not yet been hashed (safe
  * against stream removal) */
-#define image_for_each_unhashed_stream_safe(lte, tmp, imd) \
-	list_for_each_entry_safe(lte, tmp, &(imd)->unhashed_streams, unhashed_list)
+#define image_for_each_unhashed_stream_safe(blob, tmp, imd) \
+	list_for_each_entry_safe(blob, tmp, &(imd)->unhashed_streams, unhashed_list)
 
 extern void
 put_image_metadata(struct wim_image_metadata *imd,

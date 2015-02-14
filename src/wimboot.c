@@ -1057,7 +1057,7 @@ out:
  *
  * @h
  *	Open handle to the file, with GENERIC_WRITE access.
- * @lte
+ * @blob
  *	Unnamed data stream of the file.
  * @data_source_id
  *	Allocated identifier for the WIM data source on the destination volume.
@@ -1071,7 +1071,7 @@ out:
  */
 bool
 wimboot_set_pointer(HANDLE h,
-		    const struct wim_lookup_table_entry *lte,
+		    const struct blob_info *blob,
 		    u64 data_source_id,
 		    const u8 lookup_table_hash[SHA1_HASH_SIZE],
 		    bool wof_running)
@@ -1096,7 +1096,7 @@ wimboot_set_pointer(HANDLE h,
 		in.wim_info.version = WIM_PROVIDER_CURRENT_VERSION;
 		in.wim_info.flags = 0;
 		in.wim_info.data_source_id = data_source_id;
-		copy_hash(in.wim_info.resource_hash, lte->hash);
+		copy_hash(in.wim_info.resource_hash, blob->hash);
 
 		/* lookup_table_hash is not necessary  */
 
@@ -1148,11 +1148,11 @@ wimboot_set_pointer(HANDLE h,
 		in.wim_info.version = 2;
 		in.wim_info.flags = 0;
 		in.wim_info.data_source_id = data_source_id;
-		copy_hash(in.wim_info.resource_hash, lte->hash);
+		copy_hash(in.wim_info.resource_hash, blob->hash);
 		copy_hash(in.wim_info.wim_lookup_table_hash, lookup_table_hash);
-		in.wim_info.stream_uncompressed_size = lte->size;
-		in.wim_info.stream_compressed_size = lte->rspec->size_in_wim;
-		in.wim_info.stream_offset_in_wim = lte->rspec->offset_in_wim;
+		in.wim_info.stream_uncompressed_size = blob->size;
+		in.wim_info.stream_compressed_size = blob->rspec->size_in_wim;
+		in.wim_info.stream_offset_in_wim = blob->rspec->offset_in_wim;
 
 		if (!DeviceIoControl(h, FSCTL_SET_REPARSE_POINT,
 				     &in, sizeof(in), NULL, 0, &bytes_returned, NULL))
@@ -1167,7 +1167,7 @@ wimboot_set_pointer(HANDLE h,
 			return false;
 
 		if (!SetFilePointerEx(h,
-				      (LARGE_INTEGER){ .QuadPart = lte->size},
+				      (LARGE_INTEGER){ .QuadPart = blob->size},
 				      NULL, FILE_BEGIN))
 			return false;
 

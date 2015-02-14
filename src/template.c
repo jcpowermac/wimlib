@@ -62,23 +62,23 @@ inode_metadata_consistent(const struct wim_inode *inode,
 
 	/* Iterate through each stream and do some more checks.  */
 	for (unsigned i = 0; i <= inode->i_num_ads; i++) {
-		const struct wim_lookup_table_entry *lte, *template_lte;
+		const struct blob_info *blob, *template_lte;
 
-		lte = inode_stream_lte_resolved(inode, i);
-		template_lte = inode_stream_lte(template_inode, i,
+		blob = inode_get_blob_for_stream_resolved(inode, i);
+		template_lte = inode_get_blob_for_stream(template_inode, i,
 						template_lookup_table);
 
 		/* Compare stream sizes.  */
-		if (lte && template_lte) {
-			if (lte->size != template_lte->size)
+		if (blob && template_lte) {
+			if (blob->size != template_lte->size)
 				return false;
 
 			/* If hash happens to be available, compare with template.  */
-			if (!lte->unhashed && !template_lte->unhashed &&
-			    !hashes_equal(lte->hash, template_lte->hash))
+			if (!blob->unhashed && !template_lte->unhashed &&
+			    !hashes_equal(blob->hash, template_lte->hash))
 				return false;
 
-		} else if (lte && lte->size) {
+		} else if (blob && blob->size) {
 			return false;
 		} else if (template_lte && template_lte->size) {
 			return false;
@@ -97,7 +97,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
  * useful stream information (e.g. checksums) from @template_inode.
  *
  * This assumes that the streams for @inode have been resolved (to point
- * directly to the appropriate `struct wim_lookup_table_entry's)  but do not
+ * directly to the appropriate `struct blob_info's)  but do not
  * necessarily have checksum information filled in.
  */
 static int
@@ -107,21 +107,21 @@ inode_copy_checksums(struct wim_inode *inode,
 		     WIMStruct *template_wim)
 {
 	for (unsigned i = 0; i <= inode->i_num_ads; i++) {
-		struct wim_lookup_table_entry *lte, *template_lte;
-		struct wim_lookup_table_entry *replace_lte;
+		struct blob_info *blob, *template_lte;
+		struct blob_info *replace_lte;
 
-		lte = inode_stream_lte_resolved(inode, i);
-		template_lte = inode_stream_lte(template_inode, i,
+		blob = inode_get_blob_for_stream_resolved(inode, i);
+		template_lte = inode_get_blob_for_stream(template_inode, i,
 						template_wim->lookup_table);
 
 		/* Only take action if both entries exist, the entry for @inode
 		 * has no checksum calculated, but the entry for @template_inode
 		 * does.  */
-		if (lte == NULL || template_lte == NULL ||
-		    !lte->unhashed || template_lte->unhashed)
+		if (blob == NULL || template_lte == NULL ||
+		    !blob->unhashed || template_lte->unhashed)
 			continue;
 
-		wimlib_assert(lte->refcnt == inode->i_nlink);
+		wimlib_assert(blob->refcnt == inode->i_nlink);
 
 		/* If the WIM of the template image is the same as the WIM of
 		 * the new image, then @template_lte can be used directly.
@@ -136,21 +136,21 @@ inode_copy_checksums(struct wim_inode *inode,
 			replace_lte = lookup_stream(wim->lookup_table,
 						    template_lte->hash);
 
-		list_del(&lte->unhashed_list);
+		list_del(&blob->unhashed_list);
 		if (replace_lte) {
-			free_lookup_table_entry(lte);
+			free_lookup_table_entry(blob);
 		} else {
-			copy_hash(lte->hash, template_lte->hash);
-			lte->unhashed = 0;
-			lookup_table_insert(wim->lookup_table, lte);
-			lte->refcnt = 0;
-			replace_lte = lte;
+			copy_hash(blob->hash, template_lte->hash);
+			blob->unhashed = 0;
+			lookup_table_insert(wim->lookup_table, blob);
+			blob->refcnt = 0;
+			replace_lte = blob;
 		}
 
 		if (i == 0)
 			inode->i_lte = replace_lte;
 		else
-			inode->i_ads_entries[i - 1].lte = replace_lte;
+			inode->i_ads_entries[i - 1].blob = replace_lte;
 
 		replace_lte->refcnt += inode->i_nlink;
 	}

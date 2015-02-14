@@ -70,10 +70,10 @@ open_ntfs_attr(ntfs_inode *ni, struct ntfs_location *loc)
 }
 
 int
-read_ntfs_file_prefix(const struct wim_lookup_table_entry *lte, u64 size,
+read_ntfs_file_prefix(const struct blob_info *blob, u64 size,
 		      consume_data_callback_t cb, void *cb_ctx)
 {
-	struct ntfs_location *loc = lte->ntfs_loc;
+	struct ntfs_location *loc = blob->ntfs_loc;
 	ntfs_volume *vol = loc->ntfs_vol;
 	ntfs_inode *ni;
 	ntfs_attr *na;
@@ -163,7 +163,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 	ntfs_attr_search_ctx *actx;
 	struct ntfs_location *ntfs_loc;
 	int ret;
-	struct wim_lookup_table_entry *lte;
+	struct blob_info *blob;
 
 	DEBUG("Capturing NTFS data streams from `%s'", path);
 
@@ -185,7 +185,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 
 		if (data_size == 0) {
 			/* Empty stream.  No lookup table entry is needed. */
-			lte = NULL;
+			blob = NULL;
 			ntfs_loc = NULL;
 		} else {
 			ntfs_loc = CALLOC(1, sizeof(*ntfs_loc));
@@ -209,13 +209,13 @@ capture_ntfs_streams(struct wim_inode *inode,
 				ntfs_loc->stream_name_nchars = name_length;
 			}
 
-			lte = new_lookup_table_entry();
-			if (!lte) {
+			blob = new_lookup_table_entry();
+			if (!blob) {
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
 			}
-			lte->resource_location = RESOURCE_IN_NTFS_VOLUME;
-			lte->ntfs_loc = ntfs_loc;
+			blob->resource_location = RESOURCE_IN_NTFS_VOLUME;
+			blob->ntfs_loc = ntfs_loc;
 			ntfs_loc = NULL;
 			if (type == AT_REPARSE_POINT) {
 				if (data_size < 8) {
@@ -224,22 +224,22 @@ capture_ntfs_streams(struct wim_inode *inode,
 					ret = WIMLIB_ERR_NTFS_3G;
 					goto out_free_lte;
 				}
-				lte->ntfs_loc->is_reparse_point = true;
-				lte->size = data_size - 8;
-				ret = read_reparse_tag(ni, lte->ntfs_loc,
+				blob->ntfs_loc->is_reparse_point = true;
+				blob->size = data_size - 8;
+				ret = read_reparse_tag(ni, blob->ntfs_loc,
 						       &inode->i_reparse_tag);
 				if (ret)
 					goto out_free_lte;
 			} else {
-				lte->ntfs_loc->is_reparse_point = false;
-				lte->size = data_size;
+				blob->ntfs_loc->is_reparse_point = false;
+				blob->size = data_size;
 			}
 		}
 		if (name_length == 0) {
 			/* Unnamed data stream.  Put the reference to it in the
 			 * dentry's inode. */
 			if (inode->i_lte) {
-				if (lte) {
+				if (blob) {
 					if (!(inode->i_attributes &
 					      FILE_ATTRIBUTE_REPARSE_POINT))
 					{
@@ -249,14 +249,14 @@ capture_ntfs_streams(struct wim_inode *inode,
 							"%"PRIu64")",
 							path,
 							inode->i_lte->size,
-							lte->size);
+							blob->size);
 					}
-					free_lookup_table_entry(lte);
+					free_lookup_table_entry(blob);
 					continue;
 				}
 			} else {
 				stream_id = 0;
-				inode->i_lte = lte;
+				inode->i_lte = blob;
 			}
 		} else {
 			/* Named data stream.  Put the reference to it in the
@@ -272,10 +272,10 @@ capture_ntfs_streams(struct wim_inode *inode,
 			}
 			wimlib_assert(new_ads_entry->stream_name_nbytes == name_length * 2);
 			stream_id = new_ads_entry->stream_id;
-			new_ads_entry->lte = lte;
+			new_ads_entry->blob = blob;
 		}
-		if (lte) {
-			add_unhashed_stream(lte, inode,
+		if (blob) {
+			add_unhashed_stream(blob, inode,
 					    stream_id, unhashed_streams);
 		}
 	}
@@ -287,7 +287,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 	}
 	goto out_put_actx;
 out_free_lte:
-	free_lookup_table_entry(lte);
+	free_lookup_table_entry(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {
 		FREE(ntfs_loc->path);

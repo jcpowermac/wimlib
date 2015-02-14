@@ -4,7 +4,7 @@
 #include "wimlib/callback.h"
 #include "wimlib/types.h"
 
-struct wim_lookup_table_entry;
+struct blob_info;
 struct _ntfs_volume;
 
 #ifdef WITH_NTFS_3G
@@ -22,7 +22,7 @@ extern void
 libntfs3g_global_init(void);
 
 extern int
-read_ntfs_file_prefix(const struct wim_lookup_table_entry *lte,
+read_ntfs_file_prefix(const struct blob_info *blob,
 		      u64 size,
 		      consume_data_callback_t cb,
 		      void *cb_ctx);

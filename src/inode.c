@@ -316,8 +316,8 @@ inode_add_ads_with_data(struct wim_inode *inode, const tchar *name,
 	if (unlikely(!new_entry))
 		return NULL;
 
-	new_entry->lte = new_stream_from_data_buffer(value, size, lookup_table);
-	if (unlikely(!new_entry->lte)) {
+	new_entry->blob = new_stream_from_data_buffer(value, size, lookup_table);
+	if (unlikely(!new_entry->blob)) {
 		inode_remove_ads(inode, new_entry, NULL);
 		return NULL;
 	}
@@ -329,15 +329,15 @@ void
 inode_remove_ads(struct wim_inode *inode, struct wim_ads_entry *entry,
 		 struct wim_lookup_table *lookup_table)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob_info *blob;
 	unsigned idx = entry - inode->i_ads_entries;
 
 	wimlib_assert(idx < inode->i_num_ads);
 	wimlib_assert(inode->i_resolved);
 
-	lte = entry->lte;
-	if (lte)
-		lte_decrement_refcnt(lte, lookup_table);
+	blob = entry->blob;
+	if (blob)
+		blob_decrement_refcnt(blob, lookup_table);
 
 	destroy_ads_entry(entry);
 
@@ -378,7 +378,7 @@ inode_set_unnamed_stream(struct wim_inode *inode, const void *data, size_t len,
  *
  * This takes each SHA-1 message digest stored in the inode or one of its ADS
  * entries and replaces it with a pointer directly to the appropriate 'struct
- * wim_lookup_table_entry' currently inserted into @table to represent the
+ * blob_info' currently inserted into @table to represent the
  * single-instance stream having that SHA-1 message digest.
  *
  * If @force is %false:
@@ -401,25 +401,25 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_lookup_table *table,
 		      bool force)
 {
 	const u8 *hash;
-	struct wim_lookup_table_entry *lte, *ads_lte;
+	struct blob_info *blob, *ads_lte;
 
 	if (inode->i_resolved)
 		return 0;
 
-	struct wim_lookup_table_entry *ads_ltes[inode->i_num_ads];
+	struct blob_info *ads_ltes[inode->i_num_ads];
 
 	/* Resolve the default data stream */
-	lte = NULL;
+	blob = NULL;
 	hash = inode->i_hash;
 	if (!is_zero_hash(hash)) {
-		lte = lookup_stream(table, hash);
-		if (!lte) {
+		blob = lookup_stream(table, hash);
+		if (!blob) {
 			if (force) {
-				lte = new_lookup_table_entry();
-				if (!lte)
+				blob = new_lookup_table_entry();
+				if (!blob)
 					return WIMLIB_ERR_NOMEM;
-				copy_hash(lte->hash, hash);
-				lookup_table_insert(table, lte);
+				copy_hash(blob->hash, hash);
+				lookup_table_insert(table, blob);
 			} else {
 				goto stream_not_found;
 			}
@@ -449,9 +449,9 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_lookup_table *table,
 		}
 		ads_ltes[i] = ads_lte;
 	}
-	inode->i_lte = lte;
+	inode->i_lte = blob;
 	for (unsigned i = 0; i < inode->i_num_ads; i++)
-		inode->i_ads_entries[i].lte = ads_ltes[i];
+		inode->i_ads_entries[i].blob = ads_ltes[i];
 	inode->i_resolved = 1;
 	return 0;
 
@@ -476,9 +476,9 @@ inode_unresolve_streams(struct wim_inode *inode)
 		zero_out_hash(inode->i_hash);
 
 	for (unsigned i = 0; i < inode->i_num_ads; i++) {
-		if (inode->i_ads_entries[i].lte)
+		if (inode->i_ads_entries[i].blob)
 			copy_hash(inode->i_ads_entries[i].hash,
-				  inode->i_ads_entries[i].lte->hash);
+				  inode->i_ads_entries[i].blob->hash);
 		else
 			zero_out_hash(inode->i_ads_entries[i].hash);
 	}
@@ -508,12 +508,12 @@ stream_not_found_error(const struct wim_inode *inode, const u8 *hash)
  * stream_idx = 0: default data stream
  * stream_idx > 0: alternate data stream
  */
-struct wim_lookup_table_entry *
-inode_stream_lte(const struct wim_inode *inode, unsigned stream_idx,
+struct blob_info *
+inode_get_blob_for_stream(const struct wim_inode *inode, unsigned stream_idx,
 		 const struct wim_lookup_table *table)
 {
 	if (inode->i_resolved)
-		return inode_stream_lte_resolved(inode, stream_idx);
+		return inode_get_blob_for_stream_resolved(inode, stream_idx);
 	if (stream_idx == 0)
 		return lookup_stream(table, inode->i_hash);
 	return lookup_stream(table, inode->i_ads_entries[stream_idx - 1].hash);
@@ -524,7 +524,7 @@ inode_stream_lte(const struct wim_inode *inode, unsigned stream_idx,
  * inode, or NULL if the inode's unnamed data stream is empty.  Also return the
  * 0-based index of the unnamed data stream in *stream_idx_ret.
  */
-struct wim_lookup_table_entry *
+struct blob_info *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
 			      unsigned *stream_idx_ret)
 {
@@ -536,10 +536,10 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
 
 	for (unsigned i = 0; i < inode->i_num_ads; i++) {
 		if (inode->i_ads_entries[i].stream_name_nbytes == 0 &&
-		    inode->i_ads_entries[i].lte)
+		    inode->i_ads_entries[i].blob)
 		{
 			*stream_idx_ret = i + 1;
-			return inode->i_ads_entries[i].lte;
+			return inode->i_ads_entries[i].blob;
 		}
 	}
 	return NULL;
@@ -552,25 +552,25 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
  * Note: this is complicated by the fact that WIMGAPI may put the unnamed data
  * stream in an alternate data stream entry rather than in the dentry itself.
  */
-struct wim_lookup_table_entry *
-inode_unnamed_lte(const struct wim_inode *inode,
+struct blob_info *
+inode_get_blob_for_unnamed_stream(const struct wim_inode *inode,
 		  const struct wim_lookup_table *table)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob_info *blob;
 
 	if (inode->i_resolved)
-		return inode_unnamed_lte_resolved(inode);
+		return inode_get_blob_for_unnamed_stream_resolved(inode);
 
-	lte = lookup_stream(table, inode->i_hash);
-	if (likely(lte))
-		return lte;
+	blob = lookup_stream(table, inode->i_hash);
+	if (likely(blob))
+		return blob;
 
 	for (unsigned i = 0; i < inode->i_num_ads; i++) {
 		if (inode->i_ads_entries[i].stream_name_nbytes)
 			continue;
-		lte = lookup_stream(table, inode->i_ads_entries[i].hash);
-		if (lte)
-			return lte;
+		blob = lookup_stream(table, inode->i_ads_entries[i].hash);
+		if (blob)
+			return blob;
 	}
 	return NULL;
 }
@@ -581,11 +581,11 @@ const u8 *
 inode_stream_hash(const struct wim_inode *inode, unsigned stream_idx)
 {
 	if (inode->i_resolved) {
-		struct wim_lookup_table_entry *lte;
+		struct blob_info *blob;
 
-		lte = inode_stream_lte_resolved(inode, stream_idx);
-		if (lte)
-			return lte->hash;
+		blob = inode_get_blob_for_stream_resolved(inode, stream_idx);
+		if (blob)
+			return blob->hash;
 		return zero_hash;
 	}
 	if (stream_idx == 0)
@@ -615,29 +615,29 @@ inode_unnamed_stream_hash(const struct wim_inode *inode)
  *
  * The inode must be resolved.  */
 void
-inode_ref_streams(struct wim_inode *inode)
+inode_ref_blobs(struct wim_inode *inode)
 {
 	wimlib_assert(inode->i_resolved);
 
 	if (inode->i_lte)
 		inode->i_lte->refcnt++;
 	for (unsigned i = 0; i < inode->i_num_ads; i++)
-		if (inode->i_ads_entries[i].lte)
-			inode->i_ads_entries[i].lte->refcnt++;
+		if (inode->i_ads_entries[i].blob)
+			inode->i_ads_entries[i].blob->refcnt++;
 }
 
 /* Drop a reference to each single-instance stream referenced by this inode.
  * This is necessary when deleting a hard link to this inode.  */
 void
-inode_unref_streams(struct wim_inode *inode,
+inode_unref_blobs(struct wim_inode *inode,
 		    struct wim_lookup_table *lookup_table)
 {
 	for (unsigned i = 0; i <= inode->i_num_ads; i++) {
-		struct wim_lookup_table_entry *lte;
+		struct blob_info *blob;
 
-		lte = inode_stream_lte(inode, i, lookup_table);
-		if (lte)
-			lte_decrement_refcnt(lte, lookup_table);
+		blob = inode_get_blob_for_stream(inode, i, lookup_table);
+		if (blob)
+			blob_decrement_refcnt(blob, lookup_table);
 	}
 }
 
@@ -819,17 +819,17 @@ check_inode(struct wim_inode *inode, const struct wim_security_data *sd)
  * inode.  (It can't be in an unresolved inode, since that would imply the hash
  * is known!)
  */
-struct wim_lookup_table_entry **
-retrieve_lte_pointer(struct wim_lookup_table_entry *lte)
+struct blob_info **
+retrieve_blob_pointer(struct blob_info *blob)
 {
-	wimlib_assert(lte->unhashed);
-	struct wim_inode *inode = lte->back_inode;
-	u32 stream_id = lte->back_stream_id;
+	wimlib_assert(blob->unhashed);
+	struct wim_inode *inode = blob->back_inode;
+	u32 stream_id = blob->back_stream_id;
 	if (stream_id == 0)
 		return &inode->i_lte;
 	for (unsigned i = 0; i < inode->i_num_ads; i++)
 		if (inode->i_ads_entries[i].stream_id == stream_id)
-			return &inode->i_ads_entries[i].lte;
+			return &inode->i_ads_entries[i].blob;
 	wimlib_assert(0);
 	return NULL;
 }

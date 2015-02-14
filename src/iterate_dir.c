@@ -45,7 +45,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	int ret;
 	size_t dummy;
 	const struct wim_inode *inode = dentry->d_inode;
-	struct wim_lookup_table_entry *lte;
+	struct blob_info *blob;
 	const u8 *hash;
 	struct wimlib_unix_data unix_data;
 
@@ -88,9 +88,9 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 		wdentry->unix_rdev = unix_data.rdev;
 	}
 
-	lte = inode_unnamed_lte(inode, wim->lookup_table);
-	if (lte) {
-		lte_to_wimlib_resource_entry(lte, &wdentry->streams[0].resource);
+	blob = inode_get_blob_for_unnamed_stream(inode, wim->lookup_table);
+	if (blob) {
+		blob_to_wimlib_resource_entry(blob, &wdentry->streams[0].resource);
 	} else if (!is_zero_hash(hash = inode_unnamed_stream_hash(inode))) {
 		if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
 			return stream_not_found_error(inode, hash);
@@ -101,10 +101,10 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	for (unsigned i = 0; i < inode->i_num_ads; i++) {
 		if (!inode->i_ads_entries[i].stream_name_nbytes)
 			continue;
-		lte = inode_stream_lte(inode, i + 1, wim->lookup_table);
+		blob = inode_get_blob_for_stream(inode, i + 1, wim->lookup_table);
 		wdentry->num_named_streams++;
-		if (lte) {
-			lte_to_wimlib_resource_entry(lte, &wdentry->streams[
+		if (blob) {
+			blob_to_wimlib_resource_entry(blob, &wdentry->streams[
 								wdentry->num_named_streams].resource);
 		} else if (!is_zero_hash(hash = inode_stream_hash(inode, i + 1))) {
 			if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
