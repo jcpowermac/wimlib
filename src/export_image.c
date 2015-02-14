@@ -156,10 +156,10 @@ wimlib_export_image(WIMStruct *src_wim,
 	orig_dest_image_count = dest_wim->hdr.image_count;
 
 	/* Stream checksums must be known before proceeding.  */
-	ret = wim_checksum_unhashed_streams(src_wim);
+	ret = wim_checksum_unhashed_blobs(src_wim);
 	if (ret)
 		return ret;
-	ret = wim_checksum_unhashed_streams(dest_wim);
+	ret = wim_checksum_unhashed_blobs(dest_wim);
 	if (ret)
 		return ret;
 

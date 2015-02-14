@@ -388,16 +388,16 @@ static inline void
 add_unhashed_stream(struct blob_info *blob,
 		    struct wim_inode *back_inode,
 		    u32 back_stream_id,
-		    struct list_head *unhashed_streams)
+		    struct list_head *unhashed_blobs)
 {
 	blob->unhashed = 1;
 	blob->back_inode = back_inode;
 	blob->back_stream_id = back_stream_id;
-	list_add_tail(&blob->unhashed_list, unhashed_streams);
+	list_add_tail(&blob->unhashed_list, unhashed_blobs);
 }
 
 extern int
-hash_unhashed_stream(struct blob_info *blob,
+hash_unhashed_blob(struct blob_info *blob,
 		     struct wim_blob_table *blob_table,
 		     struct blob_info **blob_ret);
 

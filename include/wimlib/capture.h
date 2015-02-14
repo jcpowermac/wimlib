@@ -27,7 +27,7 @@ struct capture_params {
 
 	/* List of streams that have been added so far, but without their SHA1
 	 * message digests being calculated (as a shortcut).  */
-	struct list_head *unhashed_streams;
+	struct list_head *unhashed_blobs;
 
 	/* Hash table of inodes that have been captured for this tree so far. */
 	struct wim_inode_table *inode_table;

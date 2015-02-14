@@ -101,7 +101,7 @@ my_fdopendir(int *dirfd_p)
 
 static int
 unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
-		       struct list_head *unhashed_streams)
+		       struct list_head *unhashed_blobs)
 {
 	struct blob_info *blob;
 	char *file_on_disk;
@@ -124,7 +124,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 	blob->file_inode = inode;
 	blob->resource_location = RESOURCE_IN_FILE_ON_DISK;
 	blob->size = size;
-	add_unhashed_stream(blob, inode, 0, unhashed_streams);
+	add_unhashed_stream(blob, inode, 0, unhashed_blobs);
 	inode->i_blob = blob;
 	return 0;
 }
@@ -418,7 +418,7 @@ unix_build_dentry_tree_recursive(struct wim_dentry **tree_ret,
 
 	if (S_ISREG(stbuf.st_mode)) {
 		ret = unix_scan_regular_file(full_path, stbuf.st_size,
-					     inode, params->unhashed_streams);
+					     inode, params->unhashed_blobs);
 	} else if (S_ISDIR(stbuf.st_mode)) {
 		ret = unix_scan_directory(tree, full_path, full_path_len,
 					  dirfd, relpath, params);

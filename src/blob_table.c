@@ -2,7 +2,7 @@
  * blob_table.c
  *
  * Lookup table, implemented as a hash table, that maps SHA1 message digests to
- * data streams; plus code to read and write the corresponding on-disk data.
+ * blobs; plus code to read and write the corresponding on-disk data.
  */
 
 /*
@@ -41,7 +41,8 @@
 #include "wimlib/util.h"
 #include "wimlib/write.h"
 
-/* WIM lookup table:
+/*
+ * WIM blob table:
  *
  * This is a logical mapping from SHA1 message digests to the data streams
  * contained in a WIM.
@@ -1306,7 +1307,8 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 	return blob;
 }
 
-/* Calculate the SHA1 message digest of a stream and move it from the list of
+/*
+ * Calculate the SHA1 message digest of a stream and move it from the list of
  * unhashed streams to the stream lookup table, possibly joining it with an
  * existing blob table entry for an identical stream.
  *
@@ -1320,9 +1322,9 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
  * Returns 0 on success; nonzero if there is an error reading the stream.
  */
 int
-hash_unhashed_stream(struct blob_info *blob,
-		     struct wim_blob_table *blob_table,
-		     struct blob_info **blob_ret)
+hash_unhashed_blob(struct blob_info *blob,
+		   struct wim_blob_table *blob_table,
+		   struct blob_info **blob_ret)
 {
 	int ret;
 	struct blob_info *duplicate_blob;

@@ -156,7 +156,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 		     ntfs_inode *ni,
 		     char *path,
 		     size_t path_len,
-		     struct list_head *unhashed_streams,
+		     struct list_head *unhashed_blobs,
 		     ntfs_volume *vol,
 		     ATTR_TYPES type)
 {
@@ -276,7 +276,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 		}
 		if (blob) {
 			add_unhashed_stream(blob, inode,
-					    stream_id, unhashed_streams);
+					    stream_id, unhashed_blobs);
 		}
 	}
 	if (errno == ENOENT) {
@@ -587,7 +587,7 @@ build_dentry_tree_ntfs_recursive(struct wim_dentry **root_ret,
 	if (attributes & FILE_ATTR_REPARSE_POINT) {
 		/* Capture reparse data stream.  */
 		ret = capture_ntfs_streams(inode, ni, path, path_len,
-					   params->unhashed_streams,
+					   params->unhashed_blobs,
 					   vol, AT_REPARSE_POINT);
 		if (ret)
 			goto out;
@@ -605,7 +605,7 @@ build_dentry_tree_ntfs_recursive(struct wim_dentry **root_ret,
 	 * Regular files can have an unnamed data stream as well as named data
 	 * streams.  */
 	ret = capture_ntfs_streams(inode, ni, path, path_len,
-				   params->unhashed_streams, vol, AT_DATA);
+				   params->unhashed_blobs, vol, AT_DATA);
 	if (ret)
 		goto out;
 

@@ -208,7 +208,7 @@ extern int
 for_image(WIMStruct *wim, int image, int (*visitor)(WIMStruct *));
 
 extern int
-wim_checksum_unhashed_streams(WIMStruct *wim);
+wim_checksum_unhashed_blobs(WIMStruct *wim);
 
 extern int
 delete_wim_image(WIMStruct *wim, int image);

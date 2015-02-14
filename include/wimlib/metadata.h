@@ -34,7 +34,7 @@ struct wim_image_metadata {
 	 * digest calculated yet and therefore have not been inserted into the
 	 * WIM's lookup table.  This list is added to during wimlib_add_image()
 	 * and wimlib_mount_image() (read-write only). */
-	struct list_head unhashed_streams;
+	struct list_head unhashed_blobs;
 
 	/* 1 iff the dentry tree has been modified.  If this is the case, the
 	 * memory for the dentry tree should not be freed when switching to a
@@ -76,12 +76,12 @@ wim_get_current_security_data(WIMStruct *wim)
 
 /* Iterate over each stream in a WIM image that has not yet been hashed */
 #define image_for_each_unhashed_stream(blob, imd) \
-	list_for_each_entry(blob, &(imd)->unhashed_streams, unhashed_list)
+	list_for_each_entry(blob, &(imd)->unhashed_blobs, unhashed_list)
 
 /* Iterate over each stream in a WIM image that has not yet been hashed (safe
  * against stream removal) */
 #define image_for_each_unhashed_stream_safe(blob, tmp, imd) \
-	list_for_each_entry_safe(blob, tmp, &(imd)->unhashed_streams, unhashed_list)
+	list_for_each_entry_safe(blob, tmp, &(imd)->unhashed_blobs, unhashed_list)
 
 extern void
 put_image_metadata(struct wim_image_metadata *imd,

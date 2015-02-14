@@ -115,7 +115,7 @@ read_metadata_resource(struct wim_image_metadata *imd)
 	/* Success; fill in the image_metadata structure.  */
 	imd->root_dentry = root;
 	imd->security_data = sd;
-	INIT_LIST_HEAD(&imd->unhashed_streams);
+	INIT_LIST_HEAD(&imd->unhashed_blobs);
 	DEBUG("Done parsing metadata resource.");
 	return 0;
 
