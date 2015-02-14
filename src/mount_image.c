@@ -577,7 +577,7 @@ inode_to_stbuf(const struct wim_inode *inode,
 	stbuf->st_ino = inode->i_ino;
 	stbuf->st_nlink = inode->i_nlink;
 	if (blob)
-		stbuf->st_size = blob->size;
+		stbuf->st_size = blob->b_size;
 #ifdef HAVE_STAT_NANOSECOND_PRECISION
 	stbuf->st_atim = wim_timestamp_to_timespec(inode->i_last_access_time);
 	stbuf->st_mtim = wim_timestamp_to_timespec(inode->i_last_write_time);
@@ -699,7 +699,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 
 		filedes_init(&fd, staging_fd);
 		errno = 0;
-		extract_size = min(old_blob->size, size);
+		extract_size = min(old_blob->b_size, size);
 		result = extract_stream_to_fd(old_blob, &fd, extract_size);
 	} else {
 		extract_size = 0;
@@ -793,7 +793,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 	new_blob->resource_location = RESOURCE_IN_STAGING_FILE;
 	new_blob->staging_file_name = staging_file_name;
 	new_blob->staging_dir_fd	   = ctx->staging_dir_fd;
-	new_blob->size		   = size;
+	new_blob->b_size		   = size;
 
 	add_unhashed_blob(new_blob, inode, stream_id,
 			    &wim_get_current_image_metadata(ctx->wim)->unhashed_blobs);
@@ -993,7 +993,7 @@ delete_empty_streams(struct wimfs_context *ctx)
 	imd = wim_get_current_image_metadata(ctx->wim);
 
         image_for_each_unhashed_stream_safe(blob, tmp, imd) {
-                if (!blob->size) {
+                if (!blob->b_size) {
                         *retrieve_blob_pointer(blob) = NULL;
                         list_del(&blob->unhashed_list);
                         free_blob_info(blob);
@@ -1286,7 +1286,7 @@ wimfs_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
 	if (ftruncate(fd->f_staging_fd.fd, size))
 		return -errno;
 	touch_inode(fd->f_inode);
-	fd->f_blob->size = size;
+	fd->f_blob->b_size = size;
 	return 0;
 }
 
@@ -1386,17 +1386,17 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 	if (!blob)
 		return 0;
 
-	if (unlikely(blob->size > INT_MAX))
+	if (unlikely(blob->b_size > INT_MAX))
 		return -EFBIG;
 
 	if (size) {
-		if (size < blob->size)
+		if (size < blob->b_size)
 			return -ERANGE;
 
 		if (read_full_stream_into_buf(blob, value))
 			return errno ? -errno : -EIO;
 	}
-	return blob->size;
+	return blob->b_size;
 }
 
 static int
@@ -1597,7 +1597,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 		ret = extract_resource_to_staging_dir(inode,
 						      stream_idx,
 						      &blob,
-						      blob ? blob->size : 0,
+						      blob ? blob->b_size : 0,
 						      ctx);
 		if (ret)
 			return ret;
@@ -1655,11 +1655,11 @@ wimfs_read(const char *path, char *buf, size_t size,
 	if (!blob)
 		return 0;
 
-	if (offset >= blob->size)
+	if (offset >= blob->b_size)
 		return 0;
 
-	if (size > blob->size - offset)
-		size = blob->size - offset;
+	if (size > blob->b_size - offset)
+		size = blob->b_size - offset;
 
 	if (!size)
 		return 0;
@@ -1928,7 +1928,7 @@ wimfs_truncate(const char *path, off_t size)
 	ret = ftruncate(fd, size);
 	if (close(fd) || ret)
 		return -errno;
-	blob->size = size;
+	blob->b_size = size;
 	return 0;
 }
 
@@ -2013,8 +2013,8 @@ wimfs_write(const char *path, const char *buf, size_t size,
 	if (ret < 0)
 		return -errno;
 
-	if (offset + size > fd->f_blob->size)
-		fd->f_blob->size = offset + size;
+	if (offset + size > fd->f_blob->b_size)
+		fd->f_blob->b_size = offset + size;
 
 	touch_inode(fd->f_inode);
 	return ret;

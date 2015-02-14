@@ -225,14 +225,14 @@ capture_ntfs_streams(struct wim_inode *inode,
 					goto out_free_blob;
 				}
 				blob->ntfs_loc->is_reparse_point = true;
-				blob->size = data_size - 8;
+				blob->b_size = data_size - 8;
 				ret = read_reparse_tag(ni, blob->ntfs_loc,
 						       &inode->i_reparse_tag);
 				if (ret)
 					goto out_free_blob;
 			} else {
 				blob->ntfs_loc->is_reparse_point = false;
-				blob->size = data_size;
+				blob->b_size = data_size;
 			}
 		}
 		if (name_length == 0) {
@@ -248,8 +248,8 @@ capture_ntfs_streams(struct wim_inode *inode,
 							"(sizes = %"PRIu64", "
 							"%"PRIu64")",
 							path,
-							inode->i_blob->size,
-							blob->size);
+							inode->i_blob->b_size,
+							blob->b_size);
 					}
 					free_blob_info(blob);
 					continue;

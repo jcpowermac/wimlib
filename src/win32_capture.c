@@ -836,7 +836,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	wimlib_assert(!wmemcmp(blob->file_on_disk, L"\\??\\", 4));
 	blob->file_on_disk[1] = L'\\';
 
-	ret = win32_get_encrypted_file_size(blob->file_on_disk, &blob->size);
+	ret = win32_get_encrypted_file_size(blob->file_on_disk, &blob->b_size);
 	if (unlikely(ret)) {
 		free_blob_info(blob);
 		return ret;
@@ -962,7 +962,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 	}
 	blob->file_on_disk = stream_path;
 	blob->resource_location = RESOURCE_IN_WINNT_FILE_ON_DISK;
-	blob->size = stream_size;
+	blob->b_size = stream_size;
 	if (ads_entry) {
 		stream_id = ads_entry->stream_id;
 		ads_entry->blob = blob;

@@ -309,7 +309,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 	sec.name = T("PrepopulateList");
 	sec.strings = s;
 
-	ret = do_load_text_file(path, buf, blob->size, &mem, &sec, 1,
+	ret = do_load_text_file(path, buf, blob->b_size, &mem, &sec, 1,
 				LOAD_TEXT_FILE_REMOVE_QUOTES |
 					LOAD_TEXT_FILE_NO_WARNINGS,
 				mangle_pat);
@@ -395,7 +395,7 @@ will_externally_back_inode(struct wim_inode *inode, struct win32_apply_ctx *ctx,
 	if (!stream ||
 	    stream->resource_location != RESOURCE_IN_WIM ||
 	    stream->rspec->wim != ctx->common.wim ||
-	    stream->size != stream->rspec->uncompressed_size)
+	    stream->b_size != stream->rspec->uncompressed_size)
 		return WIM_BACKING_NOT_POSSIBLE;
 
 	/*
@@ -1667,7 +1667,7 @@ begin_extract_stream_instance(const struct blob_info *stream,
 		 * TODO: This isn't sufficient for extremely large encrypted
 		 * files.  Perhaps we should create an extra thread to write
 		 * such files...  */
-		if (!prepare_data_buffer(ctx, stream->size))
+		if (!prepare_data_buffer(ctx, stream->b_size))
 			return WIMLIB_ERR_NOMEM;
 		list_add_tail(&dentry->tmp_list, &ctx->encrypted_dentries);
 		return 0;
@@ -1689,7 +1689,7 @@ begin_extract_stream_instance(const struct blob_info *stream,
 		 * with FSCTL_SET_REPARSE_POINT, which requires that all the
 		 * data be available.  So, stage the data in a buffer.  */
 
-		if (!prepare_data_buffer(ctx, stream->size))
+		if (!prepare_data_buffer(ctx, stream->b_size))
 			return WIMLIB_ERR_NOMEM;
 		list_add_tail(&dentry->tmp_list, &ctx->reparse_dentries);
 		return 0;
@@ -1719,7 +1719,7 @@ begin_extract_stream_instance(const struct blob_info *stream,
 	ctx->open_handles[ctx->num_open_handles++] = h;
 
 	/* Allocate space for the data.  */
-	alloc_info.AllocationSize.QuadPart = stream->size;
+	alloc_info.AllocationSize.QuadPart = stream->b_size;
 	(*func_NtSetInformationFile)(h, &ctx->iosb,
 				     &alloc_info, sizeof(alloc_info),
 				     FileAllocationInformation);
@@ -2108,26 +2108,26 @@ end_extract_stream(struct blob_info *stream, int status, void *_ctx)
 		return 0;
 
 	if (!list_empty(&ctx->reparse_dentries)) {
-		if (stream->size > REPARSE_DATA_MAX_SIZE) {
+		if (stream->b_size > REPARSE_DATA_MAX_SIZE) {
 			dentry = list_first_entry(&ctx->reparse_dentries,
 						  struct wim_dentry, tmp_list);
 			build_extraction_path(dentry, ctx);
 			ERROR("Reparse data of \"%ls\" has size "
 			      "%"PRIu64" bytes (exceeds %u bytes)",
-			      current_path(ctx), stream->size,
+			      current_path(ctx), stream->b_size,
 			      REPARSE_DATA_MAX_SIZE);
 			ret = WIMLIB_ERR_INVALID_REPARSE_DATA;
 			return check_apply_error(dentry, ctx, ret);
 		}
 		/* In the WIM format, reparse streams are just the reparse data
 		 * and omit the header.  But we can reconstruct the header.  */
-		memcpy(ctx->rpbuf.rpdata, ctx->data_buffer, stream->size);
-		ctx->rpbuf.rpdatalen = stream->size;
+		memcpy(ctx->rpbuf.rpdata, ctx->data_buffer, stream->b_size);
+		ctx->rpbuf.rpdatalen = stream->b_size;
 		ctx->rpbuf.rpreserved = 0;
 		list_for_each_entry(dentry, &ctx->reparse_dentries, tmp_list) {
 			ctx->rpbuf.rptag = dentry->d_inode->i_reparse_tag;
 			ret = set_reparse_data(dentry, &ctx->rpbuf,
-					       stream->size + REPARSE_DATA_OFFSET,
+					       stream->b_size + REPARSE_DATA_OFFSET,
 					       ctx);
 			ret = check_apply_error(dentry, ctx, ret);
 			if (ret)
@@ -2136,7 +2136,7 @@ end_extract_stream(struct blob_info *stream, int status, void *_ctx)
 	}
 
 	if (!list_empty(&ctx->encrypted_dentries)) {
-		ctx->encrypted_size = stream->size;
+		ctx->encrypted_size = stream->b_size;
 		list_for_each_entry(dentry, &ctx->encrypted_dentries, tmp_list) {
 			ret = extract_encrypted_file(dentry, ctx);
 			ret = check_apply_error(dentry, ctx, ret);

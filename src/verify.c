@@ -56,7 +56,7 @@ end_verify_stream(struct blob_info *blob, int status, void *_ctx)
 		return status;
 
 	progress->verify_streams.completed_streams++;
-	progress->verify_streams.completed_bytes += blob->size;
+	progress->verify_streams.completed_bytes += blob->b_size;
 
 	/* Handle rate-limiting of progress messages  */
 
@@ -174,7 +174,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	progress.verify_streams.wimfile = wim->filename;
 	list_for_each_entry(blob, &blob_list, extraction_list) {
 		progress.verify_streams.total_streams++;
-		progress.verify_streams.total_bytes += blob->size;
+		progress.verify_streams.total_bytes += blob->b_size;
 	}
 
 	ctx.progfunc = wim->progfunc;

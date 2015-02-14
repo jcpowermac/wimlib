@@ -76,7 +76,7 @@ do_capture_progress(struct capture_params *params, int status,
 		for (unsigned i = 0; i <= inode->i_num_ads; i++) {
 			blob = inode_get_blob_for_stream_resolved(inode, i);
 			if (blob)
-				params->progress.scan.num_bytes_scanned += blob->size;
+				params->progress.scan.num_bytes_scanned += blob->b_size;
 		}
 
 		/* Tally the file itself.  */

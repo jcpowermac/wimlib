@@ -147,7 +147,7 @@ clone_blob_info(const struct blob_info *old)
 			goto out_free;
 		break;
 	case RESOURCE_IN_ATTACHED_BUFFER:
-		new->attached_buffer = memdup(old->attached_buffer, old->size);
+		new->attached_buffer = memdup(old->attached_buffer, old->b_size);
 		if (new->attached_buffer == NULL)
 			goto out_free;
 		break;
@@ -742,10 +742,10 @@ bind_stream_to_solid_resource(const struct wim_reshdr *reshdr,
 
 	/* XXX: This linear search will be slow in the degenerate case where the
 	 * number of solid resources in the run is huge.  */
-	stream->size = reshdr->size_in_wim;
+	stream->b_size = reshdr->size_in_wim;
 	stream->flags = reshdr->flags;
 	for (size_t i = 0; i < num_rspecs; i++) {
-		if (offset + stream->size <= rspecs[i]->uncompressed_size) {
+		if (offset + stream->b_size <= rspecs[i]->uncompressed_size) {
 			stream->offset_in_res = offset;
 			blob_bind_wim_resource_spec(stream, rspecs[i]);
 			return 0;
@@ -796,12 +796,12 @@ validate_resource(struct wim_resource_spec *rspec)
 	expected_next_offset = 0;
 	out_of_order = false;
 	list_for_each_entry(blob, &rspec->blob_list, rspec_node) {
-		if (blob->offset_in_res + blob->size < blob->size ||
-		    blob->offset_in_res + blob->size > rspec->uncompressed_size)
+		if (blob->offset_in_res + blob->b_size < blob->b_size ||
+		    blob->offset_in_res + blob->b_size > rspec->uncompressed_size)
 			goto invalid_due_to_overflow;
 
 		if (blob->offset_in_res >= expected_next_offset)
-			expected_next_offset = blob->offset_in_res + blob->size;
+			expected_next_offset = blob->offset_in_res + blob->b_size;
 		else
 			out_of_order = true;
 	}
@@ -820,7 +820,7 @@ validate_resource(struct wim_resource_spec *rspec)
 		expected_next_offset = 0;
 		list_for_each_entry(blob, &rspec->blob_list, rspec_node) {
 			if (blob->offset_in_res >= expected_next_offset)
-				expected_next_offset = blob->offset_in_res + blob->size;
+				expected_next_offset = blob->offset_in_res + blob->b_size;
 			else
 				goto invalid_due_to_overlap;
 		}
@@ -1025,7 +1025,7 @@ read_blob_table(WIMStruct *wim)
 			wim_res_hdr_to_spec(&reshdr, wim, rspec);
 
 			cur_entry->offset_in_res = 0;
-			cur_entry->size = reshdr.uncompressed_size;
+			cur_entry->b_size = reshdr.uncompressed_size;
 			cur_entry->flags = reshdr.flags;
 
 			blob_bind_wim_resource_spec(cur_entry, rspec);
@@ -1285,7 +1285,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 	sha1_buffer(buffer, size, hash);
 	existing_blob = lookup_blob(blob_table, hash);
 	if (existing_blob) {
-		wimlib_assert(existing_blob->size == size);
+		wimlib_assert(existing_blob->b_size == size);
 		blob = existing_blob;
 		blob->refcnt++;
 	} else {
@@ -1300,7 +1300,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 		}
 		blob->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
 		blob->attached_buffer    = buffer_copy;
-		blob->size               = size;
+		blob->b_size               = size;
 		copy_hash(blob->hash, hash);
 		blob_table_insert(blob_table, blob);
 	}
@@ -1351,7 +1351,7 @@ hash_unhashed_blob(struct blob_info *blob,
 		 * duplicate.  The caller is responsible for freeing @blob if
 		 * needed.  */
 		wimlib_assert(!(duplicate_blob->unhashed));
-		wimlib_assert(duplicate_blob->size == blob->size);
+		wimlib_assert(duplicate_blob->b_size == blob->b_size);
 		duplicate_blob->refcnt += blob->refcnt;
 		blob->refcnt = 0;
 		*back_ptr = duplicate_blob;
@@ -1372,7 +1372,7 @@ blob_to_wimlib_resource_entry(const struct blob_info *blob,
 {
 	memset(wentry, 0, sizeof(*wentry));
 
-	wentry->uncompressed_size = blob->size;
+	wentry->uncompressed_size = blob->b_size;
 	if (blob->resource_location == RESOURCE_IN_WIM) {
 		wentry->part_number = blob->rspec->wim->hdr.part_number;
 		if (blob->flags & WIM_RESHDR_FLAG_SOLID) {

@@ -158,7 +158,7 @@ add_stream_to_swm(struct blob_info *blob, void *_swm_info)
 	if (blob->resource_location == RESOURCE_IN_WIM)
 		stream_size = blob->rspec->size_in_wim;
 	else
-		stream_size = blob->size;
+		stream_size = blob->b_size;
 
 	/* - Start first part if no parts have been started so far;
 	 * - Start next part if adding this stream exceeds maximum part size,

@@ -199,7 +199,7 @@ can_raw_copy(const struct blob_info *blob,
 
 		list_for_each_entry(res_stream, &rspec->blob_list, rspec_node)
 			if (res_stream->will_be_in_output_wim)
-				write_size += res_stream->size;
+				write_size += res_stream->b_size;
 
 		return (write_size > rspec->uncompressed_size * 2 / 3);
 	}
@@ -230,7 +230,7 @@ stream_set_out_reshdr_for_reuse(struct blob_info *blob)
 
 		blob->out_reshdr.offset_in_wim = blob->offset_in_res;
 		blob->out_reshdr.uncompressed_size = 0;
-		blob->out_reshdr.size_in_wim = blob->size;
+		blob->out_reshdr.size_in_wim = blob->b_size;
 
 		blob->out_res_offset_in_wim = rspec->offset_in_wim;
 		blob->out_res_size_in_wim = rspec->size_in_wim;
@@ -257,7 +257,7 @@ write_pwm_stream_header(const struct blob_info *blob,
 	int ret;
 
 	stream_hdr.magic = cpu_to_le64(PWM_STREAM_MAGIC);
-	stream_hdr.uncompressed_size = cpu_to_le64(blob->size);
+	stream_hdr.uncompressed_size = cpu_to_le64(blob->b_size);
 	if (additional_reshdr_flags & PWM_RESHDR_FLAG_UNHASHED) {
 		zero_out_hash(stream_hdr.hash);
 	} else {
@@ -727,10 +727,10 @@ write_stream_begin_read(struct blob_info *blob, void *_ctx)
 	struct write_streams_ctx *ctx = _ctx;
 	int ret;
 
-	wimlib_assert(blob->size > 0);
+	wimlib_assert(blob->b_size > 0);
 
 	ctx->cur_read_stream_offset = 0;
-	ctx->cur_read_stream_size = blob->size;
+	ctx->cur_read_stream_size = blob->b_size;
 
 	/* As an optimization, we allow some streams to be "unhashed", meaning
 	 * their SHA1 message digests are unknown.  This is the case with
@@ -763,16 +763,16 @@ write_stream_begin_read(struct blob_info *blob, void *_ctx)
 				 * passing its output reference count to the
 				 * duplicate stream in the former case.  */
 				DEBUG("Discarding duplicate stream of "
-				      "length %"PRIu64, blob->size);
+				      "length %"PRIu64, blob->b_size);
 				ret = do_write_streams_progress(&ctx->progress_data,
-								blob->size,
+								blob->b_size,
 								1, true);
 				list_del(&blob->write_streams_list);
 				list_del(&blob->blob_table_list);
 				if (blob_new->will_be_in_output_wim)
 					blob_new->out_refcnt += blob->out_refcnt;
 				if (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID)
-					ctx->cur_write_res_size -= blob->size;
+					ctx->cur_write_res_size -= blob->b_size;
 				if (!ret)
 					ret = done_with_stream(blob, ctx);
 				free_blob_info(blob);
@@ -830,13 +830,13 @@ write_stream_uncompressed(struct blob_info *blob,
 			 * resource instead.  */
 			WARNING("Recovered compressed stream of "
 				"size %"PRIu64", continuing on.",
-				blob->size);
+				blob->b_size);
 			return 0;
 		}
 		return ret;
 	}
 
-	wimlib_assert(out_fd->offset - begin_offset == blob->size);
+	wimlib_assert(out_fd->offset - begin_offset == blob->b_size);
 
 	if (out_fd->offset < end_offset &&
 	    0 != ftruncate(out_fd->fd, out_fd->offset))
@@ -846,7 +846,7 @@ write_stream_uncompressed(struct blob_info *blob,
 		return WIMLIB_ERR_WRITE;
 	}
 
-	blob->out_reshdr.size_in_wim = blob->size;
+	blob->out_reshdr.size_in_wim = blob->b_size;
 	blob->out_reshdr.flags &= ~(WIM_RESHDR_FLAG_COMPRESSED |
 				   WIM_RESHDR_FLAG_SOLID);
 	return 0;
@@ -953,7 +953,7 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 				return ret;
 		}
 
-		ret = begin_write_resource(ctx, blob->size);
+		ret = begin_write_resource(ctx, blob->b_size);
 		if (ret)
 			return ret;
 	}
@@ -990,9 +990,9 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 		 * streams.  */
 		struct blob_info *next_blob;
 
-		while (blob && ctx->cur_write_stream_offset >= blob->size) {
+		while (blob && ctx->cur_write_stream_offset >= blob->b_size) {
 
-			ctx->cur_write_stream_offset -= blob->size;
+			ctx->cur_write_stream_offset -= blob->b_size;
 
 			if (ctx->cur_write_stream_offset)
 				next_blob = list_entry(blob->write_streams_list.next,
@@ -1012,7 +1012,7 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 	} else {
 		/* Wrote chunk in non-solid mode.  It may have finished a
 		 * stream.  */
-		if (ctx->cur_write_stream_offset == blob->size) {
+		if (ctx->cur_write_stream_offset == blob->b_size) {
 
 			wimlib_assert(ctx->cur_write_stream_offset ==
 				      ctx->cur_write_res_size);
@@ -1029,7 +1029,7 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 			if (ret)
 				return ret;
 
-			wimlib_assert(blob->out_reshdr.uncompressed_size == blob->size);
+			wimlib_assert(blob->out_reshdr.uncompressed_size == blob->b_size);
 
 			ctx->cur_write_stream_offset = 0;
 
@@ -1205,7 +1205,7 @@ compute_blob_list_stats(struct list_head *blob_list,
 
 	list_for_each_entry(blob, blob_list, write_streams_list) {
 		num_streams++;
-		total_bytes += blob->size;
+		total_bytes += blob->b_size;
 		if (blob->resource_location == RESOURCE_IN_WIM) {
 			if (prev_wim_part != blob->rspec->wim) {
 				prev_wim_part = blob->rspec->wim;
@@ -1257,7 +1257,7 @@ find_raw_copy_streams(struct list_head *blob_list,
 			list_move_tail(&blob->write_streams_list,
 				       raw_copy_streams);
 		} else {
-			num_bytes_to_compress += blob->size;
+			num_bytes_to_compress += blob->b_size;
 		}
 	}
 
@@ -1348,7 +1348,7 @@ write_raw_copy_resources(struct list_head *raw_copy_streams,
 				return ret;
 			blob->rspec->raw_copy_ok = 0;
 		}
-		ret = do_write_streams_progress(progress_data, blob->size,
+		ret = do_write_streams_progress(progress_data, blob->b_size,
 						1, false);
 		if (ret)
 			return ret;
@@ -1390,7 +1390,7 @@ remove_zero_length_streams(struct list_head *blob_list)
 
 	list_for_each_entry_safe(blob, tmp, blob_list, write_streams_list) {
 		wimlib_assert(blob->will_be_in_output_wim);
-		if (blob->size == 0) {
+		if (blob->b_size == 0) {
 			list_del(&blob->write_streams_list);
 			blob->out_reshdr.offset_in_wim = 0;
 			blob->out_reshdr.size_in_wim = 0;
@@ -1710,7 +1710,7 @@ write_blob_list(struct list_head *blob_list,
 
 		offset_in_res = 0;
 		list_for_each_entry(blob, &ctx.solid_streams, write_streams_list) {
-			blob->out_reshdr.size_in_wim = blob->size;
+			blob->out_reshdr.size_in_wim = blob->b_size;
 			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
 			blob->out_reshdr.flags |= WIM_RESHDR_FLAG_SOLID;
 			blob->out_reshdr.uncompressed_size = 0;
@@ -1718,7 +1718,7 @@ write_blob_list(struct list_head *blob_list,
 			blob->out_res_offset_in_wim = reshdr.offset_in_wim;
 			blob->out_res_size_in_wim = reshdr.size_in_wim;
 			blob->out_res_uncompressed_size = reshdr.uncompressed_size;
-			offset_in_res += blob->size;
+			offset_in_res += blob->b_size;
 		}
 		wimlib_assert(offset_in_res == reshdr.uncompressed_size);
 	}
@@ -1838,7 +1838,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 
 	blob->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
 	blob->attached_buffer    = (void*)buf;
-	blob->size               = buf_size;
+	blob->b_size               = buf_size;
 	blob->flags              = reshdr_flags;
 
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_PIPABLE) {
@@ -1895,10 +1895,10 @@ stream_size_table_insert(struct blob_info *blob, void *_tab)
 	struct blob_info *same_size_blob;
 	struct hlist_node *tmp;
 
-	pos = hash_u64(blob->size) % tab->capacity;
+	pos = hash_u64(blob->b_size) % tab->capacity;
 	blob->unique_size = 1;
 	hlist_for_each_entry(same_size_blob, tmp, &tab->array[pos], hash_list_2) {
-		if (same_size_blob->size == blob->size) {
+		if (same_size_blob->b_size == blob->b_size) {
 			blob->unique_size = 0;
 			same_size_blob->unique_size = 0;
 			break;

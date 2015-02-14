@@ -743,7 +743,7 @@ skip_wim_stream(struct blob_info *blob)
 {
 	wimlib_assert(blob->resource_location == RESOURCE_IN_WIM);
 	wimlib_assert(!(blob->flags & WIM_RESHDR_FLAG_SOLID));
-	DEBUG("Skipping stream (size=%"PRIu64")", blob->size);
+	DEBUG("Skipping stream (size=%"PRIu64")", blob->b_size);
 	return read_partial_wim_resource(blob->rspec,
 					 0,
 					 blob->rspec->uncompressed_size,
@@ -775,7 +775,7 @@ read_file_on_disk_prefix(const struct blob_info *blob, u64 size,
 	int raw_fd;
 	struct filedes fd;
 
-	wimlib_assert(size <= blob->size);
+	wimlib_assert(size <= blob->b_size);
 
 	DEBUG("Reading %"PRIu64" bytes from \"%"TS"\"", size, blob->file_on_disk);
 
@@ -799,7 +799,7 @@ read_staging_file_prefix(const struct blob_info *blob, u64 size,
 	struct filedes fd;
 	int ret;
 
-	wimlib_assert(size <= blob->size);
+	wimlib_assert(size <= blob->b_size);
 
 	DEBUG("Reading %"PRIu64" bytes from staging file \"%s\"",
 	      size, blob->staging_file_name);
@@ -824,7 +824,7 @@ static int
 read_buffer_prefix(const struct blob_info *blob,
 		   u64 size, consume_data_callback_t cb, void *cb_ctx)
 {
-	wimlib_assert(size <= blob->size);
+	wimlib_assert(size <= blob->b_size);
 	return (*cb)(blob->attached_buffer, size, cb_ctx);
 }
 
@@ -873,12 +873,12 @@ read_stream_prefix(const struct blob_info *blob, u64 size,
 }
 
 /* Read the full uncompressed data of the specified stream into the specified
- * buffer, which must have space for at least blob->size bytes.  */
+ * buffer, which must have space for at least blob->b_size bytes.  */
 int
 read_full_stream_into_buf(const struct blob_info *blob, void *_buf)
 {
 	u8 *buf = _buf;
-	return read_stream_prefix(blob, blob->size, bufferer_cb, &buf);
+	return read_stream_prefix(blob, blob->b_size, bufferer_cb, &buf);
 }
 
 /* Retrieve the full uncompressed data of the specified stream.  A buffer large
@@ -890,13 +890,13 @@ read_full_stream_into_alloc_buf(const struct blob_info *blob,
 	int ret;
 	void *buf;
 
-	if ((size_t)blob->size != blob->size) {
+	if ((size_t)blob->b_size != blob->b_size) {
 		ERROR("Can't read %"PRIu64" byte stream into "
-		      "memory", blob->size);
+		      "memory", blob->b_size);
 		return WIMLIB_ERR_NOMEM;
 	}
 
-	buf = MALLOC(blob->size);
+	buf = MALLOC(blob->b_size);
 	if (buf == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -924,7 +924,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 
 	blob_bind_wim_resource_spec(blob, rspec);
 	blob->flags = rspec->flags;
-	blob->size = rspec->uncompressed_size;
+	blob->b_size = rspec->uncompressed_size;
 	blob->offset_in_res = 0;
 
 	ret = read_full_stream_into_alloc_buf(blob, buf_ret);
@@ -966,7 +966,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 
 	blob_bind_wim_resource_spec(blob, &rspec);
 	blob->flags = rspec.flags;
-	blob->size = rspec.uncompressed_size;
+	blob->b_size = rspec.uncompressed_size;
 	blob->offset_in_res = 0;
 	blob->unhashed = 1;
 
@@ -1009,13 +1009,13 @@ streamifier_cb(const void *chunk, size_t size, void *_ctx)
 	DEBUG("%zu bytes passed to streamifier", size);
 
 	wimlib_assert(ctx->cur_stream != NULL);
-	wimlib_assert(size <= ctx->cur_stream->size - ctx->cur_stream_offset);
+	wimlib_assert(size <= ctx->cur_stream->b_size - ctx->cur_stream_offset);
 
 	if (ctx->cur_stream_offset == 0) {
 
 		/* Starting a new stream.  */
 		DEBUG("Begin new stream (size=%"PRIu64").",
-		      ctx->cur_stream->size);
+		      ctx->cur_stream->b_size);
 
 		ret = (*ctx->cbs.begin_stream)(ctx->cur_stream,
 					       ctx->cbs.begin_stream_ctx);
@@ -1030,12 +1030,12 @@ streamifier_cb(const void *chunk, size_t size, void *_ctx)
 	if (ret)
 		return ret;
 
-	if (ctx->cur_stream_offset == ctx->cur_stream->size) {
+	if (ctx->cur_stream_offset == ctx->cur_stream->b_size) {
 		/* Finished reading all the data for a stream.  */
 
 		ctx->cur_stream_offset = 0;
 
-		DEBUG("End stream (size=%"PRIu64").", ctx->cur_stream->size);
+		DEBUG("End stream (size=%"PRIu64").", ctx->cur_stream->b_size);
 		ret = (*ctx->cbs.end_stream)(ctx->cur_stream, 0,
 					     ctx->cbs.end_stream_ctx);
 		if (ret)
@@ -1114,7 +1114,7 @@ hasher_end_stream(struct blob_info *blob, int status, void *_ctx)
 			/* No SHA1 message digest was previously present for the
 			 * stream.  Set it to the one just calculated.  */
 			DEBUG("Set SHA1 message digest for stream "
-			      "(size=%"PRIu64").", blob->size);
+			      "(size=%"PRIu64").", blob->b_size);
 			copy_hash(blob->hash, hash);
 		}
 	} else {
@@ -1137,7 +1137,7 @@ hasher_end_stream(struct blob_info *blob, int status, void *_ctx)
 				goto out_next_cb;
 			}
 			DEBUG("SHA1 message digest okay for "
-			      "stream (size=%"PRIu64").", blob->size);
+			      "stream (size=%"PRIu64").", blob->b_size);
 		}
 	}
 	ret = 0;
@@ -1158,7 +1158,7 @@ read_full_stream_with_cbs(struct blob_info *blob,
 	if (ret)
 		return ret;
 
-	ret = read_stream_prefix(blob, blob->size, cbs->consume_chunk,
+	ret = read_stream_prefix(blob, blob->b_size, cbs->consume_chunk,
 				 cbs->consume_chunk_ctx);
 
 	return (*cbs->end_stream)(blob, ret, cbs->end_stream_ctx);
@@ -1230,7 +1230,7 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
 	     i++, cur_stream = next_stream(cur_stream, list_head_offset))
 	{
 		ranges[i].offset = cur_stream->offset_in_res;
-		ranges[i].size = cur_stream->size;
+		ranges[i].size = cur_stream->b_size;
 	}
 
 	struct streamifier_context streamifier_ctx = {
@@ -1345,7 +1345,7 @@ read_blob_list(struct list_head *blob_list,
 		blob = (struct blob_info*)((u8*)cur - list_head_offset);
 
 		if (blob->flags & WIM_RESHDR_FLAG_SOLID &&
-		    blob->size != blob->rspec->uncompressed_size)
+		    blob->b_size != blob->rspec->uncompressed_size)
 		{
 
 			struct blob_info *blob_next, *blob_last;
@@ -1408,8 +1408,8 @@ int
 extract_stream(struct blob_info *blob, u64 size,
 	       consume_data_callback_t extract_chunk, void *extract_chunk_arg)
 {
-	wimlib_assert(size <= blob->size);
-	if (size == blob->size) {
+	wimlib_assert(size <= blob->b_size);
+	if (size == blob->b_size) {
 		/* Do SHA1.  */
 		struct read_blob_list_callbacks cbs = {
 			.consume_chunk		= extract_chunk,
@@ -1453,7 +1453,7 @@ int
 extract_full_stream_to_fd(struct blob_info *blob,
 			  struct filedes *fd)
 {
-	return extract_stream_to_fd(blob, fd, blob->size);
+	return extract_stream_to_fd(blob, fd, blob->b_size);
 }
 
 /* Calculate the SHA1 message digest of a stream and store it in @blob->hash.  */

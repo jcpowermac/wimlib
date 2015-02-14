@@ -504,7 +504,7 @@ unix_create_symlink(const struct wim_inode *inode, const char *path,
 
 	blob_override.resource_location = RESOURCE_IN_ATTACHED_BUFFER;
 	blob_override.attached_buffer = (void *)rpdata;
-	blob_override.size = rpdatalen;
+	blob_override.b_size = rpdatalen;
 
 	ret = wim_inode_readlink(inode, link_target,
 				 sizeof(link_target) - 1, &blob_override);
@@ -557,11 +557,11 @@ unix_begin_extract_stream_instance(const struct blob_info *stream,
 	if (inode_is_symlink(inode)) {
 		/* On UNIX, symbolic links must be created with symlink(), which
 		 * requires that the full link target be available.  */
-		if (stream->size > REPARSE_DATA_MAX_SIZE) {
+		if (stream->b_size > REPARSE_DATA_MAX_SIZE) {
 			ERROR_WITH_ERRNO("Reparse data of \"%s\" has size "
 					 "%"PRIu64" bytes (exceeds %u bytes)",
 					 inode_first_full_path(inode),
-					 stream->size, REPARSE_DATA_MAX_SIZE);
+					 stream->b_size, REPARSE_DATA_MAX_SIZE);
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
 		}
 		ctx->reparse_ptr = ctx->reparse_data;
@@ -661,7 +661,7 @@ unix_end_extract_stream(struct blob_info *stream, int status,
 			path = unix_build_inode_extraction_path(inode, ctx);
 			ret = unix_create_symlink(inode, path,
 						  ctx->reparse_data,
-						  stream->size,
+						  stream->b_size,
 						  rpfix,
 						  ctx->target_abspath,
 						  ctx->target_abspath_nchars);

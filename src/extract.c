@@ -211,7 +211,7 @@ read_pwm_stream_header(WIMStruct *pwm, struct blob_info *blob,
 	wim_res_hdr_to_spec(&reshdr, pwm, rspec);
 	blob_bind_wim_resource_spec(blob, rspec);
 	blob->flags = rspec->flags;
-	blob->size = rspec->uncompressed_size;
+	blob->b_size = rspec->uncompressed_size;
 	blob->offset_in_res = 0;
 	return 0;
 
@@ -264,7 +264,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 		{
 			needed_blob->offset_in_res = found_blob->offset_in_res;
 			needed_blob->flags = found_blob->flags;
-			needed_blob->size = found_blob->size;
+			needed_blob->b_size = found_blob->b_size;
 
 			blob_unbind_wim_resource_spec(found_blob);
 			blob_bind_wim_resource_spec(needed_blob, rspec);
@@ -276,7 +276,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 				goto out;
 			}
 
-			ret = extract_stream(needed_blob, needed_blob->size,
+			ret = extract_stream(needed_blob, needed_blob->b_size,
 					     cbs->consume_chunk,
 					     cbs->consume_chunk_ctx);
 
@@ -383,7 +383,7 @@ extract_chunk_wrapper(const void *chunk, size_t size, void *_ctx)
 	if (likely(ctx->supported_features.hard_links)) {
 		progress->extract.completed_bytes +=
 			(u64)size * ctx->cur_stream->out_refcnt;
-		if (ctx->cur_stream_offset == ctx->cur_stream->size)
+		if (ctx->cur_stream_offset == ctx->cur_stream->b_size)
 			progress->extract.completed_streams += ctx->cur_stream->out_refcnt;
 	} else {
 		const struct stream_owner *owners = stream_owners(ctx->cur_stream);
@@ -396,7 +396,7 @@ extract_chunk_wrapper(const void *chunk, size_t size, void *_ctx)
 					    d_extraction_alias_node)
 			{
 				progress->extract.completed_bytes += size;
-				if (ctx->cur_stream_offset == ctx->cur_stream->size)
+				if (ctx->cur_stream_offset == ctx->cur_stream->b_size)
 					progress->extract.completed_streams++;
 			}
 		}
@@ -492,7 +492,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 
 		/* Extra SHA-1 isn't necessary here, but it shouldn't hurt as
 		 * this case is very rare anyway.  */
-		ret = extract_stream(&tmpfile_blob, tmpfile_blob.size,
+		ret = extract_stream(&tmpfile_blob, tmpfile_blob.b_size,
 				     cbs->consume_chunk,
 				     cbs->consume_chunk_ctx);
 
@@ -1028,7 +1028,7 @@ ref_stream(struct blob_info *blob, unsigned stream_idx,
 	if (inode->i_visited && ctx->supported_features.hard_links)
 		return 0;
 
-	ctx->progress.extract.total_bytes += blob->size;
+	ctx->progress.extract.total_bytes += blob->b_size;
 	ctx->progress.extract.total_streams++;
 
 	if (inode->i_visited)

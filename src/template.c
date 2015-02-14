@@ -70,7 +70,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
 
 		/* Compare stream sizes.  */
 		if (blob && template_blob) {
-			if (blob->size != template_blob->size)
+			if (blob->b_size != template_blob->b_size)
 				return false;
 
 			/* If hash happens to be available, compare with template.  */
@@ -78,9 +78,9 @@ inode_metadata_consistent(const struct wim_inode *inode,
 			    !hashes_equal(blob->hash, template_blob->hash))
 				return false;
 
-		} else if (blob && blob->size) {
+		} else if (blob && blob->b_size) {
 			return false;
-		} else if (template_blob && template_blob->size) {
+		} else if (template_blob && template_blob->b_size) {
 			return false;
 		}
 	}

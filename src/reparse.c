@@ -184,11 +184,11 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 		blob = blob_override;
 	}
 
-	if (blob->size > REPARSE_POINT_MAX_SIZE - 8) {
+	if (blob->b_size > REPARSE_POINT_MAX_SIZE - 8) {
 		ERROR("Reparse data is too long!");
 		return WIMLIB_ERR_INVALID_REPARSE_DATA;
 	}
-	rpdatalen = blob->size;
+	rpdatalen = blob->b_size;
 
 	/* Read the data from the WIM file */
 	ret = read_full_stream_into_buf(blob, rpbuf + 8);

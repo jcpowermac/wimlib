@@ -82,7 +82,7 @@ struct blob_info {
 	struct hlist_node hash_list;
 
 	/* Uncompressed size of this stream.  */
-	u64 size;
+	u64 b_size;
 
 	/* Stream flags (WIM_RESHDR_FLAG_*).  */
 	u32 flags : 8;
@@ -349,7 +349,7 @@ static inline bool
 blob_is_partial(const struct blob_info * blob)
 {
 	return blob->resource_location == RESOURCE_IN_WIM &&
-	       blob->size != blob->rspec->uncompressed_size;
+	       blob->b_size != blob->rspec->uncompressed_size;
 }
 
 static inline const struct stream_owner *

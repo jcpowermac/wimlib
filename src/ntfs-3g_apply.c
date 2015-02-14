@@ -705,15 +705,15 @@ ntfs_3g_begin_extract_stream_to_attr(struct blob_info *stream,
 	if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
 	    && (stream_name_nchars == 0))
 	{
-		if (stream->size > REPARSE_DATA_MAX_SIZE) {
+		if (stream->b_size > REPARSE_DATA_MAX_SIZE) {
 			ERROR("Reparse data of \"%s\" has size "
 			      "%"PRIu64" bytes (exceeds %u bytes)",
 			      dentry_full_path(one_dentry),
-			      stream->size, REPARSE_DATA_MAX_SIZE);
+			      stream->b_size, REPARSE_DATA_MAX_SIZE);
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
 		}
 		ctx->reparse_ptr = ctx->rpbuf.rpdata;
-		ctx->rpbuf.rpdatalen = cpu_to_le16(stream->size);
+		ctx->rpbuf.rpdatalen = cpu_to_le16(stream->b_size);
 		ctx->rpbuf.rpreserved = cpu_to_le16(0);
 		ctx->ntfs_reparse_inodes[ctx->num_reparse_inodes] = ni;
 		ctx->wim_reparse_inodes[ctx->num_reparse_inodes] = inode;
@@ -740,7 +740,7 @@ ntfs_3g_begin_extract_stream_to_attr(struct blob_info *stream,
 		return WIMLIB_ERR_NTFS_3G;
 	}
 	ctx->open_attrs[ctx->num_open_attrs++] = attr;
-	ntfs_attr_truncate_solid(attr, stream->size);
+	ntfs_attr_truncate_solid(attr, stream->b_size);
 	return 0;
 }
 
@@ -869,7 +869,7 @@ ntfs_3g_end_extract_stream(struct blob_info *stream,
 
 		if (ntfs_set_ntfs_reparse_data(ctx->ntfs_reparse_inodes[i],
 					       (const char *)&ctx->rpbuf,
-					       stream->size + REPARSE_DATA_OFFSET,
+					       stream->b_size + REPARSE_DATA_OFFSET,
 					       0))
 		{
 			ERROR_WITH_ERRNO("Failed to set reparse "
