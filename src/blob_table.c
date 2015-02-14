@@ -225,7 +225,7 @@ free_blob_info(struct blob_info *blob)
 	}
 }
 
-/* Should this stream be retained even if it has no references?  */
+/* Should this blob be retained even if it has no references?  */
 static bool
 should_retain_blob(const struct blob_info *blob)
 {
@@ -240,21 +240,21 @@ finalize_blob(struct blob_info *blob)
 }
 
 /*
- * Decrements the reference count of the single-instance stream @blob, which must
- * be inserted in the stream lookup table @table.
+ * Decrements the reference count of the @blob, which must be inserted in the
+ * blob lookup table @table.
  *
- * If the stream's reference count reaches 0, we may unlink it from @table and
- * free it.  However, we retain streams with 0 reference count that originated
+ * If the blob's reference count reaches 0, we may unlink it from @table and
+ * free it.  However, we retain blobs with 0 reference count that originated
  * from WIM files (RESOURCE_IN_WIM).  We do this for two reasons:
  *
- * 1. This prevents information about valid streams in a WIM file --- streams
- *    which will continue to be present after appending to the WIM file --- from
- *    being lost merely because we dropped all references to them.
+ * 1. This prevents information about valid blobs in a WIM file --- blobs which
+ *    will continue to be present after appending to the WIM file --- from being
+ *    lost merely because we dropped all references to them.
  *
- * 2. Stream reference counts we read from WIM files can't be trusted.  It's
+ * 2. Blob reference counts we read from WIM files can't be trusted.  It's
  *    possible that a WIM has reference counts that are too low; WIMGAPI
  *    sometimes creates WIMs where this is the case.  It's also possible that
- *    streams have been referenced from an external WIM; those streams can
+ *    blobs have been referenced from an external WIM; those blobs can
  *    potentially have any reference count at all, either lower or higher than
  *    would be expected for this WIM ("this WIM" meaning the owner of @table) if
  *    it were a standalone WIM.
@@ -273,10 +273,9 @@ blob_decrement_refcnt(struct blob_info *blob,
 		if (blob->b_unhashed) {
 			list_del(&blob->b_unhashed_list);
 		#ifdef WITH_FUSE
-			/* If the stream has been extracted to a staging file
-			 * for a FUSE mount, unlink the staging file.  (Note
-			 * that there still may be open file descriptors to it.)
-			 * */
+			/* If the blob has been extracted to a staging file for
+			 * a FUSE mount, unlink the staging file.  (Note that
+			 * there still may be open file descriptors to it.) */
 			if (blob->resource_location == RESOURCE_IN_STAGING_FILE)
 				unlinkat(blob->staging_dir_fd,
 					 blob->staging_file_name, 0);
@@ -404,15 +403,15 @@ for_blob_info(struct blob_table *table,
 	return 0;
 }
 
-/* qsort() callback that sorts streams (represented by `struct
- * blob_info's) into an order optimized for reading.
+/* qsort() callback that sorts blobs (represented by `struct blob_info's) into
+ * an order optimized for reading.
  *
  * Sorting is done primarily by resource location, then secondarily by a
  * per-resource location order.  For example, resources in WIM files are sorted
  * primarily by part number, then secondarily by offset, as to implement optimal
  * reading of either a standalone or split WIM.  */
 static int
-cmp_streams_by_sequential_order(const void *p1, const void *p2)
+cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 {
 	const struct blob_info *blob1, *blob2;
 	int v;
@@ -520,7 +519,7 @@ sort_blob_list_by_sequential_order(struct list_head *blob_list,
 				     size_t list_head_offset)
 {
 	return sort_blob_list(blob_list, list_head_offset,
-				cmp_streams_by_sequential_order);
+				cmp_blobs_by_sequential_order);
 }
 
 
@@ -555,7 +554,7 @@ for_blob_info_pos_sorted(struct blob_table *table,
 	wimlib_assert(p == blob_array + num_streams);
 
 	qsort(blob_array, num_streams, sizeof(blob_array[0]),
-	      cmp_streams_by_sequential_order);
+	      cmp_blobs_by_sequential_order);
 	ret = 0;
 	for (size_t i = 0; i < num_streams; i++) {
 		ret = visitor(blob_array[i], arg);
@@ -763,7 +762,7 @@ free_solid_rspec_info(struct wim_resource_spec **rspecs, size_t num_rspecs)
 }
 
 static int
-cmp_streams_by_offset_in_res(const void *p1, const void *p2)
+cmp_blobs_by_offset_in_res(const void *p1, const void *p2)
 {
 	const struct blob_info *blob1, *blob2;
 
@@ -806,9 +805,8 @@ validate_resource(struct wim_resource_spec *rspec)
 	 */
 	if (out_of_order) {
 		ret = sort_blob_list(&rspec->blob_list,
-				       offsetof(struct blob_info,
-						rspec_node),
-				       cmp_streams_by_offset_in_res);
+				     offsetof(struct blob_info, rspec_node),
+				     cmp_blobs_by_offset_in_res);
 		if (ret)
 			return ret;
 
