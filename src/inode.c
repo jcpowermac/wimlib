@@ -365,10 +365,10 @@ inode_set_unnamed_stream(struct wim_inode *inode, const void *data, size_t len,
 			 struct wim_lookup_table *lookup_table)
 {
 	wimlib_assert(inode->i_resolved);
-	wimlib_assert(!inode->i_lte);
+	wimlib_assert(!inode->i_blob);
 
-	inode->i_lte = new_stream_from_data_buffer(data, len, lookup_table);
-	if (!inode->i_lte)
+	inode->i_blob = new_stream_from_data_buffer(data, len, lookup_table);
+	if (!inode->i_blob)
 		return WIMLIB_ERR_NOMEM;
 	return 0;
 }
@@ -401,12 +401,12 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_lookup_table *table,
 		      bool force)
 {
 	const u8 *hash;
-	struct blob_info *blob, *ads_lte;
+	struct blob_info *blob, *ads_blob;
 
 	if (inode->i_resolved)
 		return 0;
 
-	struct blob_info *ads_ltes[inode->i_num_ads];
+	struct blob_info *ads_blobs[inode->i_num_ads];
 
 	/* Resolve the default data stream */
 	blob = NULL;
@@ -430,28 +430,28 @@ inode_resolve_streams(struct wim_inode *inode, struct wim_lookup_table *table,
 	for (unsigned i = 0; i < inode->i_num_ads; i++) {
 		struct wim_ads_entry *cur_entry;
 
-		ads_lte = NULL;
+		ads_blob = NULL;
 		cur_entry = &inode->i_ads_entries[i];
 		hash = cur_entry->hash;
 		if (!is_zero_hash(hash)) {
-			ads_lte = lookup_stream(table, hash);
-			if (!ads_lte) {
+			ads_blob = lookup_stream(table, hash);
+			if (!ads_blob) {
 				if (force) {
-					ads_lte = new_lookup_table_entry();
-					if (!ads_lte)
+					ads_blob = new_lookup_table_entry();
+					if (!ads_blob)
 						return WIMLIB_ERR_NOMEM;
-					copy_hash(ads_lte->hash, hash);
-					lookup_table_insert(table, ads_lte);
+					copy_hash(ads_blob->hash, hash);
+					lookup_table_insert(table, ads_blob);
 				} else {
 					goto stream_not_found;
 				}
 			}
 		}
-		ads_ltes[i] = ads_lte;
+		ads_blobs[i] = ads_blob;
 	}
-	inode->i_lte = blob;
+	inode->i_blob = blob;
 	for (unsigned i = 0; i < inode->i_num_ads; i++)
-		inode->i_ads_entries[i].blob = ads_ltes[i];
+		inode->i_ads_entries[i].blob = ads_blobs[i];
 	inode->i_resolved = 1;
 	return 0;
 
@@ -470,8 +470,8 @@ inode_unresolve_streams(struct wim_inode *inode)
 	if (!inode->i_resolved)
 		return;
 
-	if (inode->i_lte)
-		copy_hash(inode->i_hash, inode->i_lte->hash);
+	if (inode->i_blob)
+		copy_hash(inode->i_hash, inode->i_blob->hash);
 	else
 		zero_out_hash(inode->i_hash);
 
@@ -531,8 +531,8 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
 	wimlib_assert(inode->i_resolved);
 
 	*stream_idx_ret = 0;
-	if (likely(inode->i_lte))
-		return inode->i_lte;
+	if (likely(inode->i_blob))
+		return inode->i_blob;
 
 	for (unsigned i = 0; i < inode->i_num_ads; i++) {
 		if (inode->i_ads_entries[i].stream_name_nbytes == 0 &&
@@ -619,8 +619,8 @@ inode_ref_blobs(struct wim_inode *inode)
 {
 	wimlib_assert(inode->i_resolved);
 
-	if (inode->i_lte)
-		inode->i_lte->refcnt++;
+	if (inode->i_blob)
+		inode->i_blob->refcnt++;
 	for (unsigned i = 0; i < inode->i_num_ads; i++)
 		if (inode->i_ads_entries[i].blob)
 			inode->i_ads_entries[i].blob->refcnt++;
@@ -826,7 +826,7 @@ retrieve_blob_pointer(struct blob_info *blob)
 	struct wim_inode *inode = blob->back_inode;
 	u32 stream_id = blob->back_stream_id;
 	if (stream_id == 0)
-		return &inode->i_lte;
+		return &inode->i_blob;
 	for (unsigned i = 0; i < inode->i_num_ads; i++)
 		if (inode->i_ads_entries[i].stream_id == stream_id)
 			return &inode->i_ads_entries[i].blob;

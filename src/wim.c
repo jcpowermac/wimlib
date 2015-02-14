@@ -820,11 +820,11 @@ wim_checksum_unhashed_streams(WIMStruct *wim)
 		struct blob_info *blob, *tmp;
 		struct wim_image_metadata *imd = wim->image_metadata[i];
 		image_for_each_unhashed_stream_safe(blob, tmp, imd) {
-			struct blob_info *new_lte;
-			ret = hash_unhashed_stream(blob, wim->lookup_table, &new_lte);
+			struct blob_info *new_blob;
+			ret = hash_unhashed_stream(blob, wim->lookup_table, &new_blob);
 			if (ret)
 				return ret;
-			if (new_lte != blob)
+			if (new_blob != blob)
 				free_lookup_table_entry(blob);
 		}
 	}

@@ -238,7 +238,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 		if (name_length == 0) {
 			/* Unnamed data stream.  Put the reference to it in the
 			 * dentry's inode. */
-			if (inode->i_lte) {
+			if (inode->i_blob) {
 				if (blob) {
 					if (!(inode->i_attributes &
 					      FILE_ATTRIBUTE_REPARSE_POINT))
@@ -248,7 +248,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 							"(sizes = %"PRIu64", "
 							"%"PRIu64")",
 							path,
-							inode->i_lte->size,
+							inode->i_blob->size,
 							blob->size);
 					}
 					free_lookup_table_entry(blob);
@@ -256,7 +256,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 				}
 			} else {
 				stream_id = 0;
-				inode->i_lte = blob;
+				inode->i_blob = blob;
 			}
 		} else {
 			/* Named data stream.  Put the reference to it in the

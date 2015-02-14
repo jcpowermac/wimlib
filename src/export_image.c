@@ -59,7 +59,7 @@ inode_export_streams(struct wim_inode *inode,
 {
 	unsigned i;
 	const u8 *hash;
-	struct blob_info *src_lte, *dest_lte;
+	struct blob_info *src_blob, *dest_blob;
 
 	inode_unresolve_streams(inode);
 	for (i = 0; i <= inode->i_num_ads; i++) {
@@ -71,27 +71,27 @@ inode_export_streams(struct wim_inode *inode,
 
 		/* Search for the stream (via SHA1 message digest) in the
 		 * destination WIM.  */
-		dest_lte = lookup_stream(dest_lookup_table, hash);
-		if (!dest_lte) {
+		dest_blob = lookup_stream(dest_lookup_table, hash);
+		if (!dest_blob) {
 			/* Stream not yet present in destination WIM.  Search
 			 * for it in the source WIM, then export it into the
 			 * destination WIM.  */
-			src_lte = lookup_stream(src_lookup_table, hash);
-			if (!src_lte)
+			src_blob = lookup_stream(src_lookup_table, hash);
+			if (!src_blob)
 				return stream_not_found_error(inode, hash);
 
 			if (gift) {
-				dest_lte = src_lte;
-				lookup_table_unlink(src_lookup_table, src_lte);
+				dest_blob = src_blob;
+				lookup_table_unlink(src_lookup_table, src_blob);
 			} else {
-				dest_lte = clone_lookup_table_entry(src_lte);
-				if (!dest_lte)
+				dest_blob = clone_lookup_table_entry(src_blob);
+				if (!dest_blob)
 					return WIMLIB_ERR_NOMEM;
 			}
-			dest_lte->refcnt = 0;
-			dest_lte->out_refcnt = 0;
-			dest_lte->was_exported = 1;
-			lookup_table_insert(dest_lookup_table, dest_lte);
+			dest_blob->refcnt = 0;
+			dest_blob->out_refcnt = 0;
+			dest_blob->was_exported = 1;
+			lookup_table_insert(dest_lookup_table, dest_blob);
 		}
 
 		/* Stream is present in destination WIM (either pre-existing,
@@ -100,8 +100,8 @@ inode_export_streams(struct wim_inode *inode,
 		 * the raw reference count, but 'out_refcnt' for references
 		 * arising just from the export operation; this is used to roll
 		 * back a failed export if needed.  */
-		dest_lte->refcnt += inode->i_nlink;
-		dest_lte->out_refcnt += inode->i_nlink;
+		dest_blob->refcnt += inode->i_nlink;
+		dest_blob->out_refcnt += inode->i_nlink;
 	}
 	return 0;
 }

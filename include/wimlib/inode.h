@@ -36,7 +36,7 @@ struct wim_inode {
 	 */
 	union {
 		u8 i_hash[SHA1_HASH_SIZE];
-		struct blob_info *i_lte;
+		struct blob_info *i_blob;
 	};
 
 	/* Corresponds to the 'attributes' field of `struct wim_dentry_on_disk';
@@ -412,7 +412,7 @@ static inline struct blob_info *
 inode_get_blob_for_stream_resolved(const struct wim_inode *inode, unsigned stream_idx)
 {
 	if (stream_idx == 0)
-		return inode->i_lte;
+		return inode->i_blob;
 	return inode->i_ads_entries[stream_idx - 1].blob;
 }
 

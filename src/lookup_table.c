@@ -231,15 +231,15 @@ free_lookup_table_entry(struct blob_info *blob)
 
 /* Should this stream be retained even if it has no references?  */
 static bool
-should_retain_lte(const struct blob_info *blob)
+should_retain_blob(const struct blob_info *blob)
 {
 	return blob->resource_location == RESOURCE_IN_WIM;
 }
 
 static void
-finalize_lte(struct blob_info *blob)
+finalize_blob(struct blob_info *blob)
 {
-	if (!should_retain_lte(blob))
+	if (!should_retain_blob(blob))
 		free_lookup_table_entry(blob);
 }
 
@@ -286,7 +286,7 @@ blob_decrement_refcnt(struct blob_info *blob,
 					 blob->staging_file_name, 0);
 		#endif
 		} else {
-			if (!should_retain_lte(blob))
+			if (!should_retain_blob(blob))
 				lookup_table_unlink(table, blob);
 		}
 
@@ -296,7 +296,7 @@ blob_decrement_refcnt(struct blob_info *blob,
 #ifdef WITH_FUSE
 		if (blob->num_opened_fds == 0)
 #endif
-			finalize_lte(blob);
+			finalize_blob(blob);
 	}
 }
 
@@ -307,7 +307,7 @@ blob_decrement_num_opened_fds(struct blob_info *blob)
 	wimlib_assert(blob->num_opened_fds != 0);
 
 	if (--blob->num_opened_fds == 0 && blob->refcnt == 0)
-		finalize_lte(blob);
+		finalize_blob(blob);
 }
 #endif
 
@@ -1279,13 +1279,13 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 			    struct wim_lookup_table *lookup_table)
 {
 	u8 hash[SHA1_HASH_SIZE];
-	struct blob_info *blob, *existing_lte;
+	struct blob_info *blob, *existing_blob;
 
 	sha1_buffer(buffer, size, hash);
-	existing_lte = lookup_stream(lookup_table, hash);
-	if (existing_lte) {
-		wimlib_assert(existing_lte->size == size);
-		blob = existing_lte;
+	existing_blob = lookup_stream(lookup_table, hash);
+	if (existing_blob) {
+		wimlib_assert(existing_blob->size == size);
+		blob = existing_blob;
 		blob->refcnt++;
 	} else {
 		void *buffer_copy;
@@ -1325,7 +1325,7 @@ hash_unhashed_stream(struct blob_info *blob,
 		     struct blob_info **blob_ret)
 {
 	int ret;
-	struct blob_info *duplicate_lte;
+	struct blob_info *duplicate_blob;
 	struct blob_info **back_ptr;
 
 	wimlib_assert(blob->unhashed);
@@ -1340,20 +1340,20 @@ hash_unhashed_stream(struct blob_info *blob,
 		return ret;
 
 	/* Look for a duplicate stream */
-	duplicate_lte = lookup_stream(lookup_table, blob->hash);
+	duplicate_blob = lookup_stream(lookup_table, blob->hash);
 	list_del(&blob->unhashed_list);
-	if (duplicate_lte) {
+	if (duplicate_blob) {
 		/* We have a duplicate stream.  Transfer the reference counts
 		 * from this stream to the duplicate and update the reference to
 		 * this stream (in an inode or ads_entry) to point to the
 		 * duplicate.  The caller is responsible for freeing @blob if
 		 * needed.  */
-		wimlib_assert(!(duplicate_lte->unhashed));
-		wimlib_assert(duplicate_lte->size == blob->size);
-		duplicate_lte->refcnt += blob->refcnt;
+		wimlib_assert(!(duplicate_blob->unhashed));
+		wimlib_assert(duplicate_blob->size == blob->size);
+		duplicate_blob->refcnt += blob->refcnt;
 		blob->refcnt = 0;
-		*back_ptr = duplicate_lte;
-		blob = duplicate_lte;
+		*back_ptr = duplicate_blob;
+		blob = duplicate_blob;
 	} else {
 		/* No duplicate stream, so we need to insert this stream into
 		 * the lookup table and treat it as a hashed stream. */
@@ -1399,7 +1399,7 @@ struct iterate_lte_context {
 };
 
 static int
-do_iterate_lte(struct blob_info *blob, void *_ctx)
+do_iterate_blob(struct blob_info *blob, void *_ctx)
 {
 	struct iterate_lte_context *ctx = _ctx;
 	struct wimlib_resource_entry entry;
@@ -1424,11 +1424,11 @@ wimlib_iterate_lookup_table(WIMStruct *wim, int flags,
 	if (wim_has_metadata(wim)) {
 		int ret;
 		for (int i = 0; i < wim->hdr.image_count; i++) {
-			ret = do_iterate_lte(wim->image_metadata[i]->metadata_blob,
+			ret = do_iterate_blob(wim->image_metadata[i]->metadata_blob,
 					     &ctx);
 			if (ret)
 				return ret;
 		}
 	}
-	return for_lookup_table_entry(wim->lookup_table, do_iterate_lte, &ctx);
+	return for_lookup_table_entry(wim->lookup_table, do_iterate_blob, &ctx);
 }
