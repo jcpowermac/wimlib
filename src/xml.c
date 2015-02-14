@@ -90,7 +90,7 @@ struct image_info {
 
 	/* Note: must update clone_image_info() if adding new fields here  */
 
-	struct wim_blob_table *blob_table; /* temporary field */
+	struct blob_table *blob_table; /* temporary field */
 };
 
 /* A struct wim_info structure corresponds to the entire XML data for a WIM file. */

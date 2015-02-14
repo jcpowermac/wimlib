@@ -38,7 +38,7 @@
 static bool
 inode_metadata_consistent(const struct wim_inode *inode,
 			  const struct wim_inode *template_inode,
-			  const struct wim_blob_table *template_blob_table)
+			  const struct blob_table *template_blob_table)
 {
 	/* Must have exact same creation time and last write time.  */
 	if (inode->i_creation_time != template_inode->i_creation_time ||
@@ -133,7 +133,7 @@ inode_copy_checksums(struct wim_inode *inode,
 		if (wim == template_wim)
 			replace_blob = template_blob;
 		else
-			replace_blob = lookup_stream(wim->blob_table,
+			replace_blob = lookup_blob(wim->blob_table,
 						    template_blob->hash);
 
 		list_del(&blob->unhashed_list);

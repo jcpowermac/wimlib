@@ -95,7 +95,7 @@ struct blob_info {
 	u32 unhashed : 1;
 
 	/* Temoorary fields used when writing streams; set as documented for
-	 * prepare_stream_list_for_write().  */
+	 * prepare_blob_list_for_write().  */
 	u32 unique_size : 1;
 	u32 will_be_in_output_wim : 1;
 
@@ -188,7 +188,7 @@ struct blob_info {
 	};
 
 	/* Links together streams that share the same underlying WIM resource.
-	 * The head is the `stream_list' member of `struct wim_resource_spec'.
+	 * The head is the `blob_list' member of `struct wim_resource_spec'.
 	 */
 	struct list_head rspec_node;
 
@@ -242,10 +242,10 @@ struct blob_info {
 		struct list_head extraction_list;
 
 		/* Links streams being exported.  */
-		struct list_head export_stream_list;
+		struct list_head export_blob_list;
 
 		/* Links original list of streams in the read-write mounted image.  */
-		struct list_head orig_stream_list;
+		struct list_head orig_blob_list;
 	};
 
 	/* Links streams that are still unhashed after being been added to a
@@ -255,19 +255,19 @@ struct blob_info {
 
 /* Functions to allocate and free lookup tables  */
 
-extern struct wim_blob_table *
+extern struct blob_table *
 new_blob_table(size_t capacity) _malloc_attribute;
 
 extern void
-free_blob_table(struct wim_blob_table *table);
+free_blob_table(struct blob_table *table);
 
 /* Functions to read or write the lookup table from/to a WIM file  */
 
 extern int
-read_wim_blob_table(WIMStruct *wim);
+read_blob_table(WIMStruct *wim);
 
 extern int
-write_wim_blob_table_from_stream_list(struct list_head *stream_list,
+write_blob_table_from_blob_list(struct list_head *blob_list,
 					struct filedes *out_fd,
 					u16 part_number,
 					struct wim_reshdr *out_reshdr,
@@ -279,12 +279,12 @@ extern struct blob_info *
 new_blob_info(void) _malloc_attribute;
 
 extern struct blob_info *
-clone_blob_table_entry(const struct blob_info *blob)
+clone_blob_info(const struct blob_info *blob)
 			_malloc_attribute;
 
 extern void
 blob_decrement_refcnt(struct blob_info *blob,
-		     struct wim_blob_table *table);
+		     struct blob_table *table);
 #ifdef WITH_FUSE
 extern void
 blob_decrement_num_opened_fds(struct blob_info *blob);
@@ -296,26 +296,26 @@ free_blob_info(struct blob_info *blob);
 /* Functions to insert and delete entries from a lookup table  */
 
 extern void
-blob_table_insert(struct wim_blob_table *table,
+blob_table_insert(struct blob_table *table,
 		struct blob_info *blob);
 
 extern void
-blob_table_unlink(struct wim_blob_table *table,
+blob_table_unlink(struct blob_table *table,
 		    struct blob_info *blob);
 
 /* Function to lookup a stream by SHA1 message digest  */
 extern struct blob_info *
-lookup_stream(const struct wim_blob_table *table, const u8 hash[]);
+lookup_blob(const struct blob_table *table, const u8 hash[]);
 
 /* Functions to iterate through the entries of a lookup table  */
 
 extern int
-for_blob_table_entry(struct wim_blob_table *table,
+for_blob_info(struct blob_table *table,
 		       int (*visitor)(struct blob_info *, void *),
 		       void *arg);
 
 extern int
-for_blob_table_entry_pos_sorted(struct wim_blob_table *table,
+for_blob_info_pos_sorted(struct blob_table *table,
 				  int (*visitor)(struct blob_info *,
 						 void *),
 				  void *arg);
@@ -332,12 +332,12 @@ blob_to_wimlib_resource_entry(const struct blob_info *blob,
 
 /* Functions to sort a list of lookup table entries  */
 extern int
-sort_stream_list(struct list_head *stream_list,
+sort_blob_list(struct list_head *blob_list,
 		 size_t list_head_offset,
 		 int (*compar)(const void *, const void*));
 
 extern int
-sort_stream_list_by_sequential_order(struct list_head *stream_list,
+sort_blob_list_by_sequential_order(struct list_head *blob_list,
 				     size_t list_head_offset);
 
 /* Utility functions  */
@@ -367,7 +367,7 @@ blob_bind_wim_resource_spec(struct blob_info *blob,
 {
 	blob->resource_location = RESOURCE_IN_WIM;
 	blob->rspec = rspec;
-	list_add_tail(&blob->rspec_node, &rspec->stream_list);
+	list_add_tail(&blob->rspec_node, &rspec->blob_list);
 }
 
 static inline void
@@ -382,7 +382,7 @@ blob_put_resource(struct blob_info *blob);
 
 extern struct blob_info *
 new_stream_from_data_buffer(const void *buffer, size_t size,
-			    struct wim_blob_table *blob_table);
+			    struct blob_table *blob_table);
 
 static inline void
 add_unhashed_stream(struct blob_info *blob,
@@ -398,7 +398,7 @@ add_unhashed_stream(struct blob_info *blob,
 
 extern int
 hash_unhashed_blob(struct blob_info *blob,
-		     struct wim_blob_table *blob_table,
+		     struct blob_table *blob_table,
 		     struct blob_info **blob_ret);
 
 extern struct blob_info **

@@ -159,8 +159,8 @@ struct wimfs_context {
 	unsigned long num_open_fds;
 
 	/* Original list of single-instance streams in the mounted image, linked
-	 * by 'struct blob_info'.orig_stream_list.  */
-	struct list_head orig_stream_list;
+	 * by 'struct blob_info'.orig_blob_list.  */
+	struct list_head orig_blob_list;
 
 	/* Parameters for unmounting the image (can be set via extended
 	 * attribute "wimfs.unmount_info").  */
@@ -505,7 +505,7 @@ create_dentry(struct fuse_context *fuse_ctx, const char *path,
  */
 static void
 remove_dentry(struct wim_dentry *dentry,
-	      struct wim_blob_table *blob_table)
+	      struct blob_table *blob_table)
 {
 	/* Drop the reference to each stream the inode contains.  */
 	inode_unref_blobs(dentry->d_inode, blob_table);
@@ -971,11 +971,11 @@ reassign_inode_numbers(struct wimfs_context *ctx)
 static void
 release_extra_refcnts(struct wimfs_context *ctx)
 {
-	struct list_head *list = &ctx->orig_stream_list;
-	struct wim_blob_table *blob_table = ctx->wim->blob_table;
+	struct list_head *list = &ctx->orig_blob_list;
+	struct blob_table *blob_table = ctx->wim->blob_table;
 	struct blob_info *blob, *tmp;
 
-	list_for_each_entry_safe(blob, tmp, list, orig_stream_list) {
+	list_for_each_entry_safe(blob, tmp, list, orig_blob_list) {
 		u32 n = blob->out_refcnt;
 		while (n--)
 			blob_decrement_refcnt(blob, blob_table);
@@ -1119,7 +1119,7 @@ commit_image(struct wimfs_context *ctx, int unmount_flags, mqd_t mq)
 	} else {
 		release_extra_refcnts(ctx);
 	}
-	INIT_LIST_HEAD(&ctx->orig_stream_list);
+	INIT_LIST_HEAD(&ctx->orig_blob_list);
 	delete_empty_streams(ctx);
 	xml_update_image_info(ctx->wim, ctx->wim->current_image);
 
@@ -2144,7 +2144,7 @@ wimlib_mount_image(WIMStruct *wim, int image, const char *dir,
 	 * preemptively double the number of references to each.  This is done
 	 * to allow implementing the WIMLIB_UNMOUNT_FLAG_NEW_IMAGE semantics.
 	 */
-	INIT_LIST_HEAD(&ctx.orig_stream_list);
+	INIT_LIST_HEAD(&ctx.orig_blob_list);
 	if (mount_flags & WIMLIB_MOUNT_FLAG_READWRITE) {
 		unsigned i;
 		struct wim_inode *inode;
@@ -2165,8 +2165,8 @@ wimlib_mount_image(WIMStruct *wim, int image, const char *dir,
 						       wim->blob_table);
 				if (blob) {
 					if (blob->out_refcnt == 0)
-						list_add(&blob->orig_stream_list,
-							 &ctx.orig_stream_list);
+						list_add(&blob->orig_blob_list,
+							 &ctx.orig_blob_list);
 					blob->out_refcnt += inode->i_nlink;
 					blob->refcnt += inode->i_nlink;
 				}

@@ -181,7 +181,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 		/* Alternate chunk table format.  Its header specifies the chunk
 		 * size and compression format.  Note: it could be read here;
 		 * however, the relevant data was already loaded into @rspec by
-		 * read_wim_blob_table().  */
+		 * read_blob_table().  */
 		cur_read_offset += sizeof(struct alt_chunk_table_header_disk);
 	}
 
@@ -979,7 +979,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 }
 
 struct streamifier_context {
-	struct read_stream_list_callbacks cbs;
+	struct read_blob_list_callbacks cbs;
 	struct blob_info *cur_stream;
 	struct blob_info *next_stream;
 	u64 cur_stream_offset;
@@ -1057,7 +1057,7 @@ streamifier_cb(const void *chunk, size_t size, void *_ctx)
 struct hasher_context {
 	SHA_CTX sha_ctx;
 	int flags;
-	struct read_stream_list_callbacks cbs;
+	struct read_blob_list_callbacks cbs;
 };
 
 /* Callback for starting to read a stream while calculating its SHA1 message
@@ -1150,7 +1150,7 @@ out_next_cb:
 
 static int
 read_full_stream_with_cbs(struct blob_info *blob,
-			  const struct read_stream_list_callbacks *cbs)
+			  const struct read_blob_list_callbacks *cbs)
 {
 	int ret;
 
@@ -1169,13 +1169,13 @@ read_full_stream_with_cbs(struct blob_info *blob,
  * computing the SHA1 message digest of the stream.  */
 static int
 read_full_stream_with_sha1(struct blob_info *blob,
-			   const struct read_stream_list_callbacks *cbs)
+			   const struct read_blob_list_callbacks *cbs)
 {
 	struct hasher_context hasher_ctx = {
 		.flags = VERIFY_STREAM_HASHES | COMPUTE_MISSING_STREAM_HASHES,
 		.cbs = *cbs,
 	};
-	struct read_stream_list_callbacks hasher_cbs = {
+	struct read_blob_list_callbacks hasher_cbs = {
 		.begin_stream		= hasher_begin_stream,
 		.begin_stream_ctx	= &hasher_ctx,
 		.consume_chunk		= hasher_consume_chunk,
@@ -1191,7 +1191,7 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
 			       struct blob_info *last_stream,
 			       u64 stream_count,
 			       size_t list_head_offset,
-			       const struct read_stream_list_callbacks *sink_cbs)
+			       const struct read_blob_list_callbacks *sink_cbs)
 {
 	struct data_range *ranges;
 	bool ranges_malloced;
@@ -1269,12 +1269,12 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
  * streams are combined into a single solid compressed WIM resource and reads
  * them all consecutively, only decompressing the data one time.
  *
- * @stream_list
+ * @blob_list
  *	List of streams (represented as `struct blob_info's) to
  *	read.
  * @list_head_offset
  *	Offset of the `struct list_head' within each `struct
- *	blob_info' that makes up the @stream_list.
+ *	blob_info' that makes up the @blob_list.
  * @cbs
  *	Callback functions to accept the stream data.
  * @flags
@@ -1292,7 +1292,7 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
  *		digests.
  *
  *	STREAM_LIST_ALREADY_SORTED
- *		@stream_list is already sorted in sequential order for reading.
+ *		@blob_list is already sorted in sequential order for reading.
  *
  * The callback functions are allowed to delete the current stream from the list
  * if necessary.
@@ -1302,19 +1302,19 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
  * of the callback functions.
  */
 int
-read_stream_list(struct list_head *stream_list,
+read_blob_list(struct list_head *blob_list,
 		 size_t list_head_offset,
-		 const struct read_stream_list_callbacks *cbs,
+		 const struct read_blob_list_callbacks *cbs,
 		 int flags)
 {
 	int ret;
 	struct list_head *cur, *next;
 	struct blob_info *blob;
 	struct hasher_context *hasher_ctx;
-	struct read_stream_list_callbacks *sink_cbs;
+	struct read_blob_list_callbacks *sink_cbs;
 
 	if (!(flags & STREAM_LIST_ALREADY_SORTED)) {
-		ret = sort_stream_list_by_sequential_order(stream_list, list_head_offset);
+		ret = sort_blob_list_by_sequential_order(blob_list, list_head_offset);
 		if (ret)
 			return ret;
 	}
@@ -1326,7 +1326,7 @@ read_stream_list(struct list_head *stream_list,
 			.cbs	= *cbs,
 		};
 		sink_cbs = alloca(sizeof(*sink_cbs));
-		*sink_cbs = (struct read_stream_list_callbacks) {
+		*sink_cbs = (struct read_blob_list_callbacks) {
 			.begin_stream		= hasher_begin_stream,
 			.begin_stream_ctx	= hasher_ctx,
 			.consume_chunk		= hasher_consume_chunk,
@@ -1335,11 +1335,11 @@ read_stream_list(struct list_head *stream_list,
 			.end_stream_ctx		= hasher_ctx,
 		};
 	} else {
-		sink_cbs = (struct read_stream_list_callbacks*)cbs;
+		sink_cbs = (struct read_blob_list_callbacks*)cbs;
 	}
 
-	for (cur = stream_list->next, next = cur->next;
-	     cur != stream_list;
+	for (cur = blob_list->next, next = cur->next;
+	     cur != blob_list;
 	     cur = next, next = cur->next)
 	{
 		blob = (struct blob_info*)((u8*)cur - list_head_offset);
@@ -1355,14 +1355,14 @@ read_stream_list(struct list_head *stream_list,
 			/* The next stream is a proper sub-sequence of a WIM
 			 * resource.  See if there are other streams in the same
 			 * resource that need to be read.  Since
-			 * sort_stream_list_by_sequential_order() sorted the
+			 * sort_blob_list_by_sequential_order() sorted the
 			 * streams by offset in the WIM, this can be determined
 			 * by simply scanning forward in the list.  */
 
 			blob_last = blob;
 			stream_count = 1;
 			for (next2 = next;
-			     next2 != stream_list
+			     next2 != blob_list
 			     && (blob_next = (struct blob_info*)
 						((u8*)next2 - list_head_offset),
 				 blob_next->resource_location == RESOURCE_IN_WIM
@@ -1411,7 +1411,7 @@ extract_stream(struct blob_info *blob, u64 size,
 	wimlib_assert(size <= blob->size);
 	if (size == blob->size) {
 		/* Do SHA1.  */
-		struct read_stream_list_callbacks cbs = {
+		struct read_blob_list_callbacks cbs = {
 			.consume_chunk		= extract_chunk,
 			.consume_chunk_ctx	= extract_chunk_arg,
 		};
@@ -1461,7 +1461,7 @@ int
 sha1_stream(struct blob_info *blob)
 {
 	wimlib_assert(blob->unhashed);
-	struct read_stream_list_callbacks cbs = {
+	struct read_blob_list_callbacks cbs = {
 	};
 	return read_full_stream_with_sha1(blob, &cbs);
 }
@@ -1479,7 +1479,7 @@ wim_res_hdr_to_spec(const struct wim_reshdr *reshdr, WIMStruct *wim,
 	rspec->offset_in_wim = reshdr->offset_in_wim;
 	rspec->size_in_wim = reshdr->size_in_wim;
 	rspec->uncompressed_size = reshdr->uncompressed_size;
-	INIT_LIST_HEAD(&rspec->stream_list);
+	INIT_LIST_HEAD(&rspec->blob_list);
 	rspec->flags = reshdr->flags;
 	rspec->is_pipable = wim_is_pipable(wim);
 	if (rspec->flags & WIM_RESHDR_FLAG_COMPRESSED) {

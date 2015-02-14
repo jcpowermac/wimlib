@@ -37,14 +37,14 @@
 #include "wimlib/write.h"
 
 struct swm_part_info {
-	struct list_head stream_list;
+	struct list_head blob_list;
 	u64 size;
 };
 
 static void
 copy_part_info(struct swm_part_info *dst, struct swm_part_info *src)
 {
-	list_transfer(&src->stream_list, &dst->stream_list);
+	list_transfer(&src->blob_list, &dst->blob_list);
 	dst->size = src->size;
 }
 
@@ -126,7 +126,7 @@ write_split_wim(WIMStruct *orig_wim, const tchar *swm_name,
 				     1,
 				     part_number,
 				     swm_info->num_parts,
-				     &swm_info->parts[part_number - 1].stream_list,
+				     &swm_info->parts[part_number - 1].blob_list,
 				     guid);
 		orig_wim->progfunc = progfunc;
 		if (ret)
@@ -188,13 +188,13 @@ add_stream_to_swm(struct blob_info *blob, void *_swm_info)
 			swm_info->num_alloc_parts = num_alloc_parts;
 		}
 		swm_info->num_parts++;
-		INIT_LIST_HEAD(&swm_info->parts[swm_info->num_parts - 1].stream_list);
+		INIT_LIST_HEAD(&swm_info->parts[swm_info->num_parts - 1].blob_list);
 		swm_info->parts[swm_info->num_parts - 1].size = 0;
 	}
 	swm_info->parts[swm_info->num_parts - 1].size += stream_size;
 	if (!(blob->flags & WIM_RESHDR_FLAG_METADATA)) {
 		list_add_tail(&blob->write_streams_list,
-			      &swm_info->parts[swm_info->num_parts - 1].stream_list);
+			      &swm_info->parts[swm_info->num_parts - 1].blob_list);
 	}
 	swm_info->total_bytes += stream_size;
 	return 0;
@@ -228,7 +228,7 @@ wimlib_split(WIMStruct *wim, const tchar *swm_name,
 			goto out_free_swm_info;
 	}
 
-	ret = for_blob_table_entry_pos_sorted(wim->blob_table,
+	ret = for_blob_info_pos_sorted(wim->blob_table,
 						add_stream_to_swm,
 						&swm_info);
 	if (ret)

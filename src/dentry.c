@@ -1048,7 +1048,7 @@ do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *blob_table)
  * function.
  */
 void
-free_dentry_tree(struct wim_dentry *root, struct wim_blob_table *blob_table)
+free_dentry_tree(struct wim_dentry *root, struct blob_table *blob_table)
 {
 	int (*f)(struct wim_dentry *, void *);
 

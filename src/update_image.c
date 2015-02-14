@@ -135,7 +135,7 @@ struct update_command_journal {
 	struct wim_dentry **root_p;
 
 	/* Pointer to the lookup table of the WIM (may needed for rollback)  */
-	struct wim_blob_table *blob_table;
+	struct blob_table *blob_table;
 
 	/* List of dentries that are currently unlinked from the WIM image.
 	 * These must be freed when no longer needed for commit or rollback.  */
@@ -157,7 +157,7 @@ init_update_primitive_list(struct update_primitive_list *l)
  * commands.  */
 static struct update_command_journal *
 new_update_command_journal(size_t num_cmds, struct wim_dentry **root_p,
-			   struct wim_blob_table *blob_table)
+			   struct blob_table *blob_table)
 {
 	struct update_command_journal *j;
 

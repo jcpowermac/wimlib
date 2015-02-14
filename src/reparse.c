@@ -397,7 +397,7 @@ out_free_link_target:
 int
 wim_inode_set_symlink(struct wim_inode *inode,
 		      const char *target,
-		      struct wim_blob_table *blob_table)
+		      struct blob_table *blob_table)
 
 {
 	struct reparse_buffer_disk rpbuf_disk _aligned_attribute(8);

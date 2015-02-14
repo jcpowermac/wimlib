@@ -51,19 +51,19 @@
  *
  * Note: Everything will break horribly if there is a SHA1 collision.
  */
-struct wim_blob_table {
+struct blob_table {
 	struct hlist_head *array;
 	size_t num_entries;
 	size_t capacity;
 };
 
-struct wim_blob_table *
+struct blob_table *
 new_blob_table(size_t capacity)
 {
-	struct wim_blob_table *table;
+	struct blob_table *table;
 	struct hlist_head *array;
 
-	table = MALLOC(sizeof(struct wim_blob_table));
+	table = MALLOC(sizeof(struct blob_table));
 	if (table == NULL)
 		goto oom;
 
@@ -92,10 +92,10 @@ do_free_blob_info(struct blob_info *entry, void *ignore)
 }
 
 void
-free_blob_table(struct wim_blob_table *table)
+free_blob_table(struct blob_table *table)
 {
 	if (table) {
-		for_blob_table_entry(table, do_free_blob_info, NULL);
+		for_blob_info(table, do_free_blob_info, NULL);
 		FREE(table->array);
 		FREE(table);
 	}
@@ -119,7 +119,7 @@ new_blob_info(void)
 }
 
 struct blob_info *
-clone_blob_table_entry(const struct blob_info *old)
+clone_blob_info(const struct blob_info *old)
 {
 	struct blob_info *new;
 
@@ -129,7 +129,7 @@ clone_blob_table_entry(const struct blob_info *old)
 
 	switch (new->resource_location) {
 	case RESOURCE_IN_WIM:
-		list_add(&new->rspec_node, &new->rspec->stream_list);
+		list_add(&new->rspec_node, &new->rspec->blob_list);
 		break;
 
 	case RESOURCE_IN_FILE_ON_DISK:
@@ -189,7 +189,7 @@ blob_put_resource(struct blob_info *blob)
 	switch (blob->resource_location) {
 	case RESOURCE_IN_WIM:
 		list_del(&blob->rspec_node);
-		if (list_empty(&blob->rspec->stream_list))
+		if (list_empty(&blob->rspec->blob_list))
 			FREE(blob->rspec);
 		break;
 	case RESOURCE_IN_FILE_ON_DISK:
@@ -269,7 +269,7 @@ finalize_blob(struct blob_info *blob)
  */
 void
 blob_decrement_refcnt(struct blob_info *blob,
-		     struct wim_blob_table *table)
+		     struct blob_table *table)
 {
 	if (unlikely(blob->refcnt == 0))  /* See comment above  */
 		return;
@@ -313,7 +313,7 @@ blob_decrement_num_opened_fds(struct blob_info *blob)
 #endif
 
 static void
-blob_table_insert_raw(struct wim_blob_table *table,
+blob_table_insert_raw(struct blob_table *table,
 			struct blob_info *blob)
 {
 	size_t i = blob->hash_short % table->capacity;
@@ -322,7 +322,7 @@ blob_table_insert_raw(struct wim_blob_table *table,
 }
 
 static void
-enlarge_blob_table(struct wim_blob_table *table)
+enlarge_blob_table(struct blob_table *table)
 {
 	size_t old_capacity, new_capacity;
 	struct hlist_head *old_array, *new_array;
@@ -350,7 +350,7 @@ enlarge_blob_table(struct wim_blob_table *table)
 
 /* Inserts an entry into the lookup table.  */
 void
-blob_table_insert(struct wim_blob_table *table,
+blob_table_insert(struct blob_table *table,
 		    struct blob_info *blob)
 {
 	blob_table_insert_raw(table, blob);
@@ -360,7 +360,7 @@ blob_table_insert(struct wim_blob_table *table,
 
 /* Unlinks a blob table entry from the table; does not free it.  */
 void
-blob_table_unlink(struct wim_blob_table *table,
+blob_table_unlink(struct blob_table *table,
 		    struct blob_info *blob)
 {
 	wimlib_assert(!blob->unhashed);
@@ -373,7 +373,7 @@ blob_table_unlink(struct wim_blob_table *table,
 /* Given a SHA1 message digest, return the corresponding entry in the WIM's
  * lookup table, or NULL if there is none.  */
 struct blob_info *
-lookup_stream(const struct wim_blob_table *table, const u8 hash[])
+lookup_blob(const struct blob_table *table, const u8 hash[])
 {
 	size_t i;
 	struct blob_info *blob;
@@ -389,7 +389,7 @@ lookup_stream(const struct wim_blob_table *table, const u8 hash[])
 /* Calls a function on all the entries in the WIM lookup table.  Stop early and
  * return nonzero if any call to the function returns nonzero. */
 int
-for_blob_table_entry(struct wim_blob_table *table,
+for_blob_info(struct blob_table *table,
 		       int (*visitor)(struct blob_info *, void *),
 		       void *arg)
 {
@@ -479,7 +479,7 @@ cmp_streams_by_sequential_order(const void *p1, const void *p2)
 }
 
 int
-sort_stream_list(struct list_head *stream_list,
+sort_blob_list(struct list_head *blob_list,
 		 size_t list_head_offset,
 		 int (*compar)(const void *, const void*))
 {
@@ -489,7 +489,7 @@ sort_stream_list(struct list_head *stream_list,
 	size_t array_size;
 	size_t num_streams = 0;
 
-	list_for_each(cur, stream_list)
+	list_for_each(cur, blob_list)
 		num_streams++;
 
 	if (num_streams <= 1)
@@ -500,7 +500,7 @@ sort_stream_list(struct list_head *stream_list,
 	if (array == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	cur = stream_list->next;
+	cur = blob_list->next;
 	for (i = 0; i < num_streams; i++) {
 		array[i] = (struct blob_info*)((u8*)cur -
 							    list_head_offset);
@@ -509,11 +509,11 @@ sort_stream_list(struct list_head *stream_list,
 
 	qsort(array, num_streams, sizeof(array[0]), compar);
 
-	INIT_LIST_HEAD(stream_list);
+	INIT_LIST_HEAD(blob_list);
 	for (i = 0; i < num_streams; i++) {
 		list_add_tail((struct list_head*)
 			       ((u8*)array[i] + list_head_offset),
-			      stream_list);
+			      blob_list);
 	}
 	FREE(array);
 	return 0;
@@ -521,10 +521,10 @@ sort_stream_list(struct list_head *stream_list,
 
 /* Sort the specified list of streams in an order optimized for reading.  */
 int
-sort_stream_list_by_sequential_order(struct list_head *stream_list,
+sort_blob_list_by_sequential_order(struct list_head *blob_list,
 				     size_t list_head_offset)
 {
-	return sort_stream_list(stream_list, list_head_offset,
+	return sort_blob_list(blob_list, list_head_offset,
 				cmp_streams_by_sequential_order);
 }
 
@@ -542,7 +542,7 @@ add_lte_to_array(struct blob_info *blob,
  * offset in the WIM.  Caution: this is intended to be used when the stream
  * offset field has actually been set. */
 int
-for_blob_table_entry_pos_sorted(struct wim_blob_table *table,
+for_blob_info_pos_sorted(struct blob_table *table,
 				  int (*visitor)(struct blob_info *,
 						 void *),
 				  void *arg)
@@ -555,7 +555,7 @@ for_blob_table_entry_pos_sorted(struct wim_blob_table *table,
 	if (!blob_array)
 		return WIMLIB_ERR_NOMEM;
 	p = blob_array;
-	for_blob_table_entry(table, add_lte_to_array, &p);
+	for_blob_info(table, add_lte_to_array, &p);
 
 	wimlib_assert(p == blob_array + num_streams);
 
@@ -761,7 +761,7 @@ free_solid_rspec_info(struct wim_resource_spec **rspecs, size_t num_rspecs)
 {
 	if (rspecs) {
 		for (size_t i = 0; i < num_rspecs; i++)
-			if (list_empty(&rspecs[i]->stream_list))
+			if (list_empty(&rspecs[i]->blob_list))
 				FREE(rspecs[i]);
 		FREE(rspecs);
 	}
@@ -795,7 +795,7 @@ validate_resource(struct wim_resource_spec *rspec)
 	 */
 	expected_next_offset = 0;
 	out_of_order = false;
-	list_for_each_entry(blob, &rspec->stream_list, rspec_node) {
+	list_for_each_entry(blob, &rspec->blob_list, rspec_node) {
 		if (blob->offset_in_res + blob->size < blob->size ||
 		    blob->offset_in_res + blob->size > rspec->uncompressed_size)
 			goto invalid_due_to_overflow;
@@ -810,7 +810,7 @@ validate_resource(struct wim_resource_spec *rspec)
 	 * allowing for overlap), sort them.  Then make sure that none overlap.
 	 */
 	if (out_of_order) {
-		ret = sort_stream_list(&rspec->stream_list,
+		ret = sort_blob_list(&rspec->blob_list,
 				       offsetof(struct blob_info,
 						rspec_node),
 				       cmp_streams_by_offset_in_res);
@@ -818,7 +818,7 @@ validate_resource(struct wim_resource_spec *rspec)
 			return ret;
 
 		expected_next_offset = 0;
-		list_for_each_entry(blob, &rspec->stream_list, rspec_node) {
+		list_for_each_entry(blob, &rspec->blob_list, rspec_node) {
 			if (blob->offset_in_res >= expected_next_offset)
 				expected_next_offset = blob->offset_in_res + blob->size;
 			else
@@ -880,12 +880,12 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
  *	file.
  */
 int
-read_wim_blob_table(WIMStruct *wim)
+read_blob_table(WIMStruct *wim)
 {
 	int ret;
 	size_t num_entries;
 	void *buf = NULL;
-	struct wim_blob_table *table = NULL;
+	struct blob_table *table = NULL;
 	struct blob_info *cur_entry = NULL;
 	size_t num_duplicate_entries = 0;
 	size_t num_wrong_part_entries = 0;
@@ -1095,7 +1095,7 @@ read_wim_blob_table(WIMStruct *wim)
 			/* Lookup table entry for a non-metadata stream.  */
 
 			/* Ignore this stream if it's a duplicate.  */
-			if (lookup_stream(table, cur_entry->hash)) {
+			if (lookup_blob(table, cur_entry->hash)) {
 				num_duplicate_entries++;
 				goto free_cur_entry_and_continue;
 			}
@@ -1173,7 +1173,7 @@ put_blob_info(struct blob_info_disk *disk_entry,
  * WIM_RESHDR_FLAG_METADATA set must be in the same order as the indices of the
  * underlying images.  */
 int
-write_wim_blob_table_from_stream_list(struct list_head *stream_list,
+write_blob_table_from_blob_list(struct list_head *blob_list,
 					struct filedes *out_fd,
 					u16 part_number,
 					struct wim_reshdr *out_reshdr,
@@ -1189,7 +1189,7 @@ write_wim_blob_table_from_stream_list(struct list_head *stream_list,
 	u64 logical_offset;
 
 	table_size = 0;
-	list_for_each_entry(blob, stream_list, blob_table_list) {
+	list_for_each_entry(blob, blob_list, blob_table_list) {
 		table_size += sizeof(struct blob_info_disk);
 
 		if (blob->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID &&
@@ -1214,7 +1214,7 @@ write_wim_blob_table_from_stream_list(struct list_head *stream_list,
 	prev_res_offset_in_wim = ~0ULL;
 	prev_uncompressed_size = 0;
 	logical_offset = 0;
-	list_for_each_entry(blob, stream_list, blob_table_list) {
+	list_for_each_entry(blob, blob_list, blob_table_list) {
 		if (blob->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
 			struct wim_reshdr tmp_reshdr;
 
@@ -1277,13 +1277,13 @@ write_wim_blob_table_from_stream_list(struct list_head *stream_list,
  * entry in @blob_table for the same stream.  */
 struct blob_info *
 new_stream_from_data_buffer(const void *buffer, size_t size,
-			    struct wim_blob_table *blob_table)
+			    struct blob_table *blob_table)
 {
 	u8 hash[SHA1_HASH_SIZE];
 	struct blob_info *blob, *existing_blob;
 
 	sha1_buffer(buffer, size, hash);
-	existing_blob = lookup_stream(blob_table, hash);
+	existing_blob = lookup_blob(blob_table, hash);
 	if (existing_blob) {
 		wimlib_assert(existing_blob->size == size);
 		blob = existing_blob;
@@ -1323,7 +1323,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
  */
 int
 hash_unhashed_blob(struct blob_info *blob,
-		   struct wim_blob_table *blob_table,
+		   struct blob_table *blob_table,
 		   struct blob_info **blob_ret)
 {
 	int ret;
@@ -1342,7 +1342,7 @@ hash_unhashed_blob(struct blob_info *blob,
 		return ret;
 
 	/* Look for a duplicate stream */
-	duplicate_blob = lookup_stream(blob_table, blob->hash);
+	duplicate_blob = lookup_blob(blob_table, blob->hash);
 	list_del(&blob->unhashed_list);
 	if (duplicate_blob) {
 		/* We have a duplicate stream.  Transfer the reference counts
@@ -1432,5 +1432,5 @@ wimlib_iterate_lookup_table(WIMStruct *wim, int flags,
 				return ret;
 		}
 	}
-	return for_blob_table_entry(wim->blob_table, do_iterate_blob, &ctx);
+	return for_blob_info(wim->blob_table, do_iterate_blob, &ctx);
 }

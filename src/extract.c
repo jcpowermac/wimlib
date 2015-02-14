@@ -222,11 +222,11 @@ read_error:
 
 static int
 load_streams_from_pipe(struct apply_ctx *ctx,
-		       const struct read_stream_list_callbacks *cbs)
+		       const struct read_blob_list_callbacks *cbs)
 {
 	struct blob_info *found_blob = NULL;
 	struct wim_resource_spec *rspec = NULL;
-	struct wim_blob_table *blob_table;
+	struct blob_table *blob_table;
 	int ret;
 
 	ret = WIMLIB_ERR_NOMEM;
@@ -259,7 +259,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 
 		if ((found_blob->resource_location != RESOURCE_NONEXISTENT)
 		    && !(found_blob->flags & WIM_RESHDR_FLAG_METADATA)
-		    && (needed_blob = lookup_stream(blob_table, found_blob->hash))
+		    && (needed_blob = lookup_blob(blob_table, found_blob->hash))
 		    && (needed_blob->out_refcnt))
 		{
 			needed_blob->offset_in_res = found_blob->offset_in_res;
@@ -453,7 +453,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 {
 	struct blob_info tmpfile_blob;
 	struct blob_info *orig_blob = ctx->cur_stream;
-	const struct read_stream_list_callbacks *cbs = ctx->saved_cbs;
+	const struct read_blob_list_callbacks *cbs = ctx->saved_cbs;
 	int ret;
 	const u32 orig_refcnt = orig_blob->out_refcnt;
 
@@ -544,10 +544,10 @@ end_extract_stream_wrapper(struct blob_info *stream,
  * file system might not support hard links).
  */
 int
-extract_stream_list(struct apply_ctx *ctx,
-		    const struct read_stream_list_callbacks *cbs)
+extract_blob_list(struct apply_ctx *ctx,
+		    const struct read_blob_list_callbacks *cbs)
 {
-	struct read_stream_list_callbacks wrapper_cbs = {
+	struct read_blob_list_callbacks wrapper_cbs = {
 		.begin_stream      = begin_extract_stream_wrapper,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = extract_chunk_wrapper,
@@ -559,7 +559,7 @@ extract_stream_list(struct apply_ctx *ctx,
 	if (ctx->extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE) {
 		return load_streams_from_pipe(ctx, &wrapper_cbs);
 	} else {
-		return read_stream_list(&ctx->stream_list,
+		return read_blob_list(&ctx->blob_list,
 					offsetof(struct blob_info,
 						 extraction_list),
 					&wrapper_cbs, VERIFY_STREAM_HASHES);
@@ -573,7 +573,7 @@ extract_stream_list(struct apply_ctx *ctx,
  * unnamed data stream only.  */
 static int
 extract_dentry_to_stdout(struct wim_dentry *dentry,
-			 const struct wim_blob_table *blob_table)
+			 const struct blob_table *blob_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct blob_info *blob;
@@ -601,7 +601,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 
 static int
 extract_dentries_to_stdout(struct wim_dentry **dentries, size_t num_dentries,
-			   const struct wim_blob_table *blob_table)
+			   const struct blob_table *blob_table)
 {
 	for (size_t i = 0; i < num_dentries; i++) {
 		int ret = extract_dentry_to_stdout(dentries[i], blob_table);
@@ -752,11 +752,11 @@ destroy_dentry_list(struct list_head *dentry_list)
 }
 
 static void
-destroy_stream_list(struct list_head *stream_list)
+destroy_blob_list(struct list_head *blob_list)
 {
 	struct blob_info *blob;
 
-	list_for_each_entry(blob, stream_list, extraction_list)
+	list_for_each_entry(blob, blob_list, extraction_list)
 		if (blob->out_refcnt > ARRAY_LEN(blob->inline_stream_owners))
 			FREE(blob->stream_owners);
 }
@@ -965,7 +965,7 @@ dentry_list_calculate_extraction_names(struct list_head *dentry_list,
 
 static int
 dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
-		       struct wim_blob_table *blob_table)
+		       struct blob_table *blob_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct blob_info *blob;
@@ -1037,7 +1037,7 @@ ref_stream(struct blob_info *blob, unsigned stream_idx,
 	/* Add stream to the dentry_list only one time, even if it's going
 	 * to be extracted to multiple inodes.  */
 	if (blob->out_refcnt == 0) {
-		list_add_tail(&blob->extraction_list, &ctx->stream_list);
+		list_add_tail(&blob->extraction_list, &ctx->blob_list);
 		ctx->num_streams_remaining++;
 	}
 
@@ -1140,7 +1140,7 @@ dentry_ref_streams(struct wim_dentry *dentry, struct apply_ctx *ctx)
  * For each dentry to be extracted, iterate through the data streams of the
  * corresponding inode.  For each such stream that is not to be ignored due to
  * the supported features or extraction flags, add it to the list of streams to
- * be extracted (ctx->stream_list) if not already done so.
+ * be extracted (ctx->blob_list) if not already done so.
  *
  * Also builds a mapping from each stream to the inodes referencing it.
  *
@@ -1453,7 +1453,7 @@ extract_trees(WIMStruct *wim, struct wim_dentry **trees, size_t num_trees,
 									 wim->current_image);
 		ctx->progress.extract.target = target;
 	}
-	INIT_LIST_HEAD(&ctx->stream_list);
+	INIT_LIST_HEAD(&ctx->blob_list);
 	filedes_invalidate(&ctx->tmpfile_fd);
 	ctx->apply_ops = ops;
 
@@ -1538,7 +1538,7 @@ extract_trees(WIMStruct *wim, struct wim_dentry **trees, size_t num_trees,
 				       WIMLIB_PROGRESS_MSG_EXTRACT_IMAGE_END :
 				       WIMLIB_PROGRESS_MSG_EXTRACT_TREE_END));
 out_cleanup:
-	destroy_stream_list(&ctx->stream_list);
+	destroy_blob_list(&ctx->blob_list);
 	destroy_dentry_list(&dentry_list);
 	FREE(ctx);
 out:

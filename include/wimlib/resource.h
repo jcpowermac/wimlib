@@ -41,7 +41,7 @@ struct wim_resource_spec {
 	u64 uncompressed_size;
 
 	/* The list of streams this resource contains.  */
-	struct list_head stream_list;
+	struct list_head blob_list;
 
 	/* Flags for this resource (WIM_RESHDR_FLAG_*).  */
 	u32 flags : 8;
@@ -220,10 +220,10 @@ skip_wim_stream(struct blob_info *blob);
  *
  * Must return 0 on success, a positive error code on failure, or the special
  * value BEGIN_STREAM_STATUS_SKIP_STREAM to indicate that the stream should not
- * be read, and read_stream_list() should continue on to the next stream
+ * be read, and read_blob_list() should continue on to the next stream
  * (without calling @consume_chunk or @end_stream).
  */
-typedef int (*read_stream_list_begin_stream_t)(struct blob_info *blob,
+typedef int (*read_blob_list_begin_stream_t)(struct blob_info *blob,
 					       void *ctx);
 
 #define BEGIN_STREAM_STATUS_SKIP_STREAM	-1
@@ -242,23 +242,23 @@ typedef int (*read_stream_list_begin_stream_t)(struct blob_info *blob,
  * @ctx:
  *	User-provided context.
  */
-typedef int (*read_stream_list_end_stream_t)(struct blob_info *blob,
+typedef int (*read_blob_list_end_stream_t)(struct blob_info *blob,
 					     int status,
 					     void *ctx);
 
 
-/* Callback functions and contexts for read_stream_list().  */
-struct read_stream_list_callbacks {
+/* Callback functions and contexts for read_blob_list().  */
+struct read_blob_list_callbacks {
 
 	/* Called when a stream is about to be read.  */
-	read_stream_list_begin_stream_t begin_stream;
+	read_blob_list_begin_stream_t begin_stream;
 
 	/* Called when a chunk of data has been read.  */
 	consume_data_callback_t consume_chunk;
 
 	/* Called when a stream has been fully read.  A successful call to
 	 * @begin_stream will always be matched by a call to @end_stream.  */
-	read_stream_list_end_stream_t end_stream;
+	read_blob_list_end_stream_t end_stream;
 
 	/* Parameter passed to @begin_stream.  */
 	void *begin_stream_ctx;
@@ -270,15 +270,15 @@ struct read_stream_list_callbacks {
 	void *end_stream_ctx;
 };
 
-/* Flags for read_stream_list()  */
+/* Flags for read_blob_list()  */
 #define VERIFY_STREAM_HASHES		0x1
 #define COMPUTE_MISSING_STREAM_HASHES	0x2
 #define STREAM_LIST_ALREADY_SORTED	0x4
 
 extern int
-read_stream_list(struct list_head *stream_list,
+read_blob_list(struct list_head *blob_list,
 		 size_t list_head_offset,
-		 const struct read_stream_list_callbacks *cbs,
+		 const struct read_blob_list_callbacks *cbs,
 		 int flags);
 
 /* Functions to extract streams.  */

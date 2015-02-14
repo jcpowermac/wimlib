@@ -197,7 +197,7 @@ can_raw_copy(const struct blob_info *blob,
 		struct blob_info *res_stream;
 		u64 write_size = 0;
 
-		list_for_each_entry(res_stream, &rspec->stream_list, rspec_node)
+		list_for_each_entry(res_stream, &rspec->blob_list, rspec_node)
 			if (res_stream->will_be_in_output_wim)
 				write_size += res_stream->size;
 
@@ -348,7 +348,7 @@ struct write_streams_ctx {
 
 	/* Lookup table for the WIMStruct on whose behalf the streams are being
 	 * written.  */
-	struct wim_blob_table *blob_table;
+	struct blob_table *blob_table;
 
 	/* Compression format to use.  */
 	int out_ctype;
@@ -739,7 +739,7 @@ write_stream_begin_read(struct blob_info *blob, void *_ctx)
 	 * streams, we don't know whether such each such stream really need to
 	 * written until it is actually checksummed, unless it has a unique
 	 * size.  In such cases we read and checksum the stream in this
-	 * function, thereby advancing ahead of read_stream_list(), which will
+	 * function, thereby advancing ahead of read_blob_list(), which will
 	 * still provide the data again to write_stream_process_chunk().  This
 	 * is okay because an unhashed stream cannot be in a WIM resource, which
 	 * might be costly to decompress.  */
@@ -784,7 +784,7 @@ write_stream_begin_read(struct blob_info *blob, void *_ctx)
 				 * but was not marked as such.  Discard the
 				 * current stream entry and use the duplicate,
 				 * but actually freeing the current entry must
-				 * wait until read_stream_list() has finished
+				 * wait until read_blob_list() has finished
 				 * reading its data.  */
 				DEBUG("Stream duplicate, but not already "
 				      "selected for writing.");
@@ -1180,7 +1180,7 @@ write_stream_end_read(struct blob_info *blob, int status, void *_ctx)
 	} else if (!status && blob->unhashed && ctx->blob_table != NULL) {
 		/* The 'blob' stream was not a duplicate and was previously
 		 * unhashed.  Since we passed COMPUTE_MISSING_STREAM_HASHES to
-		 * read_stream_list(), blob->hash is now computed and valid.  So
+		 * read_blob_list(), blob->hash is now computed and valid.  So
 		 * turn this stream into a "hashed" stream.  */
 		list_del(&blob->unhashed_list);
 		blob_table_insert(ctx->blob_table, blob);
@@ -1194,7 +1194,7 @@ write_stream_end_read(struct blob_info *blob, int status, void *_ctx)
  * Assumes the streams are sorted such that all streams located in each distinct
  * WIM (specified by WIMStruct) are together.  */
 static void
-compute_stream_list_stats(struct list_head *stream_list,
+compute_blob_list_stats(struct list_head *blob_list,
 			  struct write_streams_ctx *ctx)
 {
 	struct blob_info *blob;
@@ -1203,7 +1203,7 @@ compute_stream_list_stats(struct list_head *stream_list,
 	u64 total_parts = 0;
 	WIMStruct *prev_wim_part = NULL;
 
-	list_for_each_entry(blob, stream_list, write_streams_list) {
+	list_for_each_entry(blob, blob_list, write_streams_list) {
 		num_streams++;
 		total_bytes += blob->size;
 		if (blob->resource_location == RESOURCE_IN_WIM) {
@@ -1223,12 +1223,12 @@ compute_stream_list_stats(struct list_head *stream_list,
 	ctx->progress_data.next_progress = 0;
 }
 
-/* Find streams in @stream_list that can be copied to the output WIM in raw form
- * rather than compressed.  Delete these streams from @stream_list and move them
+/* Find streams in @blob_list that can be copied to the output WIM in raw form
+ * rather than compressed.  Delete these streams from @blob_list and move them
  * to @raw_copy_streams.  Return the total uncompressed size of the streams that
  * need to be compressed.  */
 static u64
-find_raw_copy_streams(struct list_head *stream_list,
+find_raw_copy_streams(struct list_head *blob_list,
 		      int write_resource_flags,
 		      int out_ctype,
 		      u32 out_chunk_size,
@@ -1240,11 +1240,11 @@ find_raw_copy_streams(struct list_head *stream_list,
 	INIT_LIST_HEAD(raw_copy_streams);
 
 	/* Initialize temporary raw_copy_ok flag.  */
-	list_for_each_entry(blob, stream_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_streams_list)
 		if (blob->resource_location == RESOURCE_IN_WIM)
 			blob->rspec->raw_copy_ok = 0;
 
-	list_for_each_entry_safe(blob, tmp, stream_list, write_streams_list) {
+	list_for_each_entry_safe(blob, tmp, blob_list, write_streams_list) {
 		if (blob->resource_location == RESOURCE_IN_WIM &&
 		    blob->rspec->raw_copy_ok)
 		{
@@ -1313,7 +1313,7 @@ write_raw_copy_resource(struct wim_resource_spec *in_rspec,
 
 	} while (cur_read_offset != end_read_offset);
 
-	list_for_each_entry(blob, &in_rspec->stream_list, rspec_node) {
+	list_for_each_entry(blob, &in_rspec->blob_list, rspec_node) {
 		if (blob->will_be_in_output_wim) {
 			stream_set_out_reshdr_for_reuse(blob);
 			if (in_rspec->flags & WIM_RESHDR_FLAG_SOLID)
@@ -1384,11 +1384,11 @@ finish_remaining_chunks(struct write_streams_ctx *ctx)
 }
 
 static void
-remove_zero_length_streams(struct list_head *stream_list)
+remove_zero_length_streams(struct list_head *blob_list)
 {
 	struct blob_info *blob, *tmp;
 
-	list_for_each_entry_safe(blob, tmp, stream_list, write_streams_list) {
+	list_for_each_entry_safe(blob, tmp, blob_list, write_streams_list) {
 		wimlib_assert(blob->will_be_in_output_wim);
 		if (blob->size == 0) {
 			list_del(&blob->write_streams_list);
@@ -1401,11 +1401,11 @@ remove_zero_length_streams(struct list_head *stream_list)
 }
 
 static void
-init_done_with_file_info(struct list_head *stream_list)
+init_done_with_file_info(struct list_head *blob_list)
 {
 	struct blob_info *blob;
 
-	list_for_each_entry(blob, stream_list, write_streams_list) {
+	list_for_each_entry(blob, blob_list, write_streams_list) {
 		if (is_file_stream(blob)) {
 			blob->file_inode->num_remaining_streams = 0;
 			blob->may_send_done_with_file = 1;
@@ -1414,7 +1414,7 @@ init_done_with_file_info(struct list_head *stream_list)
 		}
 	}
 
-	list_for_each_entry(blob, stream_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_streams_list)
 		if (blob->may_send_done_with_file)
 			blob->file_inode->num_remaining_streams++;
 }
@@ -1422,7 +1422,7 @@ init_done_with_file_info(struct list_head *stream_list)
 /*
  * Write a list of streams to the output WIM file.
  *
- * @stream_list
+ * @blob_list
  *	The list of streams to write, specified by a list of `struct
  *	blob_info's linked by the 'write_streams_list' member.
  *
@@ -1477,7 +1477,7 @@ init_done_with_file_info(struct list_head *stream_list)
  *	no streams are hard-filtered or no streams are unhashed, this parameter
  *	can be NULL.
  *
- * This function will write the streams in @stream_list to resources in
+ * This function will write the streams in @blob_list to resources in
  * consecutive positions in the output WIM file, or to a single solid resource
  * if WRITE_RESOURCE_FLAG_SOLID was specified in @write_resource_flags.  In both
  * cases, the @out_reshdr of the `struct blob_info' for each stream
@@ -1489,7 +1489,7 @@ init_done_with_file_info(struct list_head *stream_list)
  * corresponding stream.
  *
  * Each of the streams to write may be in any location supported by the
- * resource-handling code (specifically, read_stream_list()), such as the
+ * resource-handling code (specifically, read_blob_list()), such as the
  * contents of external file that has been logically added to the output WIM, or
  * a stream in another WIM file that has been imported, or even a stream in the
  * "same" WIM file of which a modified copy is being written.  In the case that
@@ -1499,25 +1499,25 @@ init_done_with_file_info(struct list_head *stream_list)
  * specified in @write_resource_flags, this is not done.
  *
  * As a further requirement, this function requires that the
- * @will_be_in_output_wim member be set to 1 on all streams in @stream_list as
- * well as any other streams not in @stream_list that will be in the output WIM
+ * @will_be_in_output_wim member be set to 1 on all streams in @blob_list as
+ * well as any other streams not in @blob_list that will be in the output WIM
  * file, but set to 0 on any other streams in the output WIM's lookup table or
- * sharing a solid resource with a stream in @stream_list.  Still furthermore,
+ * sharing a solid resource with a stream in @blob_list.  Still furthermore,
  * if on-the-fly deduplication of streams is possible, then all streams in
- * @stream_list must also be linked by @blob_table_list along with any other
+ * @blob_list must also be linked by @blob_table_list along with any other
  * streams that have @will_be_in_output_wim set.
  *
  * This function handles on-the-fly deduplication of streams for which SHA1
  * message digests have not yet been calculated.  Such streams may or may not
  * need to be written.  If @blob_table is non-NULL, then each stream in
- * @stream_list that has @unhashed set but not @unique_size set is checksummed
+ * @blob_list that has @unhashed set but not @unique_size set is checksummed
  * immediately before it would otherwise be read for writing in order to
  * determine if it is identical to another stream already being written or one
  * that would be filtered out of the output WIM using stream_filtered() with the
  * context @filter_ctx.  Each such duplicate stream will be removed from
- * @stream_list, its reference count transfered to the pre-existing duplicate
+ * @blob_list, its reference count transfered to the pre-existing duplicate
  * stream, its memory freed, and will not be written.  Alternatively, if a
- * stream in @stream_list is a duplicate with any stream in @blob_table that
+ * stream in @blob_list is a duplicate with any stream in @blob_table that
  * has not been marked for writing or would not be hard-filtered, it is freed
  * and the pre-existing duplicate is written instead, taking ownership of the
  * reference count and slot in the @blob_table_list.
@@ -1526,13 +1526,13 @@ init_done_with_file_info(struct list_head *stream_list)
  * be written; otherwise returns a non-zero error code.
  */
 static int
-write_stream_list(struct list_head *stream_list,
+write_blob_list(struct list_head *blob_list,
 		  struct filedes *out_fd,
 		  int write_resource_flags,
 		  int out_ctype,
 		  u32 out_chunk_size,
 		  unsigned num_threads,
-		  struct wim_blob_table *blob_table,
+		  struct blob_table *blob_table,
 		  struct filter_context *filter_ctx,
 		  wimlib_progress_func_t progfunc,
 		  void *progctx)
@@ -1547,9 +1547,9 @@ write_stream_list(struct list_head *stream_list,
 				(WRITE_RESOURCE_FLAG_SOLID |
 				 WRITE_RESOURCE_FLAG_PIPABLE));
 
-	remove_zero_length_streams(stream_list);
+	remove_zero_length_streams(blob_list);
 
-	if (list_empty(stream_list)) {
+	if (list_empty(blob_list)) {
 		DEBUG("No streams to write.");
 		return 0;
 	}
@@ -1557,13 +1557,13 @@ write_stream_list(struct list_head *stream_list,
 	/* If needed, set auxiliary information so that we can detect when the
 	 * library has finished using each external file.  */
 	if (unlikely(write_resource_flags & WRITE_RESOURCE_FLAG_SEND_DONE_WITH_FILE))
-		init_done_with_file_info(stream_list);
+		init_done_with_file_info(blob_list);
 
 	memset(&ctx, 0, sizeof(ctx));
 
-	/* Pre-sorting the streams is required for compute_stream_list_stats().
-	 * Afterwards, read_stream_list() need not sort them again.  */
-	ret = sort_stream_list_by_sequential_order(stream_list,
+	/* Pre-sorting the streams is required for compute_blob_list_stats().
+	 * Afterwards, read_blob_list() need not sort them again.  */
+	ret = sort_blob_list_by_sequential_order(blob_list,
 						   offsetof(struct blob_info,
 							    write_streams_list));
 	if (ret)
@@ -1590,12 +1590,12 @@ write_stream_list(struct list_head *stream_list,
 	}
 	ctx.chunk_buf_filled = 0;
 
-	compute_stream_list_stats(stream_list, &ctx);
+	compute_blob_list_stats(blob_list, &ctx);
 
 	ctx.progress_data.progfunc = progfunc;
 	ctx.progress_data.progctx = progctx;
 
-	ctx.num_bytes_to_compress = find_raw_copy_streams(stream_list,
+	ctx.num_bytes_to_compress = find_raw_copy_streams(blob_list,
 							  write_resource_flags,
 							  out_ctype,
 							  out_chunk_size,
@@ -1671,7 +1671,7 @@ write_stream_list(struct list_head *stream_list,
 	/* Read the list of streams needing to be compressed, using the
 	 * specified callbacks to execute processing of the data.  */
 
-	struct read_stream_list_callbacks cbs = {
+	struct read_blob_list_callbacks cbs = {
 		.begin_stream		= write_stream_begin_read,
 		.begin_stream_ctx	= &ctx,
 		.consume_chunk		= write_stream_process_chunk,
@@ -1680,7 +1680,7 @@ write_stream_list(struct list_head *stream_list,
 		.end_stream_ctx		= &ctx,
 	};
 
-	ret = read_stream_list(stream_list,
+	ret = read_blob_list(blob_list,
 			       offsetof(struct blob_info, write_streams_list),
 			       &cbs,
 			       STREAM_LIST_ALREADY_SORTED |
@@ -1748,13 +1748,13 @@ is_stream_in_solid_resource(struct blob_info *blob, void *_ignore)
 static bool
 wim_has_solid_resources(WIMStruct *wim)
 {
-	return for_blob_table_entry(wim->blob_table,
+	return for_blob_info(wim->blob_table,
 				      is_stream_in_solid_resource, NULL);
 }
 
 static int
-wim_write_stream_list(WIMStruct *wim,
-		      struct list_head *stream_list,
+wim_write_blob_list(WIMStruct *wim,
+		      struct list_head *blob_list,
 		      int write_flags,
 		      unsigned num_threads,
 		      struct filter_context *filter_ctx)
@@ -1783,7 +1783,7 @@ wim_write_stream_list(WIMStruct *wim,
 		out_ctype = wim->out_compression_type;
 	}
 
-	return write_stream_list(stream_list,
+	return write_blob_list(blob_list,
 				 &wim->out_fd,
 				 write_resource_flags,
 				 out_ctype,
@@ -1802,10 +1802,10 @@ write_wim_resource(struct blob_info *blob,
 		   u32 out_chunk_size,
 		   int write_resource_flags)
 {
-	LIST_HEAD(stream_list);
-	list_add(&blob->write_streams_list, &stream_list);
+	LIST_HEAD(blob_list);
+	list_add(&blob->write_streams_list, &blob_list);
 	blob->will_be_in_output_wim = 1;
-	return write_stream_list(&stream_list,
+	return write_blob_list(&blob_list,
 				 out_fd,
 				 write_resource_flags & ~WRITE_RESOURCE_FLAG_SOLID,
 				 out_ctype,
@@ -1913,17 +1913,17 @@ stream_size_table_insert(struct blob_info *blob, void *_tab)
 struct find_streams_ctx {
 	WIMStruct *wim;
 	int write_flags;
-	struct list_head stream_list;
+	struct list_head blob_list;
 	struct stream_size_table stream_size_tab;
 };
 
 static void
 reference_stream_for_write(struct blob_info *blob,
-			   struct list_head *stream_list, u32 nref)
+			   struct list_head *blob_list, u32 nref)
 {
 	if (!blob->will_be_in_output_wim) {
 		blob->out_refcnt = 0;
-		list_add_tail(&blob->write_streams_list, stream_list);
+		list_add_tail(&blob->write_streams_list, blob_list);
 		blob->will_be_in_output_wim = 1;
 	}
 	blob->out_refcnt += nref;
@@ -1931,18 +1931,18 @@ reference_stream_for_write(struct blob_info *blob,
 
 static int
 fully_reference_stream_for_write(struct blob_info *blob,
-				 void *_stream_list)
+				 void *_blob_list)
 {
-	struct list_head *stream_list = _stream_list;
+	struct list_head *blob_list = _blob_list;
 	blob->will_be_in_output_wim = 0;
-	reference_stream_for_write(blob, stream_list, blob->refcnt);
+	reference_stream_for_write(blob, blob_list, blob->refcnt);
 	return 0;
 }
 
 static int
 inode_find_streams_to_reference(const struct wim_inode *inode,
-				const struct wim_blob_table *table,
-				struct list_head *stream_list)
+				const struct blob_table *table,
+				struct list_head *blob_list)
 {
 	struct blob_info *blob;
 	unsigned i;
@@ -1952,7 +1952,7 @@ inode_find_streams_to_reference(const struct wim_inode *inode,
 	for (i = 0; i <= inode->i_num_ads; i++) {
 		blob = inode_get_blob_for_stream(inode, i, table);
 		if (blob)
-			reference_stream_for_write(blob, stream_list,
+			reference_stream_for_write(blob, blob_list,
 						   inode->i_nlink);
 		else if (!is_zero_hash(inode_stream_hash(inode, i)))
 			return WIMLIB_ERR_RESOURCE_NOT_FOUND;
@@ -1973,7 +1973,7 @@ image_find_streams_to_reference(WIMStruct *wim)
 	struct wim_image_metadata *imd;
 	struct wim_inode *inode;
 	struct blob_info *blob;
-	struct list_head *stream_list;
+	struct list_head *blob_list;
 	int ret;
 
 	imd = wim_get_current_image_metadata(wim);
@@ -1981,11 +1981,11 @@ image_find_streams_to_reference(WIMStruct *wim)
 	image_for_each_unhashed_stream(blob, imd)
 		blob->will_be_in_output_wim = 0;
 
-	stream_list = wim->private;
+	blob_list = wim->private;
 	image_for_each_inode(inode, imd) {
 		ret = inode_find_streams_to_reference(inode,
 						      wim->blob_table,
-						      stream_list);
+						      blob_list);
 		if (ret)
 			return ret;
 	}
@@ -1996,11 +1996,11 @@ static int
 prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 						 int image,
 						 int streams_ok,
-						 struct list_head *stream_list_ret)
+						 struct list_head *blob_list_ret)
 {
 	int ret;
 
-	INIT_LIST_HEAD(stream_list_ret);
+	INIT_LIST_HEAD(blob_list_ret);
 
 	if (streams_ok && (image == WIMLIB_ALL_IMAGES ||
 			   (image == 1 && wim->hdr.image_count == 1)))
@@ -2011,21 +2011,21 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 		struct wim_image_metadata *imd;
 		unsigned i;
 
-		for_blob_table_entry(wim->blob_table,
+		for_blob_info(wim->blob_table,
 				       fully_reference_stream_for_write,
-				       stream_list_ret);
+				       blob_list_ret);
 
 		for (i = 0; i < wim->hdr.image_count; i++) {
 			imd = wim->image_metadata[i];
 			image_for_each_unhashed_stream(blob, imd)
-				fully_reference_stream_for_write(blob, stream_list_ret);
+				fully_reference_stream_for_write(blob, blob_list_ret);
 		}
 	} else {
 		/* Slow case:  Walk through the images being written and
 		 * determine the streams referenced.  */
-		for_blob_table_entry(wim->blob_table,
+		for_blob_info(wim->blob_table,
 				       do_stream_set_not_in_output_wim, NULL);
-		wim->private = stream_list_ret;
+		wim->private = blob_list_ret;
 		ret = for_image(wim, image, image_find_streams_to_reference);
 		if (ret)
 			return ret;
@@ -2051,8 +2051,8 @@ insert_other_if_hard_filtered(struct blob_info *blob, void *_ctx)
 }
 
 static int
-determine_stream_size_uniquity(struct list_head *stream_list,
-			       struct wim_blob_table *lt,
+determine_stream_size_uniquity(struct list_head *blob_list,
+			       struct blob_table *lt,
 			       struct filter_context *filter_ctx)
 {
 	int ret;
@@ -2068,10 +2068,10 @@ determine_stream_size_uniquity(struct list_head *stream_list,
 			.tab = &tab,
 			.filter_ctx = filter_ctx,
 		};
-		for_blob_table_entry(lt, insert_other_if_hard_filtered, &ctx);
+		for_blob_info(lt, insert_other_if_hard_filtered, &ctx);
 	}
 
-	list_for_each_entry(blob, stream_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_streams_list)
 		stream_size_table_insert(blob, &tab);
 
 	destroy_stream_size_table(&tab);
@@ -2079,13 +2079,13 @@ determine_stream_size_uniquity(struct list_head *stream_list,
 }
 
 static void
-filter_stream_list_for_write(struct list_head *stream_list,
+filter_blob_list_for_write(struct list_head *blob_list,
 			     struct filter_context *filter_ctx)
 {
 	struct blob_info *blob, *tmp;
 
 	list_for_each_entry_safe(blob, tmp,
-				 stream_list, write_streams_list)
+				 blob_list, write_streams_list)
 	{
 		int status = stream_filtered(blob, filter_ctx);
 
@@ -2106,7 +2106,7 @@ filter_stream_list_for_write(struct list_head *stream_list,
 }
 
 /*
- * prepare_stream_list_for_write() -
+ * prepare_blob_list_for_write() -
  *
  * Prepare the list of streams to write for writing a WIM containing the
  * specified image(s) with the specified write flags.
@@ -2127,13 +2127,13 @@ filter_stream_list_for_write(struct list_head *stream_list,
  *	SKIP_EXTERNAL_WIMS, below.
  *
  *	OVERWRITE:  Streams already present in @wim shall not be returned in
- *	@stream_list_ret.
+ *	@blob_list_ret.
  *
  *	SKIP_EXTERNAL_WIMS:  Streams already present in a WIM file, but not
- *	@wim, shall be returned in neither @stream_list_ret nor
+ *	@wim, shall be returned in neither @blob_list_ret nor
  *	@blob_table_list_ret.
  *
- * @stream_list_ret
+ * @blob_list_ret
  *	List of streams, linked by write_streams_list, that need to be written
  *	will be returned here.
  *
@@ -2144,9 +2144,9 @@ filter_stream_list_for_write(struct list_head *stream_list,
  * @blob_table_list_ret
  *	List of streams, linked by blob_table_list, that need to be included
  *	in the WIM's lookup table will be returned here.  This will be a
- *	superset of the streams in @stream_list_ret.
+ *	superset of the streams in @blob_list_ret.
  *
- *	This list will be a proper superset of @stream_list_ret if and only if
+ *	This list will be a proper superset of @blob_list_ret if and only if
  *	WIMLIB_WRITE_FLAG_OVERWRITE was specified in @write_flags and some of
  *	the streams that would otherwise need to be written were already located
  *	in the WIM file.
@@ -2165,17 +2165,17 @@ filter_stream_list_for_write(struct list_head *stream_list,
  * lookup table of @wim not inserted into @blob_table_list_ret.
  *
  * Still furthermore, @unique_size will be set to 1 on all stream entries in
- * @stream_list_ret that have unique size among all stream entries in
- * @stream_list_ret and among all stream entries in the lookup table of @wim
+ * @blob_list_ret that have unique size among all stream entries in
+ * @blob_list_ret and among all stream entries in the lookup table of @wim
  * that are ineligible for being written due to filtering.
  *
  * Returns 0 on success; nonzero on read error, memory allocation error, or
  * otherwise.
  */
 static int
-prepare_stream_list_for_write(WIMStruct *wim, int image,
+prepare_blob_list_for_write(WIMStruct *wim, int image,
 			      int write_flags,
-			      struct list_head *stream_list_ret,
+			      struct list_head *blob_list_ret,
 			      struct list_head *blob_table_list_ret,
 			      struct filter_context *filter_ctx_ret)
 {
@@ -2189,21 +2189,21 @@ prepare_stream_list_for_write(WIMStruct *wim, int image,
 				wim,
 				image,
 				write_flags & WIMLIB_WRITE_FLAG_STREAMS_OK,
-				stream_list_ret);
+				blob_list_ret);
 	if (ret)
 		return ret;
 
 	INIT_LIST_HEAD(blob_table_list_ret);
-	list_for_each_entry(blob, stream_list_ret, write_streams_list)
+	list_for_each_entry(blob, blob_list_ret, write_streams_list)
 		list_add_tail(&blob->blob_table_list, blob_table_list_ret);
 
-	ret = determine_stream_size_uniquity(stream_list_ret, wim->blob_table,
+	ret = determine_stream_size_uniquity(blob_list_ret, wim->blob_table,
 					     filter_ctx_ret);
 	if (ret)
 		return ret;
 
 	if (may_filter_streams(filter_ctx_ret))
-		filter_stream_list_for_write(stream_list_ret, filter_ctx_ret);
+		filter_blob_list_for_write(blob_list_ret, filter_ctx_ret);
 
 	return 0;
 }
@@ -2211,23 +2211,23 @@ prepare_stream_list_for_write(WIMStruct *wim, int image,
 static int
 write_wim_streams(WIMStruct *wim, int image, int write_flags,
 		  unsigned num_threads,
-		  struct list_head *stream_list_override,
+		  struct list_head *blob_list_override,
 		  struct list_head *blob_table_list_ret)
 {
 	int ret;
-	struct list_head _stream_list;
-	struct list_head *stream_list;
+	struct list_head _blob_list;
+	struct list_head *blob_list;
 	struct blob_info *blob;
 	struct filter_context _filter_ctx;
 	struct filter_context *filter_ctx;
 
-	if (stream_list_override == NULL) {
+	if (blob_list_override == NULL) {
 		/* Normal case: prepare stream list from image(s) being written.
 		 */
-		stream_list = &_stream_list;
+		blob_list = &_blob_list;
 		filter_ctx = &_filter_ctx;
-		ret = prepare_stream_list_for_write(wim, image, write_flags,
-						    stream_list,
+		ret = prepare_blob_list_for_write(wim, image, write_flags,
+						    blob_list,
 						    blob_table_list_ret,
 						    filter_ctx);
 		if (ret)
@@ -2236,10 +2236,10 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 		/* Currently only as a result of wimlib_split() being called:
 		 * use stream list already explicitly provided.  Use existing
 		 * reference counts.  */
-		stream_list = stream_list_override;
+		blob_list = blob_list_override;
 		filter_ctx = NULL;
 		INIT_LIST_HEAD(blob_table_list_ret);
-		list_for_each_entry(blob, stream_list, write_streams_list) {
+		list_for_each_entry(blob, blob_list, write_streams_list) {
 			blob->out_refcnt = blob->refcnt;
 			blob->will_be_in_output_wim = 1;
 			blob->unique_size = 0;
@@ -2247,8 +2247,8 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 		}
 	}
 
-	return wim_write_stream_list(wim,
-				     stream_list,
+	return wim_write_blob_list(wim,
+				     blob_list,
 				     write_flags,
 				     num_threads,
 				     filter_ctx);
@@ -2378,7 +2378,7 @@ cmp_streams_by_out_rspec(const void *p1, const void *p2)
 }
 
 static int
-write_wim_blob_table(WIMStruct *wim, int image, int write_flags,
+write_blob_table(WIMStruct *wim, int image, int write_flags,
 		       struct wim_reshdr *out_reshdr,
 		       struct list_head *blob_table_list)
 {
@@ -2397,7 +2397,7 @@ write_wim_blob_table(WIMStruct *wim, int image, int write_flags,
 		}
 	}
 
-	ret = sort_stream_list(blob_table_list,
+	ret = sort_blob_list(blob_table_list,
 			       offsetof(struct blob_info, blob_table_list),
 			       cmp_streams_by_out_rspec);
 	if (ret)
@@ -2429,7 +2429,7 @@ write_wim_blob_table(WIMStruct *wim, int image, int write_flags,
 		}
 	}
 
-	return write_wim_blob_table_from_stream_list(blob_table_list,
+	return write_blob_table_from_blob_list(blob_table_list,
 						       &wim->out_fd,
 						       wim->hdr.part_number,
 						       out_reshdr,
@@ -2533,7 +2533,7 @@ finish_write(WIMStruct *wim, int image, int write_flags,
 
 	/* Write lookup table.  */
 	if (!(write_flags & WIMLIB_WRITE_FLAG_NO_LOOKUP_TABLE)) {
-		ret = write_wim_blob_table(wim, image, write_flags,
+		ret = write_blob_table(wim, image, write_flags,
 					     &wim->hdr.blob_table_reshdr,
 					     blob_table_list);
 		if (ret) {
@@ -2728,7 +2728,7 @@ unlock_wim_for_append(WIMStruct *wim)
 static int
 write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 		  unsigned num_threads,
-		  struct list_head *stream_list_override,
+		  struct list_head *blob_list_override,
 		  struct list_head *blob_table_list_ret)
 {
 	int ret;
@@ -2769,7 +2769,7 @@ write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 	/* Write streams needed for the image(s) being included in the output
 	 * WIM, or streams needed for the split WIM part.  */
 	return write_wim_streams(wim, image, write_flags, num_threads,
-				 stream_list_override, blob_table_list_ret);
+				 blob_list_override, blob_table_list_ret);
 
 	/* The lookup table, XML data, and header at end are handled by
 	 * finish_write().  */
@@ -2785,7 +2785,7 @@ write_wim_part(WIMStruct *wim,
 	       unsigned num_threads,
 	       unsigned part_number,
 	       unsigned total_parts,
-	       struct list_head *stream_list_override,
+	       struct list_head *blob_list_override,
 	       const u8 *guid)
 {
 	int ret;
@@ -2859,7 +2859,7 @@ write_wim_part(WIMStruct *wim,
 	else
 		DEBUG("Number of threads: %u", num_threads);
 	DEBUG("Progress function: %s", (wim->progfunc ? "yes" : "no"));
-	DEBUG("Stream list:       %s", (stream_list_override ? "specified" : "autodetect"));
+	DEBUG("Stream list:       %s", (blob_list_override ? "specified" : "autodetect"));
 	DEBUG("GUID:              %s", (write_flags &
 					WIMLIB_WRITE_FLAG_RETAIN_GUID) ? "retain"
 						: guid ? "explicit" : "generate new");
@@ -3026,7 +3026,7 @@ write_wim_part(WIMStruct *wim,
 	if (!(write_flags & WIMLIB_WRITE_FLAG_PIPABLE)) {
 		/* Default case: create a normal (non-pipable) WIM.  */
 		ret = write_wim_streams(wim, image, write_flags, num_threads,
-					stream_list_override,
+					blob_list_override,
 					&blob_table_list);
 		if (ret)
 			goto out_restore_hdr;
@@ -3037,7 +3037,7 @@ write_wim_part(WIMStruct *wim,
 	} else {
 		/* Non-default case: create pipable WIM.  */
 		ret = write_pipable_wim(wim, image, write_flags, num_threads,
-					stream_list_override,
+					blob_list_override,
 					&blob_table_list);
 		if (ret)
 			goto out_restore_hdr;
@@ -3124,7 +3124,7 @@ check_resource_offsets(WIMStruct *wim, off_t end_offset)
 	unsigned i;
 
 	wim->private = &end_offset;
-	ret = for_blob_table_entry(wim->blob_table, check_resource_offset, wim);
+	ret = for_blob_info(wim->blob_table, check_resource_offset, wim);
 	if (ret)
 		return ret;
 
@@ -3200,7 +3200,7 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 	off_t old_wim_end;
 	u64 old_blob_table_end, old_xml_begin, old_xml_end;
 	struct wim_header hdr_save;
-	struct list_head stream_list;
+	struct list_head blob_list;
 	struct list_head blob_table_list;
 	struct filter_context filter_ctx;
 
@@ -3274,8 +3274,8 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 	if (ret)
 		goto out_restore_memory_hdr;
 
-	ret = prepare_stream_list_for_write(wim, WIMLIB_ALL_IMAGES, write_flags,
-					    &stream_list, &blob_table_list,
+	ret = prepare_blob_list_for_write(wim, WIMLIB_ALL_IMAGES, write_flags,
+					    &blob_list, &blob_table_list,
 					    &filter_ctx);
 	if (ret)
 		goto out_restore_memory_hdr;
@@ -3302,8 +3302,8 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 		goto out_restore_physical_hdr;
 	}
 
-	ret = wim_write_stream_list(wim,
-				    &stream_list,
+	ret = wim_write_blob_list(wim,
+				    &blob_list,
 				    write_flags,
 				    num_threads,
 				    &filter_ctx);

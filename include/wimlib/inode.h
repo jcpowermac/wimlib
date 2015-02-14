@@ -8,7 +8,7 @@
 struct avl_tree_node;
 struct wim_ads_entry;
 struct wim_dentry;
-struct wim_blob_table;
+struct blob_table;
 struct blob_info;
 struct wim_security_data;
 struct wimfs_fd;
@@ -385,21 +385,21 @@ inode_add_ads(struct wim_inode *dentry, const tchar *stream_name);
 extern struct wim_ads_entry *
 inode_add_ads_with_data(struct wim_inode *inode, const tchar *name,
 			const void *value, size_t size,
-			struct wim_blob_table *blob_table);
+			struct blob_table *blob_table);
 
 extern void
 inode_remove_ads(struct wim_inode *inode, struct wim_ads_entry *entry,
-		 struct wim_blob_table *blob_table);
+		 struct blob_table *blob_table);
 
 extern bool
 inode_has_named_stream(const struct wim_inode *inode);
 
 extern int
 inode_set_unnamed_stream(struct wim_inode *inode, const void *data, size_t len,
-			 struct wim_blob_table *blob_table);
+			 struct blob_table *blob_table);
 
 extern int
-inode_resolve_streams(struct wim_inode *inode, struct wim_blob_table *table,
+inode_resolve_streams(struct wim_inode *inode, struct blob_table *table,
 		      bool force);
 
 extern void
@@ -418,7 +418,7 @@ inode_get_blob_for_stream_resolved(const struct wim_inode *inode, unsigned strea
 
 extern struct blob_info *
 inode_get_blob_for_stream(const struct wim_inode *inode, unsigned stream_idx,
-		 const struct wim_blob_table *table);
+		 const struct blob_table *table);
 
 extern struct blob_info *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
@@ -433,7 +433,7 @@ inode_get_blob_for_unnamed_stream_resolved(const struct wim_inode *inode)
 
 extern struct blob_info *
 inode_get_blob_for_unnamed_stream(const struct wim_inode *inode,
-		  const struct wim_blob_table *table);
+		  const struct blob_table *table);
 
 extern const u8 *
 inode_stream_hash(const struct wim_inode *inode, unsigned stream_idx);
@@ -462,7 +462,7 @@ inode_ref_blobs(struct wim_inode *inode);
 
 extern void
 inode_unref_blobs(struct wim_inode *inode,
-		    struct wim_blob_table *blob_table);
+		    struct blob_table *blob_table);
 
 extern int
 read_ads_entries(const u8 * restrict p, struct wim_inode * restrict inode,

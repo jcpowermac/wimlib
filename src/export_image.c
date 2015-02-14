@@ -41,7 +41,7 @@ blob_set_not_exported(struct blob_info *blob, void *_ignore)
 static int
 blob_rollback_export(struct blob_info *blob, void *_blob_table)
 {
-	struct wim_blob_table *blob_table = _blob_table;
+	struct blob_table *blob_table = _blob_table;
 
 	blob->refcnt -= blob->out_refcnt;
 	if (blob->was_exported) {
@@ -53,8 +53,8 @@ blob_rollback_export(struct blob_info *blob, void *_blob_table)
 
 static int
 inode_export_streams(struct wim_inode *inode,
-		     struct wim_blob_table *src_blob_table,
-		     struct wim_blob_table *dest_blob_table,
+		     struct blob_table *src_blob_table,
+		     struct blob_table *dest_blob_table,
 		     bool gift)
 {
 	unsigned i;
@@ -71,12 +71,12 @@ inode_export_streams(struct wim_inode *inode,
 
 		/* Search for the stream (via SHA1 message digest) in the
 		 * destination WIM.  */
-		dest_blob = lookup_stream(dest_blob_table, hash);
+		dest_blob = lookup_blob(dest_blob_table, hash);
 		if (!dest_blob) {
 			/* Stream not yet present in destination WIM.  Search
 			 * for it in the source WIM, then export it into the
 			 * destination WIM.  */
-			src_blob = lookup_stream(src_blob_table, hash);
+			src_blob = lookup_blob(src_blob_table, hash);
 			if (!src_blob)
 				return stream_not_found_error(inode, hash);
 
@@ -84,7 +84,7 @@ inode_export_streams(struct wim_inode *inode,
 				dest_blob = src_blob;
 				blob_table_unlink(src_blob_table, src_blob);
 			} else {
-				dest_blob = clone_blob_table_entry(src_blob);
+				dest_blob = clone_blob_info(src_blob);
 				if (!dest_blob)
 					return WIMLIB_ERR_NOMEM;
 			}
@@ -164,7 +164,7 @@ wimlib_export_image(WIMStruct *src_wim,
 		return ret;
 
 	/* Enable rollbacks  */
-	for_blob_table_entry(dest_wim->blob_table, blob_set_not_exported, NULL);
+	for_blob_info(dest_wim->blob_table, blob_set_not_exported, NULL);
 
 	/* Export each requested image.  */
 	for (src_image = start_src_image;
@@ -275,7 +275,7 @@ out_rollback:
 		put_image_metadata(dest_wim->image_metadata[
 					--dest_wim->hdr.image_count], NULL);
 	}
-	for_blob_table_entry(dest_wim->blob_table, blob_rollback_export,
+	for_blob_info(dest_wim->blob_table, blob_rollback_export,
 			       dest_wim->blob_table);
 	return ret;
 }

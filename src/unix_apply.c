@@ -568,7 +568,7 @@ unix_begin_extract_stream_instance(const struct blob_info *stream,
 		return 0;
 	}
 
-	/* This should be ensured by extract_stream_list()  */
+	/* This should be ensured by extract_blob_list()  */
 	wimlib_assert(ctx->num_open_fds < MAX_OPEN_STREAMS);
 
 	first_dentry = inode_first_extraction_dentry(inode);
@@ -772,7 +772,7 @@ unix_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 
 	/* Extract nonempty regular files and symbolic links.  */
 
-	struct read_stream_list_callbacks cbs = {
+	struct read_blob_list_callbacks cbs = {
 		.begin_stream      = unix_begin_extract_stream,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = unix_extract_chunk,
@@ -780,7 +780,7 @@ unix_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 		.end_stream        = unix_end_extract_stream,
 		.end_stream_ctx    = ctx,
 	};
-	ret = extract_stream_list(&ctx->common, &cbs);
+	ret = extract_blob_list(&ctx->common, &cbs);
 	if (ret)
 		goto out;
 

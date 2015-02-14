@@ -52,7 +52,7 @@ struct win32_apply_ctx {
 		u64 data_source_id;
 		struct string_set *prepopulate_pats;
 		void *mem_prepopulate_pats;
-		u8 wim_blob_table_hash[SHA1_HASH_SIZE];
+		u8 blob_table_hash[SHA1_HASH_SIZE];
 		bool wof_running;
 		bool tried_to_load_prepopulate_list;
 	} wimboot;
@@ -474,7 +474,7 @@ set_external_backing(HANDLE h, struct wim_inode *inode, struct win32_apply_ctx *
 		if (unlikely(!wimboot_set_pointer(h,
 						  inode_get_blob_for_unnamed_stream_resolved(inode),
 						  ctx->wimboot.data_source_id,
-						  ctx->wimboot.wim_blob_table_hash,
+						  ctx->wimboot.blob_table_hash,
 						  ctx->wimboot.wof_running)))
 		{
 			const DWORD err = GetLastError();
@@ -512,7 +512,7 @@ start_wimboot_extraction(struct win32_apply_ctx *ctx)
 		WARNING("Image is not marked as WIMBoot compatible!");
 
 	ret = hash_blob_table(ctx->common.wim,
-				ctx->wimboot.wim_blob_table_hash);
+				ctx->wimboot.blob_table_hash);
 	if (ret)
 		return ret;
 
@@ -1296,7 +1296,7 @@ retry:
 /* Create empty named data streams.
  *
  * Since these won't have 'struct blob_info's, they won't show up
- * in the call to extract_stream_list().  Hence the need for the special case.
+ * in the call to extract_blob_list().  Hence the need for the special case.
  */
 static int
 create_any_empty_ads(const struct wim_dentry *dentry,
@@ -1697,7 +1697,7 @@ begin_extract_stream_instance(const struct blob_info *stream,
 
 	if (ctx->num_open_handles == MAX_OPEN_STREAMS) {
 		/* XXX: Fix this.  But because of the checks in
-		 * extract_stream_list(), this can now only happen on a
+		 * extract_blob_list(), this can now only happen on a
 		 * filesystem that does not support hard links.  */
 		ERROR("Can't extract data: too many open files!");
 		return WIMLIB_ERR_UNSUPPORTED;
@@ -2519,7 +2519,7 @@ win32_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 	if (ret)
 		goto out;
 
-	struct read_stream_list_callbacks cbs = {
+	struct read_blob_list_callbacks cbs = {
 		.begin_stream      = begin_extract_stream,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = extract_chunk,
@@ -2527,7 +2527,7 @@ win32_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 		.end_stream        = end_extract_stream,
 		.end_stream_ctx    = ctx,
 	};
-	ret = extract_stream_list(&ctx->common, &cbs);
+	ret = extract_blob_list(&ctx->common, &cbs);
 	if (ret)
 		goto out;
 

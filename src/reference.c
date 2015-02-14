@@ -39,7 +39,7 @@ struct reference_info {
 	struct list_head new_streams;
 	struct list_head new_subwims;
 	int ref_flags;
-	struct wim_blob_table *src_table;
+	struct blob_table *src_table;
 };
 
 static void
@@ -95,7 +95,7 @@ static bool
 need_stream(const struct reference_info *info,
 	    const struct blob_info *blob)
 {
-	return !lookup_stream(info->dest_wim->blob_table, blob->hash);
+	return !lookup_blob(info->dest_wim->blob_table, blob->hash);
 }
 
 static void
@@ -118,7 +118,7 @@ blob_clone_if_new(struct blob_info *blob, void *_info)
 	struct reference_info *info = _info;
 
 	if (need_stream(info, blob)) {
-		blob = clone_blob_table_entry(blob);
+		blob = clone_blob_info(blob);
 		if (unlikely(!blob))
 			return WIMLIB_ERR_NOMEM;
 		reference_stream(info, blob);
@@ -151,7 +151,7 @@ wimlib_reference_resources(WIMStruct *wim, WIMStruct **resource_wims,
 	init_reference_info(&info, wim, ref_flags);
 
 	for (i = 0; i < num_resource_wims; i++) {
-		ret = for_blob_table_entry(resource_wims[i]->blob_table,
+		ret = for_blob_info(resource_wims[i]->blob_table,
 					     blob_clone_if_new, &info);
 		if (ret)
 			break;
@@ -187,7 +187,7 @@ reference_resource_path(struct reference_info *info, const tchar *path,
 		return ret;
 
 	info->src_table = src_wim->blob_table;
-	for_blob_table_entry(src_wim->blob_table, blob_gift, info);
+	for_blob_info(src_wim->blob_table, blob_gift, info);
 	reference_subwim(info, src_wim);
 	return 0;
 }

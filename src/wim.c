@@ -182,7 +182,7 @@ WIMLIBAPI int
 wimlib_create_new_wim(int ctype, WIMStruct **wim_ret)
 {
 	WIMStruct *wim;
-	struct wim_blob_table *table;
+	struct blob_table *table;
 	int ret;
 
 	ret = wimlib_global_init(WIMLIB_INIT_FLAG_ASSUME_UTF8);
@@ -217,7 +217,7 @@ out_free_wim:
 
 static void
 destroy_image_metadata(struct wim_image_metadata *imd,
-		       struct wim_blob_table *table,
+		       struct blob_table *table,
 		       bool free_metadata_blob)
 {
 	free_dentry_tree(imd->root_dentry, table);
@@ -246,7 +246,7 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 
 void
 put_image_metadata(struct wim_image_metadata *imd,
-		   struct wim_blob_table *table)
+		   struct blob_table *table)
 {
 	if (imd && --imd->refcnt == 0) {
 		destroy_image_metadata(imd, table, true);
@@ -743,7 +743,7 @@ begin_read(WIMStruct *wim, const void *wim_filename_or_fd, int open_flags)
 			return WIMLIB_ERR_IMAGE_COUNT;
 		}
 
-		ret = read_wim_blob_table(wim);
+		ret = read_blob_table(wim);
 		if (ret)
 			return ret;
 	}

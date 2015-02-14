@@ -6,7 +6,7 @@
 #include "wimlib/types.h"
 
 struct wim_inode;
-struct wim_blob_table;
+struct blob_table;
 struct blob_info;
 
 #define REPARSE_POINT_MAX_SIZE (16 * 1024)
@@ -99,7 +99,7 @@ wim_inode_readlink(const struct wim_inode * restrict inode, char * restrict buf,
 
 extern int
 wim_inode_set_symlink(struct wim_inode *inode, const char *target,
-		      struct wim_blob_table *blob_table);
+		      struct blob_table *blob_table);
 #endif
 
 #endif /* _WIMLIB_REPARSE_H */

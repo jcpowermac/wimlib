@@ -318,7 +318,7 @@ out_close:
 /* Create empty named data streams.
  *
  * Since these won't have 'struct blob_info's, they won't show up
- * in the call to extract_stream_list().  Hence the need for the special case.
+ * in the call to extract_blob_list().  Hence the need for the special case.
  */
 static int
 ntfs_3g_create_any_empty_ads(ntfs_inode *ni, const struct wim_inode *inode,
@@ -730,7 +730,7 @@ ntfs_3g_begin_extract_stream_to_attr(struct blob_info *stream,
 		return WIMLIB_ERR_NTFS_3G;
 	}
 
-	/* This should be ensured by extract_stream_list()  */
+	/* This should be ensured by extract_blob_list()  */
 	wimlib_assert(ctx->num_open_attrs < MAX_OPEN_STREAMS);
 
 	attr = ntfs_attr_open(ni, AT_DATA, stream_name, stream_name_nchars);
@@ -951,7 +951,7 @@ ntfs_3g_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 		goto out_unmount;
 
 	/* Extract streams.  */
-	struct read_stream_list_callbacks cbs = {
+	struct read_blob_list_callbacks cbs = {
 		.begin_stream      = ntfs_3g_begin_extract_stream,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = ntfs_3g_extract_chunk,
@@ -959,7 +959,7 @@ ntfs_3g_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 		.end_stream        = ntfs_3g_end_extract_stream,
 		.end_stream_ctx    = ctx,
 	};
-	ret = extract_stream_list(&ctx->common, &cbs);
+	ret = extract_blob_list(&ctx->common, &cbs);
 
 	/* We do not need a final pass to set timestamps because libntfs-3g does
 	 * not update timestamps automatically (exception:

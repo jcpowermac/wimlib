@@ -39,7 +39,7 @@ append_lte_to_list(struct blob_info *blob, void *_list)
 	return 0;
 }
 
-struct verify_stream_list_ctx {
+struct verify_blob_list_ctx {
 	wimlib_progress_func_t progfunc;
 	void *progctx;
 	union wimlib_progress_info *progress;
@@ -49,7 +49,7 @@ struct verify_stream_list_ctx {
 static int
 end_verify_stream(struct blob_info *blob, int status, void *_ctx)
 {
-	struct verify_stream_list_ctx *ctx = _ctx;
+	struct verify_blob_list_ctx *ctx = _ctx;
 	union wimlib_progress_info *progress = ctx->progress;
 
 	if (status)
@@ -94,7 +94,7 @@ end_verify_stream(struct blob_info *blob, int status, void *_ctx)
 
 static int
 verify_image_streams_present(struct wim_image_metadata *imd,
-			     struct wim_blob_table *blob_table)
+			     struct blob_table *blob_table)
 {
 	struct wim_inode *inode;
 	int ret;
@@ -112,11 +112,11 @@ WIMLIBAPI int
 wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 {
 	int ret;
-	LIST_HEAD(stream_list);
+	LIST_HEAD(blob_list);
 	union wimlib_progress_info progress;
-	struct verify_stream_list_ctx ctx;
+	struct verify_blob_list_ctx ctx;
 	struct blob_info *blob;
-	struct read_stream_list_callbacks cbs = {
+	struct read_blob_list_callbacks cbs = {
 		.end_stream = end_verify_stream,
 		.end_stream_ctx = &ctx,
 	};
@@ -167,12 +167,12 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 
 	/* Verify the streams  */
 
-	for_blob_table_entry(wim->blob_table, append_lte_to_list, &stream_list);
+	for_blob_info(wim->blob_table, append_lte_to_list, &blob_list);
 
 	memset(&progress, 0, sizeof(progress));
 
 	progress.verify_streams.wimfile = wim->filename;
-	list_for_each_entry(blob, &stream_list, extraction_list) {
+	list_for_each_entry(blob, &blob_list, extraction_list) {
 		progress.verify_streams.total_streams++;
 		progress.verify_streams.total_bytes += blob->size;
 	}
@@ -187,7 +187,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	if (ret)
 		return ret;
 
-	return read_stream_list(&stream_list,
+	return read_blob_list(&blob_list,
 				offsetof(struct blob_info,
 					 extraction_list),
 				&cbs, VERIFY_STREAM_HASHES);
