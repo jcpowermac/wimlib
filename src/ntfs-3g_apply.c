@@ -686,7 +686,7 @@ ntfs_3g_create_nondirectories(struct list_head *dentry_list,
 }
 
 static int
-ntfs_3g_begin_extract_stream_to_attr(struct blob_info *stream,
+ntfs_3g_begin_extract_blob_to_attr(struct blob_info *stream,
 				     ntfs_inode *ni,
 				     struct wim_inode *inode,
 				     ntfschar *stream_name,
@@ -798,7 +798,7 @@ ntfs_3g_open_inode(struct wim_inode *inode, struct ntfs_3g_apply_ctx *ctx)
 }
 
 static int
-ntfs_3g_begin_extract_stream(struct blob_info *stream, void *_ctx)
+ntfs_3g_begin_extract_blob(struct blob_info *stream, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
 	const struct stream_owner *owners = stream_owners(stream);
@@ -814,7 +814,7 @@ ntfs_3g_begin_extract_stream(struct blob_info *stream, void *_ctx)
 		if (!ni)
 			goto out_cleanup;
 
-		ret = ntfs_3g_begin_extract_stream_to_attr(stream, ni, inode,
+		ret = ntfs_3g_begin_extract_blob_to_attr(stream, ni, inode,
 							   stream_name, ctx);
 		if (ret)
 			goto out_cleanup;
@@ -851,7 +851,7 @@ ntfs_3g_extract_chunk(const void *chunk, size_t size, void *_ctx)
 }
 
 static int
-ntfs_3g_end_extract_stream(struct blob_info *stream,
+ntfs_3g_end_extract_blob(struct blob_info *stream,
 			   int status, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
@@ -952,11 +952,11 @@ ntfs_3g_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 
 	/* Extract streams.  */
 	struct read_blob_list_callbacks cbs = {
-		.begin_stream      = ntfs_3g_begin_extract_stream,
+		.begin_stream      = ntfs_3g_begin_extract_blob,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = ntfs_3g_extract_chunk,
 		.consume_chunk_ctx = ctx,
-		.end_stream        = ntfs_3g_end_extract_stream,
+		.end_stream        = ntfs_3g_end_extract_blob,
 		.end_stream_ctx    = ctx,
 	};
 	ret = extract_blob_list(&ctx->common, &cbs);

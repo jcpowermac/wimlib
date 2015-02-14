@@ -1330,19 +1330,18 @@ hash_unhashed_blob(struct blob_info *blob,
 	 * the SHA1 has been calculated. */
 	back_ptr = retrieve_blob_pointer(blob);
 
-	ret = sha1_stream(blob);
+	ret = sha1_blob(blob);
 	if (ret)
 		return ret;
 
-	/* Look for a duplicate stream */
+	/* Look for a duplicate blob */
 	duplicate_blob = lookup_blob(blob_table, blob->hash);
 	list_del(&blob->b_unhashed_list);
 	if (duplicate_blob) {
-		/* We have a duplicate stream.  Transfer the reference counts
-		 * from this stream to the duplicate and update the reference to
-		 * this stream (in an inode or ads_entry) to point to the
-		 * duplicate.  The caller is responsible for freeing @blob if
-		 * needed.  */
+		/* We have a duplicate blob.  Transfer the reference counts from
+		 * this blob to the duplicate and update the reference to this
+		 * blob (in an inode or ads_entry) to point to the duplicate.
+		 * The caller is responsible for freeing @blob if needed.  */
 		wimlib_assert(!(duplicate_blob->b_unhashed));
 		wimlib_assert(duplicate_blob->b_size == blob->b_size);
 		duplicate_blob->refcnt += blob->refcnt;
@@ -1350,8 +1349,8 @@ hash_unhashed_blob(struct blob_info *blob,
 		*back_ptr = duplicate_blob;
 		blob = duplicate_blob;
 	} else {
-		/* No duplicate stream, so we need to insert this stream into
-		 * the lookup table and treat it as a hashed stream. */
+		/* No duplicate blob, so we need to insert this blob into the
+		 * lookup table and treat it as a hashed blob. */
 		blob_table_insert(blob_table, blob);
 		blob->b_unhashed = 0;
 	}

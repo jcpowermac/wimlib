@@ -546,7 +546,7 @@ unix_cleanup_open_fds(struct unix_apply_ctx *ctx, unsigned offset)
 }
 
 static int
-unix_begin_extract_stream_instance(const struct blob_info *stream,
+unix_begin_extract_blob_instance(const struct blob_info *stream,
 				   const struct wim_inode *inode,
 				   struct unix_apply_ctx *ctx)
 {
@@ -587,7 +587,7 @@ retry_create:
 
 /* Called when starting to read a single-instance stream for extraction  */
 static int
-unix_begin_extract_stream(struct blob_info *stream, void *_ctx)
+unix_begin_extract_blob(struct blob_info *stream, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
 	const struct stream_owner *owners = stream_owners(stream);
@@ -596,7 +596,7 @@ unix_begin_extract_stream(struct blob_info *stream, void *_ctx)
 	for (u32 i = 0; i < stream->out_refcnt; i++) {
 		const struct wim_inode *inode = owners[i].inode;
 
-		ret = unix_begin_extract_stream_instance(stream, inode, ctx);
+		ret = unix_begin_extract_blob_instance(stream, inode, ctx);
 		if (ret) {
 			ctx->reparse_ptr = NULL;
 			unix_cleanup_open_fds(ctx, 0);
@@ -628,7 +628,7 @@ unix_extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a single-instance stream has been fully read for extraction  */
 static int
-unix_end_extract_stream(struct blob_info *stream, int status,
+unix_end_extract_blob(struct blob_info *stream, int status,
 			void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
@@ -773,11 +773,11 @@ unix_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 	/* Extract nonempty regular files and symbolic links.  */
 
 	struct read_blob_list_callbacks cbs = {
-		.begin_stream      = unix_begin_extract_stream,
+		.begin_stream      = unix_begin_extract_blob,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = unix_extract_chunk,
 		.consume_chunk_ctx = ctx,
-		.end_stream        = unix_end_extract_stream,
+		.end_stream        = unix_end_extract_blob,
 		.end_stream_ctx    = ctx,
 	};
 	ret = extract_blob_list(&ctx->common, &cbs);

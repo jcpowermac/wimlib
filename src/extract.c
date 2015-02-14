@@ -276,7 +276,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 				goto out;
 			}
 
-			ret = extract_stream(needed_blob, needed_blob->b_size,
+			ret = extract_blob(needed_blob, needed_blob->b_size,
 					     cbs->consume_chunk,
 					     cbs->consume_chunk_ctx);
 
@@ -358,7 +358,7 @@ retry:
 }
 
 static int
-begin_extract_stream_wrapper(struct blob_info *blob, void *_ctx)
+begin_extract_blob_wrapper(struct blob_info *blob, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
 
@@ -478,7 +478,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 		 * stream entry to callbacks provided by the extraction backend
 		 * as opposed to the tmpfile stream entry, since they shouldn't
 		 * actually read data from the stream other than through the
-		 * read_stream_prefix() call below.  But for
+		 * read_blob_prefix() call below.  But for
 		 * WIMLIB_EXTRACT_FLAG_WIMBOOT mode on Windows it does matter
 		 * because it needs the original stream location in order to
 		 * create the external backing reference.  */
@@ -492,7 +492,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 
 		/* Extra SHA-1 isn't necessary here, but it shouldn't hurt as
 		 * this case is very rare anyway.  */
-		ret = extract_stream(&tmpfile_blob, tmpfile_blob.b_size,
+		ret = extract_blob(&tmpfile_blob, tmpfile_blob.b_size,
 				     cbs->consume_chunk,
 				     cbs->consume_chunk_ctx);
 
@@ -506,7 +506,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 }
 
 static int
-end_extract_stream_wrapper(struct blob_info *stream,
+end_extract_blob_wrapper(struct blob_info *stream,
 			   int status, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
@@ -534,7 +534,7 @@ end_extract_stream_wrapper(struct blob_info *stream,
  * This also handles sending WIMLIB_PROGRESS_MSG_EXTRACT_STREAMS.
  *
  * This also works if the WIM is being read from a pipe, whereas attempting to
- * read streams directly (e.g. with read_full_stream_into_buf()) will not.
+ * read streams directly (e.g. with read_full_blob_into_buf()) will not.
  *
  * This also will split up streams that will need to be extracted to more than
  * MAX_OPEN_STREAMS locations, as measured by the 'out_refcnt' of each stream.
@@ -548,11 +548,11 @@ extract_blob_list(struct apply_ctx *ctx,
 		    const struct read_blob_list_callbacks *cbs)
 {
 	struct read_blob_list_callbacks wrapper_cbs = {
-		.begin_stream      = begin_extract_stream_wrapper,
+		.begin_stream      = begin_extract_blob_wrapper,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = extract_chunk_wrapper,
 		.consume_chunk_ctx = ctx,
-		.end_stream        = end_extract_stream_wrapper,
+		.end_stream        = end_extract_blob_wrapper,
 		.end_stream_ctx    = ctx,
 	};
 	ctx->saved_cbs = cbs;
@@ -596,7 +596,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 	}
 
 	filedes_init(&_stdout, STDOUT_FILENO);
-	return extract_full_stream_to_fd(blob, &_stdout);
+	return extract_full_blob_to_fd(blob, &_stdout);
 }
 
 static int

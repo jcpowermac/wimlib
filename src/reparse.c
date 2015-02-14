@@ -191,7 +191,7 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	rpdatalen = blob->b_size;
 
 	/* Read the data from the WIM file */
-	ret = read_full_stream_into_buf(blob, rpbuf + 8);
+	ret = read_full_blob_into_buf(blob, rpbuf + 8);
 	if (ret)
 		return ret;
 

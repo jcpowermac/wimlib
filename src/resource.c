@@ -1,7 +1,7 @@
 /*
  * resource.c
  *
- * Code for reading streams and resources, including compressed WIM resources.
+ * Code for reading blobs and resources, including compressed WIM resources.
  */
 
 /*
@@ -71,7 +71,7 @@
  *   little-endian integers.
  *
  * - The chunk table is included in the compressed size of the resource provided
- *   in the corresponding entry in the WIM's stream lookup table.
+ *   in the corresponding entry in the WIM's blob lookup table.
  *
  * - The compressed size of a chunk is never greater than the uncompressed size.
  *   From the compressor's point of view, chunks that would have compressed to a
@@ -711,10 +711,10 @@ read_partial_wim_resource(const struct wim_resource_spec *rspec,
 	}
 }
 
-/* Read the specified range of uncompressed data from the specified stream,
- * which must be located into a WIM file, into the specified buffer.  */
+/* Read the specified range of uncompressed data from the specified blob, which
+ * must be located into a WIM file, into the specified buffer.  */
 int
-read_partial_wim_stream_into_buf(const struct blob_info *blob,
+read_partial_wim_blob_into_buf(const struct blob_info *blob,
 				 size_t size, u64 offset, void *_buf)
 {
 	u8 *buf = _buf;
@@ -736,8 +736,8 @@ skip_chunk_cb(const void *chunk, size_t size, void *_ctx)
 	return 0;
 }
 
-/* Skip over the data of the specified stream, which must correspond to a full
- * WIM resource.  */
+/* Skip over the data of the specified blob, which must correspond to a full WIM
+ * resource.  */
 int
 skip_wim_stream(struct blob_info *blob)
 {
@@ -828,13 +828,13 @@ read_buffer_prefix(const struct blob_info *blob,
 	return (*cb)(blob->attached_buffer, size, cb_ctx);
 }
 
-typedef int (*read_stream_prefix_handler_t)(const struct blob_info *blob,
+typedef int (*read_blob_prefix_handler_t)(const struct blob_info *blob,
 					    u64 size,
 					    consume_data_callback_t cb,
 					    void *cb_ctx);
 
 /*
- * read_stream_prefix()-
+ * read_blob_prefix()-
  *
  * Reads the first @size bytes from a generic "stream", which may be located in
  * any one of several locations, such as in a WIM file (compressed or
@@ -849,10 +849,10 @@ typedef int (*read_stream_prefix_handler_t)(const struct blob_info *blob,
  * which case that error code will be returned.
  */
 static int
-read_stream_prefix(const struct blob_info *blob, u64 size,
+read_blob_prefix(const struct blob_info *blob, u64 size,
 		   consume_data_callback_t cb, void *cb_ctx)
 {
-	static const read_stream_prefix_handler_t handlers[] = {
+	static const read_blob_prefix_handler_t handlers[] = {
 		[RESOURCE_IN_WIM]             = read_wim_stream_prefix,
 		[RESOURCE_IN_FILE_ON_DISK]    = read_file_on_disk_prefix,
 		[RESOURCE_IN_ATTACHED_BUFFER] = read_buffer_prefix,
@@ -875,16 +875,16 @@ read_stream_prefix(const struct blob_info *blob, u64 size,
 /* Read the full uncompressed data of the specified stream into the specified
  * buffer, which must have space for at least blob->b_size bytes.  */
 int
-read_full_stream_into_buf(const struct blob_info *blob, void *_buf)
+read_full_blob_into_buf(const struct blob_info *blob, void *_buf)
 {
 	u8 *buf = _buf;
-	return read_stream_prefix(blob, blob->b_size, bufferer_cb, &buf);
+	return read_blob_prefix(blob, blob->b_size, bufferer_cb, &buf);
 }
 
 /* Retrieve the full uncompressed data of the specified stream.  A buffer large
  * enough hold the data is allocated and returned in @buf_ret.  */
 int
-read_full_stream_into_alloc_buf(const struct blob_info *blob,
+read_full_blob_into_alloc_buf(const struct blob_info *blob,
 				void **buf_ret)
 {
 	int ret;
@@ -900,7 +900,7 @@ read_full_stream_into_alloc_buf(const struct blob_info *blob,
 	if (buf == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	ret = read_full_stream_into_buf(blob, buf);
+	ret = read_full_blob_into_buf(blob, buf);
 	if (ret) {
 		FREE(buf);
 		return ret;
@@ -927,7 +927,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	blob->b_size = rspec->uncompressed_size;
 	blob->offset_in_res = 0;
 
-	ret = read_full_stream_into_alloc_buf(blob, buf_ret);
+	ret = read_full_blob_into_alloc_buf(blob, buf_ret);
 
 	blob_unbind_wim_resource_spec(blob);
 	free_blob_info(blob);
@@ -970,7 +970,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 	blob->offset_in_res = 0;
 	blob->b_unhashed = 1;
 
-	ret = sha1_stream(blob);
+	ret = sha1_blob(blob);
 
 	blob_unbind_wim_resource_spec(blob);
 	copy_hash(hash, blob->hash);
@@ -1149,7 +1149,7 @@ out_next_cb:
 }
 
 static int
-read_full_stream_with_cbs(struct blob_info *blob,
+read_full_blob_with_cbs(struct blob_info *blob,
 			  const struct read_blob_list_callbacks *cbs)
 {
 	int ret;
@@ -1158,7 +1158,7 @@ read_full_stream_with_cbs(struct blob_info *blob,
 	if (ret)
 		return ret;
 
-	ret = read_stream_prefix(blob, blob->b_size, cbs->consume_chunk,
+	ret = read_blob_prefix(blob, blob->b_size, cbs->consume_chunk,
 				 cbs->consume_chunk_ctx);
 
 	return (*cbs->end_stream)(blob, ret, cbs->end_stream_ctx);
@@ -1168,7 +1168,7 @@ read_full_stream_with_cbs(struct blob_info *blob,
  * specified callbacks (all of which are optional) and either checking or
  * computing the SHA1 message digest of the stream.  */
 static int
-read_full_stream_with_sha1(struct blob_info *blob,
+read_full_blob_with_sha1(struct blob_info *blob,
 			   const struct read_blob_list_callbacks *cbs)
 {
 	struct hasher_context hasher_ctx = {
@@ -1183,13 +1183,13 @@ read_full_stream_with_sha1(struct blob_info *blob,
 		.end_stream		= hasher_end_stream,
 		.end_stream_ctx		= &hasher_ctx,
 	};
-	return read_full_stream_with_cbs(blob, &hasher_cbs);
+	return read_full_blob_with_cbs(blob, &hasher_cbs);
 }
 
 static int
-read_streams_in_solid_resource(struct blob_info *first_stream,
+read_blobs_in_solid_resource(struct blob_info *first_stream,
 			       struct blob_info *last_stream,
-			       u64 stream_count,
+			       u64 blob_count,
 			       size_t list_head_offset,
 			       const struct read_blob_list_callbacks *sink_cbs)
 {
@@ -1201,13 +1201,13 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
 	u64 ranges_alloc_size;
 
 	DEBUG("Reading %"PRIu64" streams combined in same WIM resource",
-	      stream_count);
+	      blob_count);
 
 	/* Setup data ranges array (one range per stream to read); this way
 	 * read_compressed_wim_resource() does not need to be aware of streams.
 	 */
 
-	ranges_alloc_size = stream_count * sizeof(ranges[0]);
+	ranges_alloc_size = blob_count * sizeof(ranges[0]);
 
 	if (unlikely((size_t)ranges_alloc_size != ranges_alloc_size)) {
 		ERROR("Too many streams in one resource!");
@@ -1226,7 +1226,7 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
 	}
 
 	for (i = 0, cur_stream = first_stream;
-	     i < stream_count;
+	     i < blob_count;
 	     i++, cur_stream = next_stream(cur_stream, list_head_offset))
 	{
 		ranges[i].offset = cur_stream->offset_in_res;
@@ -1244,7 +1244,7 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
 
 	ret = read_compressed_wim_resource(first_stream->rspec,
 					   ranges,
-					   stream_count,
+					   blob_count,
 					   streamifier_cb,
 					   &streamifier_ctx);
 
@@ -1264,7 +1264,7 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
 
 /*
  * Read a list of streams, each of which may be in any supported location (e.g.
- * in a WIM or in an external file).  Unlike read_stream_prefix() or the
+ * in a WIM or in an external file).  Unlike read_blob_prefix() or the
  * functions which call it, this function optimizes the case where multiple
  * streams are combined into a single solid compressed WIM resource and reads
  * them all consecutively, only decompressing the data one time.
@@ -1302,10 +1302,8 @@ read_streams_in_solid_resource(struct blob_info *first_stream,
  * of the callback functions.
  */
 int
-read_blob_list(struct list_head *blob_list,
-		 size_t list_head_offset,
-		 const struct read_blob_list_callbacks *cbs,
-		 int flags)
+read_blob_list(struct list_head *blob_list, size_t list_head_offset,
+	       const struct read_blob_list_callbacks *cbs, int flags)
 {
 	int ret;
 	struct list_head *cur, *next;
@@ -1350,17 +1348,17 @@ read_blob_list(struct list_head *blob_list,
 
 			struct blob_info *blob_next, *blob_last;
 			struct list_head *next2;
-			u64 stream_count;
+			u64 blob_count;
 
-			/* The next stream is a proper sub-sequence of a WIM
-			 * resource.  See if there are other streams in the same
+			/* The next blob is a proper sub-sequence of a WIM
+			 * resource.  See if there are other blobs in the same
 			 * resource that need to be read.  Since
-			 * sort_blob_list_by_sequential_order() sorted the
-			 * streams by offset in the WIM, this can be determined
-			 * by simply scanning forward in the list.  */
+			 * sort_blob_list_by_sequential_order() sorted the blobs
+			 * by offset in the WIM, this can be determined by
+			 * simply scanning forward in the list.  */
 
 			blob_last = blob;
-			stream_count = 1;
+			blob_count = 1;
 			for (next2 = next;
 			     next2 != blob_list
 			     && (blob_next = (struct blob_info*)
@@ -1370,43 +1368,45 @@ read_blob_list(struct list_head *blob_list,
 			     next2 = next2->next)
 			{
 				blob_last = blob_next;
-				stream_count++;
+				blob_count++;
 			}
-			if (stream_count > 1) {
-				/* Reading multiple streams combined into a
-				 * single WIM resource.  They are in the stream
-				 * list, sorted by offset; @blob specifies the
-				 * first stream in the resource that needs to be
-				 * read and @blob_last specifies the last stream
-				 * in the resource that needs to be read.  */
+			if (blob_count > 1) {
+				/* Reading multiple blobs combined into a single
+				 * WIM resource.  They are in the blob list,
+				 * sorted by offset; @blob specifies the first
+				 * blob in the resource that needs to be read
+				 * and @blob_last specifies the last blob in the
+				 * resource that needs to be read.  */
 				next = next2;
-				ret = read_streams_in_solid_resource(blob, blob_last,
-								     stream_count,
-								     list_head_offset,
-								     sink_cbs);
+				ret = read_blobs_in_solid_resource(blob, blob_last,
+								   blob_count,
+								   list_head_offset,
+								   sink_cbs);
 				if (ret)
 					return ret;
 				continue;
 			}
 		}
 
-		ret = read_full_stream_with_cbs(blob, sink_cbs);
+		ret = read_full_blob_with_cbs(blob, sink_cbs);
 		if (ret && ret != BEGIN_STREAM_STATUS_SKIP_STREAM)
 			return ret;
 	}
 	return 0;
 }
 
-/* Extract the first @size bytes of the specified stream.
+/*
+ * Extract the first @size bytes of the specified blob.
  *
- * If @size specifies the full uncompressed size of the stream, then the SHA1
- * message digest of the uncompressed stream is checked while being extracted.
+ * If @size specifies the full uncompressed size of the blob, then the SHA-1
+ * message digest of the uncompressed blob is checked while being extracted.
  *
- * The uncompressed data of the resource is passed in chunks of unspecified size
- * to the @extract_chunk function, passing it @extract_chunk_arg.  */
+ * The uncompressed data of the blob is passed in chunks of unspecified size
+ * to the @extract_chunk function, passing it @extract_chunk_arg.
+ */
 int
-extract_stream(struct blob_info *blob, u64 size,
-	       consume_data_callback_t extract_chunk, void *extract_chunk_arg)
+extract_blob(struct blob_info *blob, u64 size,
+	     consume_data_callback_t extract_chunk, void *extract_chunk_arg)
 {
 	wimlib_assert(size <= blob->b_size);
 	if (size == blob->b_size) {
@@ -1415,11 +1415,11 @@ extract_stream(struct blob_info *blob, u64 size,
 			.consume_chunk		= extract_chunk,
 			.consume_chunk_ctx	= extract_chunk_arg,
 		};
-		return read_full_stream_with_sha1(blob, &cbs);
+		return read_full_blob_with_sha1(blob, &cbs);
 	} else {
 		/* Don't do SHA1.  */
-		return read_stream_prefix(blob, size, extract_chunk,
-					  extract_chunk_arg);
+		return read_blob_prefix(blob, size, extract_chunk,
+					extract_chunk_arg);
 	}
 }
 
@@ -1438,32 +1438,30 @@ extract_chunk_to_fd(const void *chunk, size_t size, void *_fd_p)
 	return 0;
 }
 
-/* Extract the first @size bytes of the specified stream to the specified file
+/* Extract the first @size bytes of the specified blob to the specified file
  * descriptor.  */
 int
-extract_stream_to_fd(struct blob_info *blob,
-		     struct filedes *fd, u64 size)
+extract_blob_to_fd(struct blob_info *blob, struct filedes *fd, u64 size)
 {
-	return extract_stream(blob, size, extract_chunk_to_fd, fd);
+	return extract_blob(blob, size, extract_chunk_to_fd, fd);
 }
 
-/* Extract the full uncompressed contents of the specified stream to the
- * specified file descriptor.  */
+/* Extract the full uncompressed contents of the specified blob to the specified
+ * file descriptor.  */
 int
-extract_full_stream_to_fd(struct blob_info *blob,
-			  struct filedes *fd)
+extract_full_blob_to_fd(struct blob_info *blob, struct filedes *fd)
 {
-	return extract_stream_to_fd(blob, fd, blob->b_size);
+	return extract_blob_to_fd(blob, fd, blob->b_size);
 }
 
-/* Calculate the SHA1 message digest of a stream and store it in @blob->hash.  */
+/* Calculate the SHA1 message digest of a blob and store it in @blob->hash.  */
 int
-sha1_stream(struct blob_info *blob)
+sha1_blob(struct blob_info *blob)
 {
 	wimlib_assert(blob->b_unhashed);
 	struct read_blob_list_callbacks cbs = {
 	};
-	return read_full_stream_with_sha1(blob, &cbs);
+	return read_full_blob_with_sha1(blob, &cbs);
 }
 
 /* Convert a short WIM resource header to a stand-alone WIM resource

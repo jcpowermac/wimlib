@@ -296,7 +296,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 		return WIMLIB_ERR_PATH_DOES_NOT_EXIST;
 	}
 
-	ret = read_full_stream_into_alloc_buf(blob, &buf);
+	ret = read_full_blob_into_alloc_buf(blob, &buf);
 	if (ret)
 		return ret;
 
@@ -1627,7 +1627,7 @@ prepare_data_buffer(struct win32_apply_ctx *ctx, u64 stream_size)
 }
 
 static int
-begin_extract_stream_instance(const struct blob_info *stream,
+begin_extract_blob_instance(const struct blob_info *stream,
 			      struct wim_dentry *dentry,
 			      const wchar_t *stream_name,
 			      struct win32_apply_ctx *ctx)
@@ -2003,7 +2003,7 @@ retry:
 
 /* Called when starting to read a stream for extraction on Windows  */
 static int
-begin_extract_stream(struct blob_info *stream, void *_ctx)
+begin_extract_blob(struct blob_info *stream, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	const struct stream_owner *owners = stream_owners(stream);
@@ -2023,7 +2023,7 @@ begin_extract_stream(struct blob_info *stream, void *_ctx)
 
 		if (ctx->common.supported_features.hard_links) {
 			dentry = inode_first_extraction_dentry(inode);
-			ret = begin_extract_stream_instance(stream, dentry,
+			ret = begin_extract_blob_instance(stream, dentry,
 							    stream_name, ctx);
 			ret = check_apply_error(dentry, ctx, ret);
 			if (ret)
@@ -2037,7 +2037,7 @@ begin_extract_stream(struct blob_info *stream, void *_ctx)
 			do {
 				dentry = list_entry(next, struct wim_dentry,
 						    d_extraction_alias_node);
-				ret = begin_extract_stream_instance(stream,
+				ret = begin_extract_blob_instance(stream,
 								    dentry,
 								    stream_name,
 								    ctx);
@@ -2093,7 +2093,7 @@ extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a stream has been fully read for extraction on Windows  */
 static int
-end_extract_stream(struct blob_info *stream, int status, void *_ctx)
+end_extract_blob(struct blob_info *stream, int status, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	int ret;
@@ -2520,11 +2520,11 @@ win32_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 		goto out;
 
 	struct read_blob_list_callbacks cbs = {
-		.begin_stream      = begin_extract_stream,
+		.begin_stream      = begin_extract_blob,
 		.begin_stream_ctx  = ctx,
 		.consume_chunk     = extract_chunk,
 		.consume_chunk_ctx = ctx,
-		.end_stream        = end_extract_stream,
+		.end_stream        = end_extract_blob,
 		.end_stream_ctx    = ctx,
 	};
 	ret = extract_blob_list(&ctx->common, &cbs);

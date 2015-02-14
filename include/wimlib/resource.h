@@ -188,14 +188,14 @@ get_chunk_entry_size(u64 res_size, bool is_alt)
 /* Functions to read streams  */
 
 extern int
-read_partial_wim_stream_into_buf(const struct blob_info *blob,
+read_partial_wim_blob_into_buf(const struct blob_info *blob,
 				 size_t size, u64 offset, void *buf);
 
 extern int
-read_full_stream_into_buf(const struct blob_info *blob, void *buf);
+read_full_blob_into_buf(const struct blob_info *blob, void *buf);
 
 extern int
-read_full_stream_into_alloc_buf(const struct blob_info *blob,
+read_full_blob_into_alloc_buf(const struct blob_info *blob,
 				void **buf_ret);
 
 extern int
@@ -284,23 +284,23 @@ read_blob_list(struct list_head *blob_list,
 /* Functions to extract streams.  */
 
 extern int
-extract_stream(struct blob_info *blob,
+extract_blob(struct blob_info *blob,
 	       u64 size,
 	       consume_data_callback_t extract_chunk,
 	       void *extract_chunk_arg);
 
 extern int
-extract_stream_to_fd(struct blob_info *blob,
+extract_blob_to_fd(struct blob_info *blob,
 		     struct filedes *fd, u64 size);
 
 extern int
-extract_full_stream_to_fd(struct blob_info *blob,
+extract_full_blob_to_fd(struct blob_info *blob,
 			  struct filedes *fd);
 
 /* Miscellaneous stream functions.  */
 
 extern int
-sha1_stream(struct blob_info *blob);
+sha1_blob(struct blob_info *blob);
 
 /* Functions to read/write metadata resources.  */
 

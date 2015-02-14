@@ -700,7 +700,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 		filedes_init(&fd, staging_fd);
 		errno = 0;
 		extract_size = min(old_blob->b_size, size);
-		result = extract_stream_to_fd(old_blob, &fd, extract_size);
+		result = extract_blob_to_fd(old_blob, &fd, extract_size);
 	} else {
 		extract_size = 0;
 		result = 0;
@@ -717,7 +717,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 
 	/* If an error occurred, unlink the staging file.  */
 	if (unlikely(result)) {
-		/* extract_stream_to_fd() should set errno, but if it didn't,
+		/* extract_blob_to_fd() should set errno, but if it didn't,
 		 * set a default value.  */
 		ret = errno ? -errno : -EIO;
 		goto out_delete_staging_file;
@@ -1393,7 +1393,7 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 		if (size < blob->b_size)
 			return -ERANGE;
 
-		if (read_full_stream_into_buf(blob, value))
+		if (read_full_blob_into_buf(blob, value))
 			return errno ? -errno : -EIO;
 	}
 	return blob->b_size;
@@ -1666,7 +1666,7 @@ wimfs_read(const char *path, char *buf, size_t size,
 
 	switch (blob->resource_location) {
 	case RESOURCE_IN_WIM:
-		if (read_partial_wim_stream_into_buf(blob, size, offset, buf))
+		if (read_partial_wim_blob_into_buf(blob, size, offset, buf))
 			ret = errno ? -errno : -EIO;
 		else
 			ret = size;
