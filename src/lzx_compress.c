@@ -836,9 +836,9 @@ lzx_write_item(struct lzx_output_bitstream *os, struct lzx_item item,
 	if (main_symbol < LZX_NUM_CHARS)  /* Literal?  */
 		return;
 
-	len_symbol = (data >> 10) & 0xFF;
 
-	if (len_symbol != LZX_LENCODE_NUM_SYMBOLS) {
+	if ((main_symbol & LZX_NUM_PRIMARY_LENS) == LZX_NUM_PRIMARY_LENS) {
+		len_symbol = (data >> 10) & 0xFF;
 		lzx_write_varbits(os, codes->codewords.len[len_symbol],
 				  codes->lens.len[len_symbol],
 				  LZX_MAX_LEN_CODEWORD_LEN);
@@ -1035,6 +1035,56 @@ lzx_get_offset_slot_fast(struct lzx_compressor *c, u32 offset)
 	return c->offset_slot_fast[offset];
 }
 
+/* Tally, and optionally record, the specified match or literal.  */
+static inline void
+lzx_declare_item(struct lzx_compressor *c, u32 item,
+		 struct lzx_item **next_chosen_item)
+{
+	u32 length = item & OPTIMUM_LEN_MASK;
+	u32 offset_data = item >> OPTIMUM_OFFSET_SHIFT;
+	unsigned main_symbol;
+	unsigned len_symbol = 0;
+	unsigned num_extra_bits = 0;
+	u32 extra_bits = 0;
+
+	if (length < LZX_MIN_MATCH_LEN) {
+		main_symbol = lzx_main_symbol_for_literal(offset_data);
+	} else {
+		unsigned len_header;
+		unsigned offset_slot;
+
+		if (length < LZX_NUM_PRIMARY_LENS + LZX_MIN_MATCH_LEN) {
+			len_header = length - LZX_MIN_MATCH_LEN;
+		} else {
+			len_header = LZX_NUM_PRIMARY_LENS;
+			len_symbol = length - LZX_MIN_MATCH_LEN - LZX_NUM_PRIMARY_LENS;
+			c->freqs.len[len_symbol]++;
+		}
+
+		if (offset_data < LZX_NUM_RECENT_OFFSETS) {
+			offset_slot = offset_data;
+		} else {
+			u32 offset = offset_data - LZX_OFFSET_ADJUSTMENT;
+			offset_slot = (offset < LZX_NUM_FAST_OFFSETS) ?
+					lzx_get_offset_slot_fast(c, offset) :
+					lzx_get_offset_slot(offset);
+			num_extra_bits = lzx_extra_offset_bits[offset_slot];
+			if (num_extra_bits >= LZX_NUM_ALIGNED_OFFSET_BITS)
+				c->freqs.aligned[offset_data & LZX_ALIGNED_OFFSET_BITMASK]++;
+			extra_bits = offset_data - lzx_offset_slot_base[offset_slot];
+		}
+		main_symbol = lzx_main_symbol_for_match(offset_slot, len_header);
+	}
+	c->freqs.main[main_symbol]++;
+	if (next_chosen_item) {
+		u32 low = ((u32)num_extra_bits << 18) |
+			  ((u32)len_symbol << 10) | main_symbol;
+		*(*next_chosen_item)++ = (struct lzx_item) {
+			.data = ((u64)extra_bits << 23) | low,
+		};
+	}
+}
+
 /* Tally, and optionally record, the specified literal byte.  */
 static inline void
 lzx_declare_literal(struct lzx_compressor *c, unsigned literal,
@@ -1130,26 +1180,6 @@ lzx_declare_explicit_offset_match(struct lzx_compressor *c, unsigned len, u32 of
 				((u64)extra_bits << 23),
 		};
 	}
-}
-
-
-/* Tally, and optionally record, the specified match or literal.  */
-static inline void
-lzx_declare_item(struct lzx_compressor *c, u32 item,
-		 struct lzx_item **next_chosen_item)
-{
-	u32 len = item & OPTIMUM_LEN_MASK;
-	u32 offset_data = item >> OPTIMUM_OFFSET_SHIFT;
-
-	if (len == 1)
-		lzx_declare_literal(c, offset_data, next_chosen_item);
-	else if (offset_data < LZX_NUM_RECENT_OFFSETS)
-		lzx_declare_repeat_offset_match(c, len, offset_data,
-						next_chosen_item);
-	else
-		lzx_declare_explicit_offset_match(c, len,
-						  offset_data - LZX_OFFSET_ADJUSTMENT,
-						  next_chosen_item);
 }
 
 static inline void
