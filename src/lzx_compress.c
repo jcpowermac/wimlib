@@ -1624,13 +1624,11 @@ lzx_compress_near_optimal(struct lzx_compressor *c,
 				max_len = in_end - in_next;
 				nice_len = min(max_len, nice_len);
 
-				/* This extra check is needed to ensure that
-				 * reading the next 3 bytes when looking for a
-				 * length 2 match is valid.  In addition, we
-				 * cannot allow ourselves to find a length 2
-				 * match of the very last two bytes with the
-				 * very first two bytes, since such a match has
-				 * an offset too large to be represented.  */
+				/* This extra check is needed to ensure that we
+				 * never output a length 2 match of the very
+				 * last two bytes with the very first two bytes,
+				 * since such a match has an offset too large to
+				 * be represented.  */
 				if (unlikely(max_len < 3)) {
 					in_next++;
 					cache_ptr->length = 0;
