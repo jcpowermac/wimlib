@@ -117,7 +117,7 @@
  * Consideration of aligned offset costs is disabled for now, due to
  * insufficient benefit gained from the time spent.
  */
-#define LZX_CONSIDER_ALIGNED_COSTS	1
+#define LZX_CONSIDER_ALIGNED_COSTS	0
 
 /*
  * LZX_MAX_FAST_LEVEL is the maximum compression level at which we use the
@@ -131,7 +131,7 @@
  * hash function is trivial), but using a smaller hash table speeds up
  * compression due to reduced cache pressure.
  */
-#define LZX_HASH2_ORDER		16
+#define LZX_HASH2_ORDER		12
 #define LZX_HASH2_LENGTH	(1UL << LZX_HASH2_ORDER)
 
 #include "wimlib/lzx_common.h"
@@ -246,8 +246,7 @@ struct lzx_optimum_node {
 	u32 item;
 #define OPTIMUM_OFFSET_SHIFT 9
 #define OPTIMUM_LEN_MASK ((1 << OPTIMUM_OFFSET_SHIFT) - 1)
-	unsigned num_extra_items;
-	u32 extra_items[2];
+	u32 extra;
 } _aligned_attribute(8);
 
 /*
@@ -1169,15 +1168,13 @@ lzx_record_item_list(struct lzx_compressor *c,
 	saved_item = cur_node->item;
 	do {
 		item = saved_item;
-		if (cur_node->num_extra_items > 0) {
-			/* Handle an arrival via multi-item lookahead.  */
-			unsigned i = 0;
-			struct lzx_optimum_node *orig_node = cur_node;
-			do {
-				cur_node -= item & OPTIMUM_LEN_MASK;
-				cur_node->item = item;
-				item = orig_node->extra_items[i];
-			} while (++i != orig_node->num_extra_items);
+		if (cur_node->extra) {
+			u32 rep0_len = cur_node->extra & OPTIMUM_LEN_MASK;
+			u32 literal = cur_node->extra >> OPTIMUM_OFFSET_SHIFT;
+			cur_node -= rep0_len;
+			cur_node->item = (0 << OPTIMUM_OFFSET_SHIFT) | rep0_len;
+			cur_node -= 1;
+			cur_node->item = (literal << OPTIMUM_OFFSET_SHIFT) | 1;
 		}
 		cur_node -= item & OPTIMUM_LEN_MASK;
 		saved_item = cur_node->item;
@@ -1199,15 +1196,16 @@ lzx_tally_item_list(struct lzx_compressor *c, struct lzx_optimum_node *cur_node)
 	 * list.  Processing the items in reverse order is fine.  */
 	do {
 		u32 item = cur_node->item;
-		struct lzx_optimum_node *orig_node = cur_node;
-		unsigned i = 0;
-		for (;;) {
-			lzx_declare_item(c, item, NULL);
-			cur_node -= item & OPTIMUM_LEN_MASK;
-			if (i == orig_node->num_extra_items)
-				break;
-			item = orig_node->extra_items[i++];
+		if (cur_node->extra) {
+			u32 rep0_len = cur_node->extra & OPTIMUM_LEN_MASK;
+			u32 literal = cur_node->extra >> OPTIMUM_OFFSET_SHIFT;
+			cur_node -= rep0_len;
+			lzx_declare_literal(c, literal, NULL);
+			cur_node -= 1;
+			lzx_declare_repeat_offset_match(c, rep0_len, 0, NULL);
 		}
+		lzx_declare_item(c, item, NULL);
+		cur_node -= item & OPTIMUM_LEN_MASK;
 	} while (cur_node != c->optimum_nodes);
 }
 
@@ -1274,7 +1272,6 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 	/* The following loop runs 'block_size' iterations, one per node.  */
 	do {
 		unsigned num_matches;
-		unsigned literal;
 		u32 cost;
 
 		/*
@@ -1323,7 +1320,7 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 					(cur_node + next_len)->cost = cost;
 					(cur_node + next_len)->item =
 						(0 << OPTIMUM_OFFSET_SHIFT) | next_len;
-					(cur_node + next_len)->num_extra_items = 0;
+					(cur_node + next_len)->extra = 0;
 				}
 				if (unlikely(++next_len > max_len)) {
 					cache_ptr = end_matches;
@@ -1350,7 +1347,7 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 					(cur_node + next_len)->cost = cost;
 					(cur_node + next_len)->item =
 						(1 << OPTIMUM_OFFSET_SHIFT) | next_len;
-					(cur_node + next_len)->num_extra_items = 0;
+					(cur_node + next_len)->extra = 0;
 				}
 				if (unlikely(++next_len > max_len)) {
 					cache_ptr = end_matches;
@@ -1377,7 +1374,7 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 					(cur_node + next_len)->cost = cost;
 					(cur_node + next_len)->item =
 						(2 << OPTIMUM_OFFSET_SHIFT) | next_len;
-					(cur_node + next_len)->num_extra_items = 0;
+					(cur_node + next_len)->extra = 0;
 				}
 				if (unlikely(++next_len > max_len)) {
 					cache_ptr = end_matches;
@@ -1413,7 +1410,7 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 						(cur_node + next_len)->cost = cost;
 						(cur_node + next_len)->item =
 							(offset_data << OPTIMUM_OFFSET_SHIFT) | next_len;
-						(cur_node + next_len)->num_extra_items = 0;
+						(cur_node + next_len)->extra = 0;
 					}
 				} while (++next_len <= cache_ptr->length);
 
@@ -1422,23 +1419,20 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 				    load_u16_unaligned(in_next + len + 1) ==
 				    load_u16_unaligned(in_next - offset + len + 1))
 				{
-					u32 rep_len = lz_extend(in_next + len + 1,
-								in_next - offset + len + 1,
-								2,
-								min(block_end - (in_next + len + 1),
-								    LZX_MAX_MATCH_LEN));
+					u32 rep0_len = lz_extend(in_next + len + 1,
+								 in_next - offset + len + 1,
+								 2,
+								 min(block_end - (in_next + len + 1),
+								     LZX_MAX_MATCH_LEN));
 					cost += c->costs.main[lzx_main_symbol_for_literal(*(in_next + len))] +
-						c->costs.match_cost[0][rep_len - LZX_MIN_MATCH_LEN];
-					u32 total_len = len + 1 + rep_len;
+						c->costs.match_cost[0][rep0_len - LZX_MIN_MATCH_LEN];
+					u32 total_len = len + 1 + rep0_len;
 					if (cost < (cur_node + total_len)->cost) {
 						(cur_node + total_len)->cost = cost;
 						(cur_node + total_len)->item =
-							((u32)0 << OPTIMUM_OFFSET_SHIFT) | rep_len;
-						(cur_node + total_len)->extra_items[0] =
-							((u32)*(in_next + len) << OPTIMUM_OFFSET_SHIFT) | 1;
-						(cur_node + total_len)->extra_items[1] =
 							(offset_data << OPTIMUM_OFFSET_SHIFT) | len;
-						(cur_node + total_len)->num_extra_items = 2;
+						(cur_node + total_len)->extra =
+							((u32)*(in_next + len) << OPTIMUM_OFFSET_SHIFT) | rep0_len;
 					}
 				}
 			} while (++cache_ptr != end_matches);
@@ -1453,7 +1447,7 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 		if (cost <= (cur_node + 1)->cost) {
 			(cur_node + 1)->cost = cost;
 			(cur_node + 1)->item = ((u32)*in_next << OPTIMUM_OFFSET_SHIFT) | 1;
-			(cur_node + 1)->num_extra_items = 0;
+			(cur_node + 1)->extra = 0;
 		}
 
 		/* Advance to the next position.  */
@@ -1463,38 +1457,21 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 		/* The lowest-cost path to the current position is now known.
 		 * Finalize the adaptive state that results from taking this
 		 * lowest-cost path.  */
-		u32 item_to_take = cur_node->item;
 		u32 back_len = cur_node->item & OPTIMUM_LEN_MASK;
-		for (unsigned i = 0; i < cur_node->num_extra_items;i++) {
-			item_to_take = cur_node->extra_items[i];
-			back_len += item_to_take & OPTIMUM_LEN_MASK;
-		}
-		int next_item_idx = (int)cur_node->num_extra_items - 1;
-
+		if (cur_node->extra)
+			back_len += 1 + (cur_node->extra & OPTIMUM_LEN_MASK);
 		QUEUE(in_next) = QUEUE(in_next - back_len);
-		for (;;) {
-			const u32 length = item_to_take & OPTIMUM_LEN_MASK;
-
-			if (length > 1) {
-				u32 offset_data = item_to_take >> OPTIMUM_OFFSET_SHIFT;
-				if (offset_data >= LZX_NUM_RECENT_OFFSETS) {
-					/* Explicit offset match: insert offset at front  */
-					QUEUE(in_next) =
-						lzx_lru_queue_push(QUEUE(in_next), offset_data - LZX_OFFSET_ADJUSTMENT);
-				} else {
-					/* Repeat offset match: swap offset to front  */
-					QUEUE(in_next) =
-						lzx_lru_queue_swap(QUEUE(in_next), offset_data);
-				}
+		if ((cur_node->item & OPTIMUM_LEN_MASK) > 1) {
+			u32 offset_data = cur_node->item >> OPTIMUM_OFFSET_SHIFT;
+			if (offset_data >= LZX_NUM_RECENT_OFFSETS) {
+				/* Explicit offset match: insert offset at front  */
+				QUEUE(in_next) =
+					lzx_lru_queue_push(QUEUE(in_next), offset_data - LZX_OFFSET_ADJUSTMENT);
+			} else {
+				/* Repeat offset match: swap offset to front  */
+				QUEUE(in_next) =
+					lzx_lru_queue_swap(QUEUE(in_next), offset_data);
 			}
-
-			if (next_item_idx < 0)
-				break;
-			if (next_item_idx == 0)
-				item_to_take = cur_node->item;
-			else
-				item_to_take = cur_node->extra_items[next_item_idx - 1];
-			--next_item_idx;
 		}
 	} while (cur_node != end_node);
 
