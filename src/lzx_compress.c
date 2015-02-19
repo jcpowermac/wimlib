@@ -248,6 +248,7 @@ struct lzx_optimum_node {
 #define OPTIMUM_LEN_MASK ((1 << OPTIMUM_OFFSET_SHIFT) - 1)
 #define OPTIMUM_EXTRA_FLAG 0x80000000
 	u32 extra;
+	u32 padding;
 } _aligned_attribute(8);
 
 /*
@@ -1454,22 +1455,26 @@ lzx_find_min_cost_path(struct lzx_compressor * const restrict c,
 		 * Finalize the adaptive state that results from taking this
 		 * lowest-cost path.  */
 		if (cost <= cur_node->cost) {
+			/* Literal: queue remains unchanged.  */
 			cur_node->cost = cost;
 			cur_node->item = (literal << OPTIMUM_OFFSET_SHIFT) | 1;
 			QUEUE(in_next) = QUEUE(in_next - 1);
 		} else {
+			/* Match: queue update is needed.  */
 			u32 back_len = cur_node->item & OPTIMUM_LEN_MASK;
 			if (cur_node->item & OPTIMUM_EXTRA_FLAG)
 				back_len += 1 + (cur_node->extra & OPTIMUM_LEN_MASK);
 			u32 offset_data = (cur_node->item & ~OPTIMUM_EXTRA_FLAG) >> OPTIMUM_OFFSET_SHIFT;
 			if (offset_data >= LZX_NUM_RECENT_OFFSETS) {
 				/* Explicit offset match: insert offset at front  */
-				QUEUE(in_next) = lzx_lru_queue_push(QUEUE(in_next - back_len),
-								    offset_data - LZX_OFFSET_ADJUSTMENT);
+				QUEUE(in_next) =
+					lzx_lru_queue_push(QUEUE(in_next - back_len),
+							   offset_data - LZX_OFFSET_ADJUSTMENT);
 			} else {
 				/* Repeat offset match: swap offset to front  */
-				QUEUE(in_next) = lzx_lru_queue_swap(QUEUE(in_next - back_len),
-								    offset_data);
+				QUEUE(in_next) =
+					lzx_lru_queue_swap(QUEUE(in_next - back_len),
+							   offset_data);
 			}
 		}
 	} while (cur_node != end_node);
