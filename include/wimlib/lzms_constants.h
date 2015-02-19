@@ -22,8 +22,8 @@
  *
  *    1. offsets of LZ matches
  *    2. (power, raw offset) pairs of delta matches */
-#define LZMS_NUM_LZ_REPS			3
-#define LZMS_NUM_DELTA_REPS			3
+#define LZMS_NUM_LZ_REPS			4
+#define LZMS_NUM_DELTA_REPS			4
 
 /* The numbers of binary decision classes needed for encoding queue indices  */
 #define LZMS_NUM_LZ_REP_DECISIONS		(LZMS_NUM_LZ_REPS - 1)

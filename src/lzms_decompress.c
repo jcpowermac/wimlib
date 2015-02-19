@@ -745,10 +745,8 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			if (d->pending_lz_offset != 0 &&
 			    out_next != d->lz_offset_still_pending)
 			{
-				BUILD_BUG_ON(LZMS_NUM_LZ_REPS != 3);
-				d->recent_lz_offsets[3] = d->recent_lz_offsets[2];
-				d->recent_lz_offsets[2] = d->recent_lz_offsets[1];
-				d->recent_lz_offsets[1] = d->recent_lz_offsets[0];
+				for (int i = LZMS_NUM_LZ_REPS; i > 0; i--)
+					d->recent_lz_offsets[i] = d->recent_lz_offsets[i - 1];
 				d->recent_lz_offsets[0] = d->pending_lz_offset;
 				d->pending_lz_offset = 0;
 			}
@@ -759,27 +757,18 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			} else {
 				/* Repeat offset  */
 
-				BUILD_BUG_ON(LZMS_NUM_LZ_REPS != 3);
-				if (!lzms_decode_lz_repeat_match_bit(d, 0)) {
-					offset = d->recent_lz_offsets[0];
-					d->recent_lz_offsets[0] = d->recent_lz_offsets[1];
-					d->recent_lz_offsets[1] = d->recent_lz_offsets[2];
-					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
-				} else if (!lzms_decode_lz_repeat_match_bit(d, 1)) {
-					offset = d->recent_lz_offsets[1];
-					d->recent_lz_offsets[1] = d->recent_lz_offsets[2];
-					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
-				} else {
-					offset = d->recent_lz_offsets[2];
-					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
-				}
+				int rep_idx;
+				for (rep_idx = 0; rep_idx < LZMS_NUM_LZ_REP_DECISIONS; rep_idx++)
+					if (!lzms_decode_lz_repeat_match_bit(d, rep_idx))
+						break;
+				offset = d->recent_lz_offsets[rep_idx];
+				for (int i = rep_idx; i < LZMS_NUM_LZ_REPS; i++)
+					d->recent_lz_offsets[i] = d->recent_lz_offsets[i + 1];
 			}
 
 			if (d->pending_lz_offset != 0) {
-				BUILD_BUG_ON(LZMS_NUM_LZ_REPS != 3);
-				d->recent_lz_offsets[3] = d->recent_lz_offsets[2];
-				d->recent_lz_offsets[2] = d->recent_lz_offsets[1];
-				d->recent_lz_offsets[1] = d->recent_lz_offsets[0];
+				for (int i = LZMS_NUM_LZ_REPS; i > 0; i--)
+					d->recent_lz_offsets[i] = d->recent_lz_offsets[i - 1];
 				d->recent_lz_offsets[0] = d->pending_lz_offset;
 			}
 			d->pending_lz_offset = offset;
@@ -810,10 +799,8 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			if (d->pending_delta_pair != 0 &&
 			    out_next != d->delta_pair_still_pending)
 			{
-				BUILD_BUG_ON(LZMS_NUM_DELTA_REPS != 3);
-				d->recent_delta_pairs[3] = d->recent_delta_pairs[2];
-				d->recent_delta_pairs[2] = d->recent_delta_pairs[1];
-				d->recent_delta_pairs[1] = d->recent_delta_pairs[0];
+				for (int i = LZMS_NUM_DELTA_REPS; i > 0; i--)
+					d->recent_delta_pairs[i] = d->recent_delta_pairs[i - 1];
 				d->recent_delta_pairs[0] = d->pending_delta_pair;
 				d->pending_delta_pair = 0;
 			}
@@ -826,29 +813,20 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 				/* Repeat offset  */
 				u64 val;
 
-				BUILD_BUG_ON(LZMS_NUM_DELTA_REPS != 3);
-				if (!lzms_decode_delta_repeat_match_bit(d, 0)) {
-					val = d->recent_delta_pairs[0];
-					d->recent_delta_pairs[0] = d->recent_delta_pairs[1];
-					d->recent_delta_pairs[1] = d->recent_delta_pairs[2];
-					d->recent_delta_pairs[2] = d->recent_delta_pairs[3];
-				} else if (!lzms_decode_delta_repeat_match_bit(d, 1)) {
-					val = d->recent_delta_pairs[1];
-					d->recent_delta_pairs[1] = d->recent_delta_pairs[2];
-					d->recent_delta_pairs[2] = d->recent_delta_pairs[3];
-				} else {
-					val = d->recent_delta_pairs[2];
-					d->recent_delta_pairs[2] = d->recent_delta_pairs[3];
-				}
+				int rep_idx;
+				for (rep_idx = 0; rep_idx < LZMS_NUM_DELTA_REP_DECISIONS; rep_idx++)
+					if (!lzms_decode_delta_repeat_match_bit(d, rep_idx))
+						break;
+				val = d->recent_delta_pairs[rep_idx];
+				for (int i = rep_idx; i < LZMS_NUM_DELTA_REPS; i++)
+					d->recent_delta_pairs[i] = d->recent_delta_pairs[i + 1];
 				power = val >> 32;
 				raw_offset = (u32)val;
 			}
 
 			if (d->pending_delta_pair != 0) {
-				BUILD_BUG_ON(LZMS_NUM_DELTA_REPS != 3);
-				d->recent_delta_pairs[3] = d->recent_delta_pairs[2];
-				d->recent_delta_pairs[2] = d->recent_delta_pairs[1];
-				d->recent_delta_pairs[1] = d->recent_delta_pairs[0];
+				for (int i = LZMS_NUM_DELTA_REPS; i > 0; i--)
+					d->recent_delta_pairs[i] = d->recent_delta_pairs[i - 1];
 				d->recent_delta_pairs[0] = d->pending_delta_pair;
 			}
 			d->pending_delta_pair = raw_offset | ((u64)power << 32);
