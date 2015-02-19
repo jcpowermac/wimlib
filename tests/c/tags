@@ -1,0 +1,105 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.8	//
+ARRAY_LEN	testsuite.h	6;"	d
+CFLAGS	Makefile	/^CFLAGS := -Wall -I $(INCLUDE) -std=c99 -D_GNU_SOURCE$/;"	m
+INCLUDE	Makefile	/^INCLUDE := ..\/..\/include$/;"	m
+LIBDIR	Makefile	/^LIBDIR := ..\/..\/.libs$/;"	m
+MAX_COMPRESSION_TYPE	compression.h	12;"	d
+SUPPORT_CFLAGS	Makefile	/^SUPPORT_CFLAGS := $(CFLAGS) -O2$/;"	m
+SUPPORT_HEADER	Makefile	/^SUPPORT_HEADER := testsuite.h$/;"	m
+SUPPORT_OBJ	Makefile	/^SUPPORT_OBJ := $(SUPPORT_SRC:%.c=%.o)$/;"	m
+SUPPORT_SRC	Makefile	/^SUPPORT_SRC := testrunner.c testutil.c$/;"	m
+TEST	compression.c	/^TEST(compression_and_decompression_of_sample_data)$/;"	f
+TEST	compression.c	/^TEST(gen_compress_tab)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_compress__fails_if_uncompressed_size_exceeds_max_block_size)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_create_compressor__fails_if_ctype_is_invalid)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_create_compressor__test_max_block_sizes)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_create_compressor_fails_if_compressor_ret_not_specified)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_free_compressor__ignores_null)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_get_compressor_needed_memory__is_sane)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_get_compressor_needed_memory__test_max_block_sizes)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_get_compressor_needed_memory__works_with_default_compression_level)$/;"	f
+TEST	compression_api.c	/^TEST(wimlib_set_default_compression_level__fails_if_ctype_is_invalid)$/;"	f
+TEST	create.c	/^TEST(wimlib_create_new_wim__fails_if_ctype_is_invalid)$/;"	f
+TEST	create.c	/^TEST(wimlib_create_new_wim__fails_if_wim_ret_is_null)$/;"	f
+TEST	decompression_api.c	/^TEST(wimlib_create_decompressor__fails_if_ctype_is_invalid)$/;"	f
+TEST	decompression_api.c	/^TEST(wimlib_create_decompressor__fails_if_decompressor_ret_not_specified)$/;"	f
+TEST	decompression_api.c	/^TEST(wimlib_create_decompressor__test_max_block_sizes)$/;"	f
+TEST	decompression_api.c	/^TEST(wimlib_decompress__fails_if_uncompressed_size_exceeds_max_block_size)$/;"	f
+TEST	decompression_api.c	/^TEST(wimlib_free_decompressor__ignores_null)$/;"	f
+TEST	general.c	/^TEST(wimlib_free__ignores_null)$/;"	f
+TEST	general.c	/^TEST(wimlib_get_compression_type_string__is_sane)$/;"	f
+TEST	general.c	/^TEST(wimlib_get_error_string__is_sane)$/;"	f
+TEST	general.c	/^TEST(wimlib_get_version__is_sane)$/;"	f
+TEST	init.c	/^TEST(wimlib_can_be_initialized_multiple_times)$/;"	f
+TEST	init.c	/^TEST(wimlib_global_init__fails_if_flags_are_unrecognized)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_chunk_size_is_unrecognized)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_compression_type_is_unrecognized)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_file_does_not_exist)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_file_is_directory)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_filename_is_empty)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_filename_is_null)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_flags_are_unrecognized)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_header_size_is_too_large)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_header_size_is_too_small)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_image_count_is_insane)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_integrity_check_fails)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_magic_chars_are_bad)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_part_number_and_total_parts_not_set)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_part_number_exceeds_total_parts)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_version_is_unknown)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_if_wim_ret_is_null)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_to_open_filesystem_readonly_wim_for_write)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_to_open_flag_readonly_wim_for_write)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_to_open_split_wim_part1_for_write)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_to_open_split_wim_part2_for_write)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__fails_to_open_split_wim_with_error_if_split)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__succeeds_on_control)$/;"	f
+TEST	open.c	/^TEST(wimlib_open_wim__succeeds_with_integrity_check)$/;"	f
+TEST	testsuite.h	19;"	d
+TEST	xpress_edgecases.c	/^TEST(xpress_decompression_fails_when_compressed_data_too_small)$/;"	f
+TEST	xpress_edgecases.c	/^TEST(xpress_decompression_fails_when_huffman_code_oversubscribed)$/;"	f
+TEST	xpress_edgecases.c	/^TEST(xpress_decompression_fails_when_huffman_code_undersubscribed)$/;"	f
+TEST	xpress_edgecases.c	/^TEST(xpress_decompression_fails_when_match_overruns_buffer)$/;"	f
+TEST	xpress_edgecases.c	/^TEST(xpress_decompression_fails_when_match_underruns_buffer)$/;"	f
+TEST	xpress_edgecases.c	/^TEST(xpress_decompression_succeeds_on_control)$/;"	f
+TEST_CFLAGS	Makefile	/^TEST_CFLAGS := $(CFLAGS) -O0$/;"	m
+TEST_EXE	Makefile	/^TEST_EXE := $(TEST_SRC:%.c=%)$/;"	m
+TEST_LDFLAGS	Makefile	/^TEST_LDFLAGS := -L $(LIBDIR)$/;"	m
+TEST_LDLIBS	Makefile	/^TEST_LDLIBS := -lwim$/;"	m
+TEST_SRC	Makefile	/^TEST_SRC := $(filter-out $(SUPPORT_SRC), $(wildcard *.c))$/;"	m
+USE_VALGRIND	Makefile	/^USE_VALGRIND := no$/;"	m
+VALGRIND	Makefile	/^VALGRIND := valgrind --quiet --error-exitcode=2 --leak-check=full$/;"	m
+VALGRIND	Makefile	/^VALGRIND :=$/;"	m
+_TESTSUITE_H_	testsuite.h	2;"	d
+assert_bounded	testsuite.h	75;"	d
+assert_eq	testsuite.h	33;"	d
+assert_ge	testsuite.h	54;"	d
+assert_gt	testsuite.h	61;"	d
+assert_le	testsuite.h	47;"	d
+assert_lt	testsuite.h	68;"	d
+assert_neq	testsuite.h	40;"	d
+compress_data	compression.c	/^compress_data(const void *udata, const size_t usize,$/;"	f	file:
+compression_types	compression.h	/^static const int compression_types[] = {$/;"	v
+cur_test	testrunner.c	/^static size_t cur_test;$/;"	v	file:
+do_fail	testrunner.c	/^do_fail(const char *filename, int lineno, const char *msg, ...)$/;"	f
+do_standard_test	compression.c	/^do_standard_test(const char *data_file_name, int ctype, unsigned clevel,$/;"	f	file:
+do_xpress_decompress	xpress_edgecases.c	/^do_xpress_decompress(const void *cdata, size_t csize, void *udata,$/;"	f	file:
+fail	testsuite.h	29;"	d
+func	testrunner.c	/^	test_func_t func;$/;"	m	struct:test	file:
+gen_file_stat	compression.c	/^gen_file_stat(FILE *tab,$/;"	f	file:
+gen_file_stats	compression.c	/^gen_file_stats(FILE *tab, const char *data_file_name)$/;"	f	file:
+load_data_file	testutil.c	/^load_data_file(const char *name, size_t *size_ret)$/;"	f
+main	testrunner.c	/^main(void)$/;"	f
+max_block_sizes	compression.h	/^static const size_t max_block_sizes[] = {$/;"	v
+name	testrunner.c	/^	const char *name;$/;"	m	struct:test	file:
+num_tests	testrunner.c	/^static size_t num_tests;$/;"	v	file:
+register_test_function	testrunner.c	/^register_test_function(test_func_t func, const char *name)$/;"	f
+test	testrunner.c	/^static struct test {$/;"	s	file:
+test_func_t	testsuite.h	/^typedef void (*test_func_t)(void);$/;"	t
+tests	testrunner.c	/^} tests[1024];$/;"	v	typeref:struct:test	file:
+xmalloc	testutil.c	/^xmalloc(size_t size)$/;"	f

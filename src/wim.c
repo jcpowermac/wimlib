@@ -185,6 +185,9 @@ wimlib_create_new_wim(int ctype, WIMStruct **wim_ret)
 	struct wim_lookup_table *table;
 	int ret;
 
+	if (!wim_ret)
+		return WIMLIB_ERR_INVALID_PARAM;
+
 	ret = wimlib_global_init(WIMLIB_INIT_FLAG_ASSUME_UTF8);
 	if (ret)
 		return ret;
