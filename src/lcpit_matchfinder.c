@@ -278,11 +278,10 @@ lcpit_advance_one_byte(const u32 cur_pos,
 		       struct lz_match matches[restrict],
 		       const bool record_matches)
 {
-	u32 interval_idx;
-	u32 match_pos;
-	struct lz_match *matchptr;
 	u32 ref;
 	u32 super_ref;
+	u32 match_pos;
+	struct lz_match *matchptr;
 
 	/* Get the deepest lcp-interval containing the current suffix. */
 	ref = pos_data[cur_pos];
@@ -292,18 +291,17 @@ lcpit_advance_one_byte(const u32 cur_pos,
 	/* Ascend until we reach a visited interval, linking the unvisited
 	 * intervals to the current suffix as we go.  */
 	for (;;) {
-		interval_idx = ref & POS_MASK;
-		super_ref = intervals[interval_idx];
+		super_ref = intervals[ref & POS_MASK];
 		if (!(super_ref & LCP_MASK))
 			break;
-		intervals[interval_idx] = cur_pos;
+		intervals[ref & POS_MASK] = cur_pos;
 		ref = super_ref;
 	}
 
 	if (super_ref == 0) {
 		/* Ambiguous case; just don't allow matches with position 0. */
-		if (interval_idx != 0)
-			intervals[interval_idx] = cur_pos;
+		if (ref != 0)
+			intervals[ref & POS_MASK] = cur_pos;
 		return 0;
 	}
 
