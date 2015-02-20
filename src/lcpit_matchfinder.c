@@ -166,8 +166,8 @@ build_LCPIT(u32 intervals[restrict], u32 pos_data[restrict], const u32 n)
 
 	for (u32 r = 1; r < n; r++) {
 		const u32 next_pos = SA_and_LCP[r] & POS_MASK;
-		const u32 next_lcp = SA_and_LCP[r] >> LCP_SHIFT;
-		const u32 top_lcp = *top >> LCP_SHIFT;
+		const u32 next_lcp = SA_and_LCP[r] & LCP_MASK;
+		const u32 top_lcp = *top & LCP_MASK;
 
 		prefetch(&pos_data[SA_and_LCP[r + PREFETCH_SAFETY] & POS_MASK]);
 
@@ -176,14 +176,14 @@ build_LCPIT(u32 intervals[restrict], u32 pos_data[restrict], const u32 n)
 			pos_data[prev_pos] = *top;
 		} else if (next_lcp > top_lcp) {
 			/* Opening a new interval  */
-			*++top = (next_lcp << LCP_SHIFT) | next_interval_idx++;
+			*++top = next_lcp | next_interval_idx++;
 			pos_data[prev_pos] = *top;
 		} else {
 			/* Closing the deepest open interval  */
 			pos_data[prev_pos] = *top;
 			for (;;) {
 				const u32 closed_interval_idx = *top-- & POS_MASK;
-				const u32 superinterval_lcp = *top >> LCP_SHIFT;
+				const u32 superinterval_lcp = *top & LCP_MASK;
 
 				if (next_lcp == superinterval_lcp) {
 					/* Continuing the superinterval */
@@ -194,7 +194,7 @@ build_LCPIT(u32 intervals[restrict], u32 pos_data[restrict], const u32 n)
 					 * superinterval of the one being
 					 * closed, but still a subinterval of
 					 * its superinterval  */
-					*++top = (next_lcp << LCP_SHIFT) | next_interval_idx++;
+					*++top = next_lcp | next_interval_idx++;
 					intervals[closed_interval_idx] = *top;
 					break;
 				} else {
