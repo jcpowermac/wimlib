@@ -299,7 +299,7 @@ lcpit_advance_one_byte(const u32 cur_pos,
 		interval_idx = superinterval_idx;
 	}
 
-	match_pos = intervals[interval_idx] & POS_MASK;
+	match_pos = intervals[interval_idx];
 	if (match_pos == 0) {
 		/* Ambiguous case; just don't allow matches with position 0. */
 		if (interval_idx != 0)
