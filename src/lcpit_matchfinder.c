@@ -278,7 +278,6 @@ lcpit_advance_one_byte(const u32 cur_pos,
 		       struct lz_match matches[restrict],
 		       const bool record_matches)
 {
-	u32 lcp;
 	u32 interval_idx;
 	u32 match_pos;
 	struct lz_match *matchptr;
@@ -301,40 +300,30 @@ lcpit_advance_one_byte(const u32 cur_pos,
 		ref = super_ref;
 	}
 
-	lcp = ref >> LCP_SHIFT;
-	match_pos = super_ref;
-	if (match_pos == 0) {
+	if (super_ref == 0) {
 		/* Ambiguous case; just don't allow matches with position 0. */
 		if (interval_idx != 0)
 			intervals[interval_idx] = cur_pos;
 		return 0;
 	}
-	matchptr = matches;
-	/* Ascend indirectly via pos_data[] links.  */
-	for (;;) {
-		u32 next_lcp;
-		u32 next_interval_idx;
 
-		for (;;) {
-			next_lcp = pos_data[match_pos] >> LCP_SHIFT;
-			next_interval_idx = pos_data[match_pos] & POS_MASK;
-			if (next_lcp < lcp)
-				break;
-			/* Suffix was out of date.  */
-			match_pos = intervals[next_interval_idx];
-		}
-		intervals[interval_idx] = cur_pos;
-		pos_data[match_pos] = (lcp << LCP_SHIFT) | interval_idx;
+	/* Ascend indirectly via pos_data[] links.  */
+	match_pos = super_ref;
+	matchptr = matches;
+	for (;;) {
+		while ((super_ref = pos_data[match_pos]) > ref)
+			match_pos = intervals[super_ref & POS_MASK];
+		intervals[ref & POS_MASK] = cur_pos;
+		pos_data[match_pos] = ref;
 		if (record_matches) {
-			matchptr->length = lcp;
+			matchptr->length = ref >> LCP_SHIFT;
 			matchptr->offset = cur_pos - match_pos;
 			matchptr++;
 		}
-		if (next_interval_idx == 0)
+		if (super_ref == 0)
 			break;
-		match_pos = intervals[next_interval_idx];
-		interval_idx = next_interval_idx;
-		lcp = next_lcp;
+		ref = super_ref;
+		match_pos = intervals[ref & POS_MASK];
 	}
 	return matchptr - matches;
 }
