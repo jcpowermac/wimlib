@@ -155,58 +155,34 @@ static void
 build_LCPIT(u32 intervals[restrict], u32 pos_data[restrict], const u32 n)
 {
 	u32 * const SA_and_LCP = intervals;
-	u32 next_interval_idx;
 	u32 open_intervals[LCP_MAX + 1];
 	u32 *top = open_intervals;
 	u32 prev_pos = SA_and_LCP[0] & POS_MASK;
+	u32 next_interval_idx = 1;
 
 	*top = 0;
 	intervals[0] = 0;
-	next_interval_idx = 1;
 
 	for (u32 r = 1; r < n; r++) {
-		const u32 next_pos = SA_and_LCP[r] & POS_MASK;
 		const u32 next_lcp = SA_and_LCP[r] & LCP_MASK;
-		const u32 top_lcp = *top & LCP_MASK;
+		const u32 next_pos = SA_and_LCP[r] & POS_MASK;
+		u32 top_lcp = *top & LCP_MASK;
 
 		prefetch(&pos_data[SA_and_LCP[r + PREFETCH_SAFETY] & POS_MASK]);
 
-		if (next_lcp == top_lcp) {
-			/* Continuing the deepest open interval  */
-			pos_data[prev_pos] = *top;
-		} else if (next_lcp > top_lcp) {
-			/* Opening a new interval  */
+		if (next_lcp > top_lcp)
 			*++top = next_lcp | next_interval_idx++;
-			pos_data[prev_pos] = *top;
-		} else {
-			/* Closing the deepest open interval  */
-			pos_data[prev_pos] = *top;
-			for (;;) {
-				const u32 closed_interval_idx = *top-- & POS_MASK;
-				const u32 superinterval_lcp = *top & LCP_MASK;
-
-				if (next_lcp == superinterval_lcp) {
-					/* Continuing the superinterval */
-					intervals[closed_interval_idx] = *top;
-					break;
-				} else if (next_lcp > superinterval_lcp) {
-					/* Creating a new interval that is a
-					 * superinterval of the one being
-					 * closed, but still a subinterval of
-					 * its superinterval  */
-					*++top = next_lcp | next_interval_idx++;
-					intervals[closed_interval_idx] = *top;
-					break;
-				} else {
-					/* Also closing the superinterval  */
-					intervals[closed_interval_idx] = *top;
-				}
-			}
+		pos_data[prev_pos] = *top;
+		while (next_lcp < top_lcp) {
+			const u32 closed_interval_idx = *top-- & POS_MASK;
+			top_lcp = *top & LCP_MASK;
+			if (next_lcp > top_lcp)
+				*++top = next_lcp | next_interval_idx++;
+			intervals[closed_interval_idx] = *top;
 		}
 		prev_pos = next_pos;
 	}
 
-	/* Close any still-open intervals.  */
 	pos_data[prev_pos] = *top;
 	for (; top > open_intervals; top--)
 		intervals[*top & POS_MASK] = *(top - 1);
