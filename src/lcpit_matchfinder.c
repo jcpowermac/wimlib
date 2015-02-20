@@ -169,6 +169,8 @@ build_LCPIT(u32 intervals[restrict], u32 pos_data[restrict], const u32 n)
 		const u32 next_lcp = SA_and_LCP[r] >> LCP_SHIFT;
 		const u32 top_lcp = *top >> LCP_SHIFT;
 
+		prefetch(&pos_data[SA_and_LCP[r + PREFETCH_SAFETY] & POS_MASK]);
+
 		if (next_lcp == top_lcp) {
 			/* Continuing the deepest open interval  */
 			pos_data[prev_pos] = *top;
@@ -398,6 +400,8 @@ build_LCPIT_huge(u64 intervals64[restrict], u32 pos_data[restrict], const u32 n)
 		const u32 next_lcp = SA_and_LCP64[r] >> HUGE_LCP_SHIFT;
 		const u32 top_lcp = intervals64[*top] >> HUGE_LCP_SHIFT;
 
+		prefetch(&pos_data[SA_and_LCP64[r + PREFETCH_SAFETY] & HUGE_POS_MASK]);
+
 		if (next_lcp == top_lcp) {
 			/* Continuing the deepest open interval  */
 			pos_data[prev_pos] = *top;
@@ -558,8 +562,6 @@ lcpit_matchfinder_init(struct lcpit_matchfinder *mf, size_t max_bufsize,
 	mf->nice_match_len = min(nice_match_len,
 				 (max_bufsize <= MAX_NORMAL_BUFSIZE) ?
 				 LCP_MAX : HUGE_LCP_MAX);
-	for (u32 i = 0; i < PREFETCH_SAFETY; i++)
-		mf->pos_data[max_bufsize + i] = 0;
 	return true;
 }
 
@@ -631,12 +633,20 @@ lcpit_matchfinder_load_buffer(struct lcpit_matchfinder *mf, const u8 *T, u32 n)
 		build_LCP(mf->intervals, mf->pos_data, T, n,
 			  mf->min_match_len, mf->nice_match_len);
 		build_LCPIT(mf->intervals, mf->pos_data, n);
+		for (u32 i = 0; i < PREFETCH_SAFETY; i++) {
+			mf->intervals[n + i] = 0;
+			mf->pos_data[n + i] = 0;
+		}
 		mf->huge_mode = false;
 	} else {
 		expand_SA(mf->intervals, n);
 		build_LCP_huge(mf->intervals64, mf->pos_data, T, n,
 			       mf->min_match_len, mf->nice_match_len);
 		build_LCPIT_huge(mf->intervals64, mf->pos_data, n);
+		for (u32 i = 0; i < PREFETCH_SAFETY; i++) {
+			mf->intervals64[n + i] = 0;
+			mf->pos_data[n + i] = 0;
+		}
 		mf->huge_mode = true;
 	}
 	mf->cur_pos = 0; /* starting at beginning of input buffer  */
