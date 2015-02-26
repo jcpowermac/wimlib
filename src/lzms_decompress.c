@@ -248,6 +248,8 @@
 #  include "config.h"
 #endif
 
+#include <ctype.h>
+
 #include "wimlib/compress_common.h"
 #include "wimlib/decompress_common.h"
 #include "wimlib/decompressor_ops.h"
@@ -719,6 +721,32 @@ lzms_decode_delta_power(struct lzms_decompressor *d)
 					  &d->delta_power_rebuild_info);
 }
 
+static inline char
+hex_char(u8 v)
+{
+	if (v < 10)
+		return '0' + v;
+	else
+		return 'a' + (v - 10);
+}
+
+static const char *
+print_char(u8 c)
+{
+	static char buf[5];
+	if (isprint(c)) {
+		buf[0] = c;
+		buf[1] = '\0';
+	} else {
+		buf[0] = '\\';
+		buf[1] = 'x';
+		buf[2] = hex_char(c >> 4);
+		buf[3] = hex_char(c & 0xF);
+		buf[4] = '\0';
+	}
+	return buf;
+}
+
 /* Decode the series of literals and matches from the LZMS-compressed data.
  * Return 0 if successful or -1 if the compressed data is invalid.  */
 static int
@@ -732,8 +760,12 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 		if (!lzms_decode_main_bit(d)) {
 
+
 			/* Literal  */
 			*out_next++ = lzms_decode_literal(d);
+
+			fprintf(stderr, "%tu: Literal; %s\n",  (out_next-1)-out,
+				print_char(*(out_next - 1)));
 
 		} else if (!lzms_decode_match_bit(d)) {
 
@@ -752,6 +784,7 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 				d->recent_lz_offsets[0] = d->pending_lz_offset;
 				d->pending_lz_offset = 0;
 			}
+			int rep_idx = -1;
 
 			if (!lzms_decode_lz_bit(d)) {
 				/* Explicit offset  */
@@ -765,13 +798,16 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 					d->recent_lz_offsets[0] = d->recent_lz_offsets[1];
 					d->recent_lz_offsets[1] = d->recent_lz_offsets[2];
 					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
+					rep_idx = 0;
 				} else if (!lzms_decode_lz_rep_bit(d, 1)) {
 					offset = d->recent_lz_offsets[1];
 					d->recent_lz_offsets[1] = d->recent_lz_offsets[2];
 					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
+					rep_idx = 1;
 				} else {
 					offset = d->recent_lz_offsets[2];
 					d->recent_lz_offsets[2] = d->recent_lz_offsets[3];
+					rep_idx = 2;
 				}
 			}
 
@@ -791,8 +827,20 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			if (unlikely(offset > out_next - out))
 				return -1;
 
-			lz_copy(out_next, length, offset, out_end, LZMS_MIN_MATCH_LENGTH);
-			out_next += length;
+			if (rep_idx >= 0)
+				fprintf(stderr, "%tu: LZ-rep%u; Length=%u Offset=%u\n",
+					out_next - out, rep_idx, length, offset);
+			else
+				fprintf(stderr, "%tu: LZ-match; Length=%u Offset=%u\n",
+					out_next - out, length, offset);
+
+			putc('\t', stderr);
+			do {
+				*out_next = *(out_next - offset);
+				fputs(print_char(*out_next), stderr);
+				out_next++;
+			} while (--length);
+			putc('\n', stderr);
 
 			d->lz_offset_still_pending = out_next;
 		} else {
@@ -817,6 +865,7 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 				d->recent_delta_pairs[0] = d->pending_delta_pair;
 				d->pending_delta_pair = 0;
 			}
+			int rep_idx = -1;
 
 			if (!lzms_decode_delta_bit(d)) {
 				/* Explicit offset  */
@@ -828,15 +877,18 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 
 				BUILD_BUG_ON(LZMS_NUM_DELTA_REPS != 3);
 				if (!lzms_decode_delta_rep_bit(d, 0)) {
+					rep_idx = 0;
 					val = d->recent_delta_pairs[0];
 					d->recent_delta_pairs[0] = d->recent_delta_pairs[1];
 					d->recent_delta_pairs[1] = d->recent_delta_pairs[2];
 					d->recent_delta_pairs[2] = d->recent_delta_pairs[3];
 				} else if (!lzms_decode_delta_rep_bit(d, 1)) {
+					rep_idx = 1;
 					val = d->recent_delta_pairs[1];
 					d->recent_delta_pairs[1] = d->recent_delta_pairs[2];
 					d->recent_delta_pairs[2] = d->recent_delta_pairs[3];
 				} else {
+					rep_idx = 2;
 					val = d->recent_delta_pairs[2];
 					d->recent_delta_pairs[2] = d->recent_delta_pairs[3];
 				}
@@ -874,13 +926,23 @@ lzms_decode_items(struct lzms_decompressor * const restrict d,
 			if (unlikely(length > out_end - out_next))
 				return -1;
 
+			if (rep_idx >= 0)
+				fprintf(stderr, "%tu: Delta-rep%u; Length=%u Offset=%u Span=%u\n",
+					out_next - out, rep_idx, length, offset, span);
+			else
+				fprintf(stderr, "%tu: Delta-match; Length=%u Offset=%u Span=%u\n",
+					out_next - out, length, offset, span);
+
+			putc('\t', stderr);
 			matchptr = out_next - offset;
 			do {
 				*out_next = *matchptr + *(out_next - span) -
 					    *(matchptr - span);
+				fputs(print_char(*out_next), stderr);
 				out_next++;
 				matchptr++;
 			} while (--length);
+			putc('\n', stderr);
 
 			d->delta_pair_still_pending = out_next;
 		}
