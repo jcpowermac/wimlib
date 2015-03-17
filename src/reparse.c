@@ -157,15 +157,15 @@ make_reparse_buffer(const struct reparse_data * restrict rpdata,
  *
  * Note: in the WIM format, the first 8 bytes of the reparse point data buffer
  * are omitted, presumably because we already know the reparse tag from the
- * dentry, and we already know the reparse tag length from the lookup table
- * entry resource length.  However, we reconstruct the first 8 bytes in the
- * buffer returned by this function.
+ * dentry, and we already know the reparse tag length from the blob length.
+ * However, we reconstruct the first 8 bytes in the buffer returned by this
+ * function.
  */
 int
 wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 			   u8 * restrict rpbuf,
 			   u16 * restrict rpbuflen_ret,
-			   struct blob *lte_override)
+			   struct blob *blob_override)
 {
 	struct blob *blob;
 	int ret;
@@ -174,14 +174,18 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 
 	wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 
-	if (!lte_override) {
-		blob = inode_unnamed_lte_resolved(inode);
-		if (!blob) {
+	if (!blob_override) {
+		struct wim_attribute *attr;
+
+		attr = inode_get_attribute_utf16le(inode, ATTR_REPARSE_POINT,
+						   NO_NAME);
+		if (!attr || !attr->attr_blob) {
 			ERROR("Reparse point has no reparse data!");
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
 		}
+		blob = attr->attr_blob;
 	} else {
-		blob = lte_override;
+		blob = blob_override;
 	}
 
 	if (blob->size > REPARSE_POINT_MAX_SIZE - 8) {
@@ -190,8 +194,8 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	}
 	rpdatalen = blob->size;
 
-	/* Read the data from the WIM file */
-	ret = read_full_stream_into_buf(blob, rpbuf + 8);
+	/* Read the reparse data from blob  */
+	ret = read_full_blob_into_buf(blob, rpbuf + 8);
 	if (ret)
 		return ret;
 
@@ -318,9 +322,10 @@ parse_substitute_name(const utf16lechar *substitute_name,
  * @bufsize
  *	Available space in @buf, in bytes.
  *
- * @lte_override
- *	If not NULL, the stream from which to read the reparse data.  Otherwise,
- *	the reparse data will be read from the unnamed stream of @inode.
+ * @blob_override
+ *	If not NULL, the blob from which to read the reparse data.  Otherwise,
+ *	the reparse data will be read from the reparse point attribute of
+ *	@inode.
  *
  * If the entire symbolic link target was placed in the buffer, returns the
  * number of bytes written.  The resulting string is not null-terminated.  If
@@ -332,7 +337,7 @@ parse_substitute_name(const utf16lechar *substitute_name,
 ssize_t
 wim_inode_readlink(const struct wim_inode * restrict inode,
 		   char * restrict buf, size_t bufsize,
-		   struct blob *lte_override)
+		   struct blob *blob_override)
 {
 	int ret;
 	struct reparse_buffer_disk rpbuf_disk _aligned_attribute(8);
@@ -345,7 +350,7 @@ wim_inode_readlink(const struct wim_inode * restrict inode,
 	wimlib_assert(inode_is_symlink(inode));
 
 	if (wim_inode_get_reparse_data(inode, (u8*)&rpbuf_disk, &rpbuflen,
-				       lte_override))
+				       blob_override))
 		return -EIO;
 
 	if (parse_reparse_data((const u8*)&rpbuf_disk, rpbuflen, &rpdata))
@@ -492,10 +497,13 @@ wim_inode_set_symlink(struct wim_inode *inode,
 
 	ret = make_reparse_buffer(&rpdata, (u8*)&rpbuf_disk, &rpbuflen);
 	if (ret == 0) {
-		ret = inode_set_unnamed_stream(inode,
-					       (u8*)&rpbuf_disk + 8,
-					       rpbuflen - 8,
-					       blob_table);
+		if (!inode_add_attribute_with_data(inode,
+						   ATTR_REPARSE_POINT,
+						   T(""),
+						   (u8*)&rpbuf_disk + 8,
+						   rpbuflen - 8,
+						   blob_table))
+			ret = WIMLIB_ERR_NOMEM;
 	}
 	FREE(name_utf16le);
 	return ret;

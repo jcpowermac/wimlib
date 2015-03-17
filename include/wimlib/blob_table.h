@@ -61,7 +61,7 @@ enum resource_location {
 
 struct blob_owner {
 	struct wim_inode *inode;
-	unsigned attr_idx;
+	struct wim_attribute *attr;
 };
 
 /*
@@ -378,12 +378,12 @@ static inline void
 add_unhashed_blob(struct blob *blob,
 		  struct wim_inode *back_inode,
 		  u32 back_attr_id,
-		  struct list_head *unhashed_streams)
+		  struct list_head *unhashed_blobs)
 {
 	blob->unhashed = 1;
 	blob->back_inode = back_inode;
 	blob->back_attr_id = back_attr_id;
-	list_add_tail(&blob->unhashed_list, unhashed_streams);
+	list_add_tail(&blob->unhashed_list, unhashed_blobs);
 }
 
 extern int

@@ -231,10 +231,10 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 	}
 	if (!table) {
 		struct blob *blob, *tmp;
-		list_for_each_entry_safe(blob, tmp, &imd->unhashed_streams, unhashed_list)
+		list_for_each_entry_safe(blob, tmp, &imd->unhashed_blobs, unhashed_list)
 			free_blob(blob);
 	}
-	INIT_LIST_HEAD(&imd->unhashed_streams);
+	INIT_LIST_HEAD(&imd->unhashed_blobs);
 	INIT_LIST_HEAD(&imd->inode_list);
 #ifdef WITH_NTFS_3G
 	if (imd->ntfs_vol) {
@@ -280,7 +280,7 @@ new_image_metadata(void)
 	if (imd) {
 		imd->refcnt = 1;
 		INIT_LIST_HEAD(&imd->inode_list);
-		INIT_LIST_HEAD(&imd->unhashed_streams);
+		INIT_LIST_HEAD(&imd->unhashed_blobs);
 	}
 	return imd;
 }
@@ -364,7 +364,7 @@ deselect_current_wim_image(WIMStruct *wim)
 		return;
 	imd = wim_get_current_image_metadata(wim);
 	if (!imd->modified) {
-		wimlib_assert(list_empty(&imd->unhashed_streams));
+		wimlib_assert(list_empty(&imd->unhashed_blobs));
 		destroy_image_metadata(imd, NULL, false);
 	}
 	wim->current_image = WIMLIB_NO_IMAGE;
@@ -817,7 +817,7 @@ wimlib_open_wim(const tchar *wimfile, int open_flags, WIMStruct **wim_ret)
  * library has previously used to add or mount an image using the same
  * WIMStruct. */
 int
-wim_checksum_unhashed_streams(WIMStruct *wim)
+wim_checksum_unhashed_blobs(WIMStruct *wim)
 {
 	int ret;
 

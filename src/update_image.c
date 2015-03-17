@@ -782,7 +782,7 @@ execute_add_command(struct update_command_journal *j,
 		    const struct wimlib_update_command *add_cmd,
 		    struct wim_inode_table *inode_table,
 		    struct wim_sd_set *sd_set,
-		    struct list_head *unhashed_streams)
+		    struct list_head *unhashed_blobs)
 {
 	int ret;
 	int add_flags;
@@ -826,7 +826,7 @@ execute_add_command(struct update_command_journal *j,
 		goto out;
 
 	params.blob_table = wim->blob_table;
-	params.unhashed_streams = unhashed_streams;
+	params.unhashed_blobs = unhashed_blobs;
 	params.inode_table = inode_table;
 	params.sd_set = sd_set;
 	params.config = &config;
@@ -1122,7 +1122,7 @@ execute_update_commands(WIMStruct *wim,
 {
 	struct wim_inode_table *inode_table;
 	struct wim_sd_set *sd_set;
-	struct list_head unhashed_streams;
+	struct list_head unhashed_blobs;
 	struct update_command_journal *j;
 	union wimlib_progress_info info;
 	int ret;
@@ -1142,7 +1142,7 @@ execute_update_commands(WIMStruct *wim,
 		if (ret)
 			goto out_destroy_inode_table;
 
-		INIT_LIST_HEAD(&unhashed_streams);
+		INIT_LIST_HEAD(&unhashed_blobs);
 	} else {
 		inode_table = NULL;
 		sd_set = NULL;
@@ -1176,7 +1176,7 @@ execute_update_commands(WIMStruct *wim,
 		switch (cmds[i].op) {
 		case WIMLIB_UPDATE_OP_ADD:
 			ret = execute_add_command(j, wim, &cmds[i], inode_table,
-						  sd_set, &unhashed_streams);
+						  sd_set, &unhashed_blobs);
 			break;
 		case WIMLIB_UPDATE_OP_DELETE:
 			ret = execute_delete_command(j, wim, &cmds[i]);
@@ -1204,7 +1204,7 @@ execute_update_commands(WIMStruct *wim,
 
 		imd = wim_get_current_image_metadata(wim);
 
-		list_splice_tail(&unhashed_streams, &imd->unhashed_streams);
+		list_splice_tail(&unhashed_blobs, &imd->unhashed_blobs);
 		inode_table_prepare_inode_list(inode_table, &imd->inode_list);
 	}
 	goto out_destroy_sd_set;

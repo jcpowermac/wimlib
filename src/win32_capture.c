@@ -825,7 +825,7 @@ win32_get_encrypted_file_size(const wchar_t *path, bool is_dir, u64 *size_ret)
 
 static int
 winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path,
-				 struct list_head *unhashed_streams)
+				 struct list_head *unhashed_blobs)
 {
 	struct blob *blob = new_blob();
 	int ret;
@@ -853,7 +853,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	}
 
 	blob->file_inode = inode;
-	add_unhashed_blob(blob, inode, 0, unhashed_streams);
+	add_unhashed_blob(blob, inode, 0, unhashed_blobs);
 	inode->i_lte = blob;
 	return 0;
 }
@@ -919,7 +919,7 @@ static int
 winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		  const wchar_t *raw_stream_name, size_t raw_stream_name_nchars,
 		  u64 stream_size,
-		  struct wim_inode *inode, struct list_head *unhashed_streams)
+		  struct wim_inode *inode, struct list_head *unhashed_blobs)
 {
 	const wchar_t *stream_name;
 	size_t stream_name_nchars;
@@ -981,7 +981,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		inode->i_lte = blob;
 	}
 	blob->file_inode = inode;
-	add_unhashed_blob(blob, inode, stream_id, unhashed_streams);
+	add_unhashed_blob(blob, inode, stream_id, unhashed_blobs);
 	return 0;
 }
 
@@ -1001,7 +1001,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
  */
 static int
 winnt_scan_streams(HANDLE h, const wchar_t *path, size_t path_nchars,
-		   struct wim_inode *inode, struct list_head *unhashed_streams,
+		   struct wim_inode *inode, struct list_head *unhashed_blobs,
 		   u64 file_size, u32 vol_flags)
 {
 	int ret;
@@ -1070,7 +1070,7 @@ winnt_scan_streams(HANDLE h, const wchar_t *path, size_t path_nchars,
 					info->StreamName,
 					info->StreamNameLength / 2,
 					info->StreamSize.QuadPart,
-					inode, unhashed_streams);
+					inode, unhashed_blobs);
 		if (ret)
 			goto out_free_buf;
 
@@ -1096,7 +1096,7 @@ unnamed_only:
 	}
 
 	ret = winnt_scan_stream(path, path_nchars, L"::$DATA", 7,
-				file_size, inode, unhashed_streams);
+				file_size, inode, unhashed_blobs);
 out_free_buf:
 	/* Free buffer if allocated on heap.  */
 	if (unlikely(buf != _buf))
@@ -1339,7 +1339,7 @@ retry_open:
 				 full_path,
 				 full_path_nchars,
 				 inode,
-				 params->unhashed_streams,
+				 params->unhashed_blobs,
 				 file_info.StandardInformation.EndOfFile.QuadPart,
 				 vol_flags);
 	if (ret)
@@ -1357,7 +1357,7 @@ retry_open:
 		(*func_NtClose)(h);
 		h = NULL;
 		ret = winnt_load_encrypted_stream_info(inode, full_path,
-						       params->unhashed_streams);
+						       params->unhashed_blobs);
 		if (ret)
 			goto out;
 	}

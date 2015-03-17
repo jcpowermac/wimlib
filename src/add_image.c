@@ -24,8 +24,8 @@
 #endif
 
 #include "wimlib.h"
-#include "wimlib/error.h"
 #include "wimlib/blob_table.h"
+#include "wimlib/error.h"
 #include "wimlib/metadata.h"
 #include "wimlib/security.h"
 #include "wimlib/xml.h"
@@ -42,7 +42,7 @@ add_empty_image_metadata(WIMStruct *wim)
 	struct wim_security_data *sd;
 	struct wim_image_metadata *imd;
 
-	/* Create lookup table entry for this metadata resource (for now really
+	/* Create blob table entry for this metadata resource (for now really
 	 * just a dummy entry).  */
 	ret = WIMLIB_ERR_NOMEM;
 	metadata_blob = new_blob();
@@ -55,7 +55,7 @@ add_empty_image_metadata(WIMStruct *wim)
 	/* Create empty security data (no security descriptors).  */
 	sd = new_wim_security_data();
 	if (!sd)
-		goto out_free_metadata_lte;
+		goto out_free_metadata_blob;
 
 	imd = new_image_metadata();
 	if (!imd)
@@ -76,7 +76,7 @@ add_empty_image_metadata(WIMStruct *wim)
 
 out_free_security_data:
 	free_wim_security_data(sd);
-out_free_metadata_lte:
+out_free_metadata_blob:
 	free_blob(metadata_blob);
 out:
 	return ret;

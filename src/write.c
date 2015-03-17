@@ -2743,7 +2743,7 @@ write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 	 * needs to be known before the stream data is written.  Therefore,
 	 * before getting much farther, we need to pre-calculate the SHA1
 	 * message digests of all streams that will be written.  */
-	ret = wim_checksum_unhashed_streams(wim);
+	ret = wim_checksum_unhashed_blobs(wim);
 	if (ret)
 		return ret;
 

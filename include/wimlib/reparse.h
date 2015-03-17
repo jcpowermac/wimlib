@@ -90,7 +90,7 @@ extern int
 wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 			   u8 * restrict rpbuf,
 			   u16 * restrict rpbuflen_ret,
-			   struct blob *lte_override);
+			   struct blob *blob_override);
 
 #ifndef __WIN32__
 ssize_t

@@ -1683,7 +1683,7 @@ do_wimlib_extract_paths(WIMStruct *wim, int image, const tchar *target,
 	if (ret)
 		return ret;
 
-	ret = wim_checksum_unhashed_streams(wim);
+	ret = wim_checksum_unhashed_blobs(wim);
 	if (ret)
 		return ret;
 

@@ -101,31 +101,37 @@ my_fdopendir(int *dirfd_p)
 
 static int
 unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
-		       struct list_head *unhashed_streams)
+		       struct list_head *unhashed_blobs)
 {
 	struct blob *blob;
-	char *file_on_disk;
+	struct wim_attribute *attr;
 
 	inode->i_attributes = FILE_ATTRIBUTE_NORMAL;
 
-	/* Empty files do not have to have a lookup table entry. */
-	if (!size)
-		return 0;
+	if (size) {
+		char *file_on_disk = STRDUP(path);
+		if (!file_on_disk)
+			return WIMLIB_ERR_NOMEM;
+		blob = new_blob();
+		if (!blob) {
+			FREE(file_on_disk);
+			return WIMLIB_ERR_NOMEM;
+		}
+		blob->file_on_disk = file_on_disk;
+		blob->file_inode = inode;
+		blob->resource_location = RESOURCE_IN_FILE_ON_DISK;
+		blob->size = size;
+	} else {
+		blob = NULL;
+	}
 
-	file_on_disk = STRDUP(path);
-	if (!file_on_disk)
-		return WIMLIB_ERR_NOMEM;
-	blob = new_blob();
-	if (!blob) {
-		FREE(file_on_disk);
+	attr = inode_add_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
+	if (!attr) {
+		free_blob(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
-	blob->file_on_disk = file_on_disk;
-	blob->file_inode = inode;
-	blob->resource_location = RESOURCE_IN_FILE_ON_DISK;
-	blob->size = size;
-	add_unhashed_blob(blob, inode, 0, unhashed_streams);
-	inode->i_lte = blob;
+	add_unhashed_blob(blob, inode, 0, unhashed_blobs);
+	attr->attr_blob = blob;
 	return 0;
 }
 
@@ -418,7 +424,7 @@ unix_build_dentry_tree_recursive(struct wim_dentry **tree_ret,
 
 	if (S_ISREG(stbuf.st_mode)) {
 		ret = unix_scan_regular_file(full_path, stbuf.st_size,
-					     inode, params->unhashed_streams);
+					     inode, params->unhashed_blobs);
 	} else if (S_ISDIR(stbuf.st_mode)) {
 		ret = unix_scan_directory(tree, full_path, full_path_len,
 					  dirfd, relpath, params);
