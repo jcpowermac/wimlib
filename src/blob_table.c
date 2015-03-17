@@ -527,8 +527,7 @@ sort_blob_list_by_sequential_order(struct list_head *blob_list,
 
 
 static int
-add_lte_to_array(struct blob *blob,
-		 void *_pp)
+add_blob_to_array(struct blob *blob, void *_pp)
 {
 	struct blob ***pp = _pp;
 	*(*pp)++ = blob;
@@ -541,27 +540,27 @@ int
 for_blob_pos_sorted(struct blob_table *table,
 		    int (*visitor)(struct blob *, void *), void *arg)
 {
-	struct blob **lte_array, **p;
+	struct blob **blob_array, **p;
 	size_t num_blobs = table->num_blobs;
 	int ret;
 
-	lte_array = MALLOC(num_blobs * sizeof(lte_array[0]));
-	if (!lte_array)
+	blob_array = MALLOC(num_blobs * sizeof(blob_array[0]));
+	if (!blob_array)
 		return WIMLIB_ERR_NOMEM;
-	p = lte_array;
-	for_blob(table, add_lte_to_array, &p);
+	p = blob_array;
+	for_blob(table, add_blob_to_array, &p);
 
-	wimlib_assert(p == lte_array + num_blobs);
+	wimlib_assert(p == blob_array + num_blobs);
 
-	qsort(lte_array, num_blobs, sizeof(lte_array[0]),
+	qsort(blob_array, num_blobs, sizeof(blob_array[0]),
 	      cmp_blobs_by_sequential_order);
 	ret = 0;
 	for (size_t i = 0; i < num_blobs; i++) {
-		ret = visitor(lte_array[i], arg);
+		ret = visitor(blob_array[i], arg);
 		if (ret)
 			break;
 	}
-	FREE(lte_array);
+	FREE(blob_array);
 	return ret;
 }
 
@@ -824,11 +823,11 @@ validate_resource(struct wim_resource_spec *rspec)
 	return 0;
 
 invalid_due_to_overflow:
-	ERROR("Invalid resource entry (offset overflow)");
+	ERROR("Invalid blob table (offset overflow)");
 	return WIMLIB_ERR_INVALID_LOOKUP_TABLE_ENTRY;
 
 invalid_due_to_overlap:
-	ERROR("Invalid resource entry (streams in solid resource overlap)");
+	ERROR("Invalid blob table (blobs in solid resource overlap)");
 	return WIMLIB_ERR_INVALID_LOOKUP_TABLE_ENTRY;
 }
 
@@ -854,7 +853,7 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
  * per-image location (the wim->image_metadata array).
  *
  * This works for both version WIM_VERSION_DEFAULT (68864) and version
- * WIM_VERSION_SOLID (3584) WIMs.  In the latter, a consecutive run of lookup
+ * WIM_VERSION_SOLID (3584) WIMs.  In the latter, a consecutive run of blob
  * table entries that all have flag WIM_RESHDR_FLAG_SOLID (0x10) set is a "solid
  * run".  A solid run logically contains zero or more resources, each of which
  * logically contains zero or more blobs.  Physically, in such a run, a "lookup
@@ -869,7 +868,7 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
  *	WIMLIB_ERR_INVALID_LOOKUP_TABLE_ENTRY
  *	WIMLIB_ERR_NOMEM
  *
- *	Or an error code caused by failure to read the lookup table from the WIM
+ *	Or an error code caused by failure to read the blob table from the WIM
  *	file.
  */
 int
@@ -886,17 +885,17 @@ read_blob_table(WIMStruct *wim)
 	struct wim_resource_spec **cur_solid_rspecs = NULL;
 	size_t cur_num_solid_rspecs = 0;
 
-	DEBUG("Reading lookup table.");
+	DEBUG("Reading blob table.");
 
-	/* Sanity check: lookup table entries are 50 bytes each.  */
+	/* Sanity check: blob table entries are 50 bytes each.  */
 	BUILD_BUG_ON(sizeof(struct blob_table_entry_disk) !=
 		     WIM_BLOB_TABLE_ENTRY_DISK_SIZE);
 
-	/* Calculate the number of entries in the lookup table.  */
+	/* Calculate the number of entries in the blob table.  */
 	num_entries = wim->hdr.blob_table_reshdr.uncompressed_size /
 		      sizeof(struct blob_table_entry_disk);
 
-	/* Read the lookup table into a buffer.  */
+	/* Read the blob table into a buffer.  */
 	ret = wim_reshdr_to_data(&wim->hdr.blob_table_reshdr, wim, &buf);
 	if (ret)
 		goto out;
@@ -908,9 +907,9 @@ read_blob_table(WIMStruct *wim)
 		goto oom;
 
 	/* Allocate and initalize blob table entries ('struct blob's) from the
-	 * raw lookup table buffer.  Each of these entries will point to a
-	 * 'struct wim_resource_spec' that describes the underlying resource.
-	 * In WIMs with version number WIM_VERSION_SOLID, a resource may contain
+	 * raw blob table buffer.  Each of these entries will point to a 'struct
+	 * wim_resource_spec' that describes the underlying resource.  In WIMs
+	 * with version number WIM_VERSION_SOLID, a resource may contain
 	 * multiple blobs.  */
 	for (size_t i = 0; i < num_entries; i++) {
 		const struct blob_table_entry_disk *disk_entry =
@@ -1038,7 +1037,7 @@ read_blob_table(WIMStruct *wim)
 
 		if (reshdr.flags & WIM_RESHDR_FLAG_METADATA) {
 
-			/* Lookup table entry for a metadata resource.  */
+			/* Blob table entry for a metadata resource.  */
 
 			/* Metadata entries with no references must be ignored.
 			 * See, for example, the WinPE WIMs from the WAIK v2.1.
@@ -1062,7 +1061,7 @@ read_blob_table(WIMStruct *wim)
 				goto free_cur_entry_and_continue;
 			}
 
-			/* The number of entries in the lookup table with
+			/* The number of entries in the blob table with
 			 * WIM_RESHDR_FLAG_METADATA set should be the same as
 			 * the image_count field in the WIM header.  */
 			if (image_index == wim->hdr.image_count) {
@@ -1072,11 +1071,11 @@ read_blob_table(WIMStruct *wim)
 
 			/* Notice very carefully:  We are assigning the metadata
 			 * resources to images in the same order in which their
-			 * lookup table entries occur on disk.  (This is also
-			 * the behavior of Microsoft's software.)  In
-			 * particular, this overrides the actual locations of
-			 * the metadata resources themselves in the WIM file as
-			 * well as any information written in the XML data.  */
+			 * blob table entries occur on disk.  (This is also the
+			 * behavior of Microsoft's software.)  In particular,
+			 * this overrides the actual locations of the metadata
+			 * resources themselves in the WIM file as well as any
+			 * information written in the XML data.  */
 			DEBUG("Found metadata resource for image %"PRIu32" at "
 			      "offset %"PRIu64".",
 			      image_index + 1,
@@ -1084,7 +1083,7 @@ read_blob_table(WIMStruct *wim)
 
 			wim->image_metadata[image_index++]->metadata_blob = cur_entry;
 		} else {
-			/* Lookup table entry for a non-metadata blob.  */
+			/* Blob table entry for a non-metadata blob.  */
 
 			/* Ignore this blob if it's a duplicate.  */
 			if (lookup_blob(table, cur_entry->hash)) {
@@ -1092,8 +1091,8 @@ read_blob_table(WIMStruct *wim)
 				goto free_cur_entry_and_continue;
 			}
 
-			/* Insert the blob into the in-memory lookup table,
-			 * keyed by its SHA-1 message digest.  */
+			/* Insert the blob into the in-memory blob table, keyed
+			 * by its SHA-1 message digest.  */
 			blob_table_insert(table, cur_entry);
 		}
 
@@ -1108,7 +1107,7 @@ read_blob_table(WIMStruct *wim)
 	cur_entry = NULL;
 
 	if (cur_solid_rspecs) {
-		/* End of lookup table terminated a solid run.  */
+		/* End of blob table terminated a solid run.  */
 		ret = finish_solid_rspecs(cur_solid_rspecs, cur_num_solid_rspecs);
 		cur_solid_rspecs = NULL;
 		if (ret)
@@ -1122,23 +1121,21 @@ read_blob_table(WIMStruct *wim)
 		wim->hdr.image_count = image_index;
 	}
 
-	if (num_duplicate_blobs > 0) {
-		WARNING("Ignoring %zu duplicate blobs in the WIM lookup table",
-			num_duplicate_blobs);
-	}
+	if (num_duplicate_blobs > 0)
+		WARNING("Ignoring %zu duplicate blobs", num_duplicate_blobs);
 
 	if (num_wrong_part_blobs > 0) {
 		WARNING("Ignoring %zu blobs with wrong part number",
 			num_wrong_part_blobs);
 	}
 
-	DEBUG("Done reading lookup table.");
+	DEBUG("Done reading blob table.");
 	wim->blob_table = table;
 	ret = 0;
 	goto out_free_buf;
 
 oom:
-	ERROR("Not enough memory to read lookup table!");
+	ERROR("Not enough memory to read blob table!");
 	ret = WIMLIB_ERR_NOMEM;
 out:
 	free_solid_rspecs(cur_solid_rspecs, cur_num_solid_rspecs);
@@ -1192,12 +1189,12 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 		}
 	}
 
-	DEBUG("Writing WIM lookup table (size=%zu, offset=%"PRIu64")",
+	DEBUG("Writing WIM blob table (size=%zu, offset=%"PRIu64")",
 	      table_size, out_fd->offset);
 
 	table_buf = MALLOC(table_size);
 	if (table_buf == NULL) {
-		ERROR("Failed to allocate %zu bytes for temporary lookup table",
+		ERROR("Failed to allocate %zu bytes for temporary blob table",
 		      table_size);
 		return WIMLIB_ERR_NOMEM;
 	}
@@ -1241,8 +1238,8 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 	}
 	wimlib_assert((u8*)table_buf_ptr - (u8*)table_buf == table_size);
 
-	/* Write the lookup table uncompressed.  Although wimlib can handle a
-	 * compressed lookup table, MS software cannot.  */
+	/* Write the blob table uncompressed.  Although wimlib can handle a
+	 * compressed blob table, MS software cannot.  */
 	ret = write_wim_resource_from_buffer(table_buf,
 					     table_size,
 					     WIM_RESHDR_FLAG_METADATA,
@@ -1264,13 +1261,13 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
 			  struct blob_table *blob_table)
 {
 	u8 hash[SHA1_HASH_SIZE];
-	struct blob *blob, *existing_lte;
+	struct blob *blob, *existing_blob;
 
 	sha1_buffer(buffer, size, hash);
-	existing_lte = lookup_blob(blob_table, hash);
-	if (existing_lte) {
-		wimlib_assert(existing_lte->size == size);
-		blob = existing_lte;
+	existing_blob = lookup_blob(blob_table, hash);
+	if (existing_blob) {
+		wimlib_assert(existing_blob->size == size);
+		blob = existing_blob;
 		blob->refcnt++;
 	} else {
 		void *buffer_copy;
@@ -1282,9 +1279,9 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
 			free_blob(blob);
 			return NULL;
 		}
-		blob->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
-		blob->attached_buffer    = buffer_copy;
-		blob->size               = size;
+		blob->resource_location = RESOURCE_IN_ATTACHED_BUFFER;
+		blob->attached_buffer = buffer_copy;
+		blob->size = size;
 		copy_hash(blob->hash, hash);
 		blob_table_insert(blob_table, blob);
 	}
@@ -1341,7 +1338,7 @@ hash_unhashed_blob(struct blob *blob, struct blob_table *blob_table,
 		blob = duplicate_blob;
 	} else {
 		/* No duplicate blob, so we need to insert this blob into the
-		 * lookup table and treat it as a hashed blob. */
+		 * blob table and treat it as a hashed blob. */
 		blob_table_insert(blob_table, blob);
 		blob->unhashed = 0;
 	}
