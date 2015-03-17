@@ -979,7 +979,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 }
 
 struct streamifier_context {
-	struct read_stream_list_callbacks cbs;
+	struct read_blob_list_callbacks cbs;
 	struct blob *cur_stream;
 	struct blob *next_stream;
 	u64 cur_stream_offset;
@@ -998,7 +998,7 @@ next_stream(struct blob *blob, size_t list_head_offset)
 }
 
 /* A consume_data_callback_t implementation that translates raw resource data
- * into streams, calling the begin_stream, consume_chunk, and end_stream
+ * into streams, calling the begin_blob, consume_chunk, and end_blob
  * callback functions as appropriate.  */
 static int
 streamifier_cb(const void *chunk, size_t size, void *_ctx)
@@ -1017,8 +1017,8 @@ streamifier_cb(const void *chunk, size_t size, void *_ctx)
 		DEBUG("Begin new stream (size=%"PRIu64").",
 		      ctx->cur_stream->size);
 
-		ret = (*ctx->cbs.begin_stream)(ctx->cur_stream,
-					       ctx->cbs.begin_stream_ctx);
+		ret = (*ctx->cbs.begin_blob)(ctx->cur_stream,
+					       ctx->cbs.begin_blob_ctx);
 		if (ret)
 			return ret;
 	}
@@ -1036,8 +1036,8 @@ streamifier_cb(const void *chunk, size_t size, void *_ctx)
 		ctx->cur_stream_offset = 0;
 
 		DEBUG("End stream (size=%"PRIu64").", ctx->cur_stream->size);
-		ret = (*ctx->cbs.end_stream)(ctx->cur_stream, 0,
-					     ctx->cbs.end_stream_ctx);
+		ret = (*ctx->cbs.end_blob)(ctx->cur_stream, 0,
+					     ctx->cbs.end_blob_ctx);
 		if (ret)
 			return ret;
 
@@ -1057,22 +1057,22 @@ streamifier_cb(const void *chunk, size_t size, void *_ctx)
 struct hasher_context {
 	SHA_CTX sha_ctx;
 	int flags;
-	struct read_stream_list_callbacks cbs;
+	struct read_blob_list_callbacks cbs;
 };
 
 /* Callback for starting to read a stream while calculating its SHA1 message
  * digest.  */
 static int
-hasher_begin_stream(struct blob *blob, void *_ctx)
+hasher_begin_blob(struct blob *blob, void *_ctx)
 {
 	struct hasher_context *ctx = _ctx;
 
 	sha1_init(&ctx->sha_ctx);
 
-	if (ctx->cbs.begin_stream == NULL)
+	if (ctx->cbs.begin_blob == NULL)
 		return 0;
 	else
-		return (*ctx->cbs.begin_stream)(blob, ctx->cbs.begin_stream_ctx);
+		return (*ctx->cbs.begin_blob)(blob, ctx->cbs.begin_blob_ctx);
 }
 
 /* A consume_data_callback_t implementation that continues calculating the SHA1
@@ -1094,7 +1094,7 @@ hasher_consume_chunk(const void *chunk, size_t size, void *_ctx)
 /* Callback for finishing reading a stream while calculating its SHA1 message
  * digest.  */
 static int
-hasher_end_stream(struct blob *blob, int status, void *_ctx)
+hasher_end_blob(struct blob *blob, int status, void *_ctx)
 {
 	struct hasher_context *ctx = _ctx;
 	u8 hash[SHA1_HASH_SIZE];
@@ -1110,7 +1110,7 @@ hasher_end_stream(struct blob *blob, int status, void *_ctx)
 	sha1_final(hash, &ctx->sha_ctx);
 
 	if (blob->unhashed) {
-		if (ctx->flags & COMPUTE_MISSING_STREAM_HASHES) {
+		if (ctx->flags & COMPUTE_MISSING_BLOB_HASHES) {
 			/* No SHA1 message digest was previously present for the
 			 * stream.  Set it to the one just calculated.  */
 			DEBUG("Set SHA1 message digest for stream "
@@ -1118,7 +1118,7 @@ hasher_end_stream(struct blob *blob, int status, void *_ctx)
 			copy_hash(blob->hash, hash);
 		}
 	} else {
-		if (ctx->flags & VERIFY_STREAM_HASHES) {
+		if (ctx->flags & VERIFY_BLOB_HASHES) {
 			/* The stream already had a SHA1 message digest present.  Verify
 			 * that it is the same as the calculated value.  */
 			if (!hashes_equal(hash, blob->hash)) {
@@ -1142,26 +1142,26 @@ hasher_end_stream(struct blob *blob, int status, void *_ctx)
 	}
 	ret = 0;
 out_next_cb:
-	if (ctx->cbs.end_stream == NULL)
+	if (ctx->cbs.end_blob == NULL)
 		return ret;
 	else
-		return (*ctx->cbs.end_stream)(blob, ret, ctx->cbs.end_stream_ctx);
+		return (*ctx->cbs.end_blob)(blob, ret, ctx->cbs.end_blob_ctx);
 }
 
 static int
 read_full_stream_with_cbs(struct blob *blob,
-			  const struct read_stream_list_callbacks *cbs)
+			  const struct read_blob_list_callbacks *cbs)
 {
 	int ret;
 
-	ret = (*cbs->begin_stream)(blob, cbs->begin_stream_ctx);
+	ret = (*cbs->begin_blob)(blob, cbs->begin_blob_ctx);
 	if (ret)
 		return ret;
 
 	ret = read_stream_prefix(blob, blob->size, cbs->consume_chunk,
 				 cbs->consume_chunk_ctx);
 
-	return (*cbs->end_stream)(blob, ret, cbs->end_stream_ctx);
+	return (*cbs->end_blob)(blob, ret, cbs->end_blob_ctx);
 }
 
 /* Read the full data of the specified stream, passing the data into the
@@ -1169,19 +1169,19 @@ read_full_stream_with_cbs(struct blob *blob,
  * computing the SHA1 message digest of the stream.  */
 static int
 read_full_stream_with_sha1(struct blob *blob,
-			   const struct read_stream_list_callbacks *cbs)
+			   const struct read_blob_list_callbacks *cbs)
 {
 	struct hasher_context hasher_ctx = {
-		.flags = VERIFY_STREAM_HASHES | COMPUTE_MISSING_STREAM_HASHES,
+		.flags = VERIFY_BLOB_HASHES | COMPUTE_MISSING_BLOB_HASHES,
 		.cbs = *cbs,
 	};
-	struct read_stream_list_callbacks hasher_cbs = {
-		.begin_stream		= hasher_begin_stream,
-		.begin_stream_ctx	= &hasher_ctx,
+	struct read_blob_list_callbacks hasher_cbs = {
+		.begin_blob		= hasher_begin_blob,
+		.begin_blob_ctx	= &hasher_ctx,
 		.consume_chunk		= hasher_consume_chunk,
 		.consume_chunk_ctx	= &hasher_ctx,
-		.end_stream		= hasher_end_stream,
-		.end_stream_ctx		= &hasher_ctx,
+		.end_blob		= hasher_end_blob,
+		.end_blob_ctx		= &hasher_ctx,
 	};
 	return read_full_stream_with_cbs(blob, &hasher_cbs);
 }
@@ -1191,7 +1191,7 @@ read_streams_in_solid_resource(struct blob *first_stream,
 			       struct blob *last_stream,
 			       u64 stream_count,
 			       size_t list_head_offset,
-			       const struct read_stream_list_callbacks *sink_cbs)
+			       const struct read_blob_list_callbacks *sink_cbs)
 {
 	struct data_range *ranges;
 	bool ranges_malloced;
@@ -1253,10 +1253,10 @@ read_streams_in_solid_resource(struct blob *first_stream,
 
 	if (ret) {
 		if (streamifier_ctx.cur_stream_offset != 0) {
-			ret = (*streamifier_ctx.cbs.end_stream)
+			ret = (*streamifier_ctx.cbs.end_blob)
 				(streamifier_ctx.cur_stream,
 				 ret,
-				 streamifier_ctx.cbs.end_stream_ctx);
+				 streamifier_ctx.cbs.end_blob_ctx);
 		}
 	}
 	return ret;
@@ -1280,18 +1280,18 @@ read_streams_in_solid_resource(struct blob *first_stream,
  * @flags
  *	Bitwise OR of zero or more of the following flags:
  *
- *	VERIFY_STREAM_HASHES:
+ *	VERIFY_BLOB_HASHES:
  *		For all streams being read that have already had SHA1 message
  *		digests computed, calculate the SHA1 message digest of the read
  *		data and compare it with the previously computed value.  If they
  *		do not match, return WIMLIB_ERR_INVALID_RESOURCE_HASH.
  *
- *	COMPUTE_MISSING_STREAM_HASHES
+ *	COMPUTE_MISSING_BLOB_HASHES
  *		For all streams being read that have not yet had their SHA1
  *		message digests computed, calculate and save their SHA1 message
  *		digests.
  *
- *	STREAM_LIST_ALREADY_SORTED
+ *	BLOB_LIST_ALREADY_SORTED
  *		@stream_list is already sorted in sequential order for reading.
  *
  * The callback functions are allowed to delete the current stream from the list
@@ -1302,40 +1302,40 @@ read_streams_in_solid_resource(struct blob *first_stream,
  * of the callback functions.
  */
 int
-read_stream_list(struct list_head *stream_list,
+read_blob_list(struct list_head *stream_list,
 		 size_t list_head_offset,
-		 const struct read_stream_list_callbacks *cbs,
+		 const struct read_blob_list_callbacks *cbs,
 		 int flags)
 {
 	int ret;
 	struct list_head *cur, *next;
 	struct blob *blob;
 	struct hasher_context *hasher_ctx;
-	struct read_stream_list_callbacks *sink_cbs;
+	struct read_blob_list_callbacks *sink_cbs;
 
-	if (!(flags & STREAM_LIST_ALREADY_SORTED)) {
+	if (!(flags & BLOB_LIST_ALREADY_SORTED)) {
 		ret = sort_blob_list_by_sequential_order(stream_list, list_head_offset);
 		if (ret)
 			return ret;
 	}
 
-	if (flags & (VERIFY_STREAM_HASHES | COMPUTE_MISSING_STREAM_HASHES)) {
+	if (flags & (VERIFY_BLOB_HASHES | COMPUTE_MISSING_BLOB_HASHES)) {
 		hasher_ctx = alloca(sizeof(*hasher_ctx));
 		*hasher_ctx = (struct hasher_context) {
 			.flags	= flags,
 			.cbs	= *cbs,
 		};
 		sink_cbs = alloca(sizeof(*sink_cbs));
-		*sink_cbs = (struct read_stream_list_callbacks) {
-			.begin_stream		= hasher_begin_stream,
-			.begin_stream_ctx	= hasher_ctx,
+		*sink_cbs = (struct read_blob_list_callbacks) {
+			.begin_blob		= hasher_begin_blob,
+			.begin_blob_ctx	= hasher_ctx,
 			.consume_chunk		= hasher_consume_chunk,
 			.consume_chunk_ctx	= hasher_ctx,
-			.end_stream		= hasher_end_stream,
-			.end_stream_ctx		= hasher_ctx,
+			.end_blob		= hasher_end_blob,
+			.end_blob_ctx		= hasher_ctx,
 		};
 	} else {
-		sink_cbs = (struct read_stream_list_callbacks*)cbs;
+		sink_cbs = (struct read_blob_list_callbacks*)cbs;
 	}
 
 	for (cur = stream_list->next, next = cur->next;
@@ -1391,7 +1391,7 @@ read_stream_list(struct list_head *stream_list,
 		}
 
 		ret = read_full_stream_with_cbs(blob, sink_cbs);
-		if (ret && ret != BEGIN_STREAM_STATUS_SKIP_STREAM)
+		if (ret && ret != BEGIN_BLOB_STATUS_SKIP_BLOB)
 			return ret;
 	}
 	return 0;
@@ -1405,13 +1405,13 @@ read_stream_list(struct list_head *stream_list,
  * The uncompressed data of the resource is passed in chunks of unspecified size
  * to the @extract_chunk function, passing it @extract_chunk_arg.  */
 int
-extract_stream(struct blob *blob, u64 size,
+extract_blob(struct blob *blob, u64 size,
 	       consume_data_callback_t extract_chunk, void *extract_chunk_arg)
 {
 	wimlib_assert(size <= blob->size);
 	if (size == blob->size) {
 		/* Do SHA1.  */
-		struct read_stream_list_callbacks cbs = {
+		struct read_blob_list_callbacks cbs = {
 			.consume_chunk		= extract_chunk,
 			.consume_chunk_ctx	= extract_chunk_arg,
 		};
@@ -1441,10 +1441,10 @@ extract_chunk_to_fd(const void *chunk, size_t size, void *_fd_p)
 /* Extract the first @size bytes of the specified stream to the specified file
  * descriptor.  */
 int
-extract_stream_to_fd(struct blob *blob,
+extract_blob_to_fd(struct blob *blob,
 		     struct filedes *fd, u64 size)
 {
-	return extract_stream(blob, size, extract_chunk_to_fd, fd);
+	return extract_blob(blob, size, extract_chunk_to_fd, fd);
 }
 
 /* Extract the full uncompressed contents of the specified stream to the
@@ -1453,7 +1453,7 @@ int
 extract_full_stream_to_fd(struct blob *blob,
 			  struct filedes *fd)
 {
-	return extract_stream_to_fd(blob, fd, blob->size);
+	return extract_blob_to_fd(blob, fd, blob->size);
 }
 
 /* Calculate the SHA1 message digest of a stream and store it in @blob->hash.  */
@@ -1461,7 +1461,7 @@ int
 sha1_stream(struct blob *blob)
 {
 	wimlib_assert(blob->unhashed);
-	struct read_stream_list_callbacks cbs = {
+	struct read_blob_list_callbacks cbs = {
 	};
 	return read_full_stream_with_sha1(blob, &cbs);
 }

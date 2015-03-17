@@ -32,7 +32,7 @@ struct wim_features {
 };
 
 struct blob;
-struct read_stream_list_callbacks;
+struct read_blob_list_callbacks;
 struct apply_operations;
 struct wim_dentry;
 
@@ -69,7 +69,7 @@ struct apply_ctx {
 	unsigned long invalid_sequence;
 	unsigned long num_streams_remaining;
 	struct list_head stream_list;
-	const struct read_stream_list_callbacks *saved_cbs;
+	const struct read_blob_list_callbacks *saved_cbs;
 	struct blob *cur_stream;
 	u64 cur_stream_offset;
 	struct filedes tmpfile_fd;
@@ -140,8 +140,8 @@ report_apply_error(struct apply_ctx *ctx, int error_code, const tchar *path)
 			 struct wim_dentry, d_extraction_alias_node)
 
 extern int
-extract_stream_list(struct apply_ctx *ctx,
-		    const struct read_stream_list_callbacks *cbs);
+extract_blob_list(struct apply_ctx *ctx,
+		    const struct read_blob_list_callbacks *cbs);
 
 /*
  * Represents an extraction backend.
@@ -207,7 +207,7 @@ struct apply_operations {
 	 *
 	 * The streams required to be extracted will already be prepared in
 	 * 'apply_ctx'.  The extraction backend should call
-	 * extract_stream_list() to extract them.
+	 * extract_blob_list() to extract them.
 	 *
 	 * The will_extract_dentry() utility function, given an arbitrary dentry
 	 * in the WIM image (which may not be in the extraction list), can be

@@ -16,10 +16,10 @@ struct wim_image_metadata;
  * If a `struct blob' blob has (blob->resource_location ==
  * RESOURCE_IN_WIM), then blob->rspec points to an instance of this structure.
  *
- * Normally, there is a one-to-one correspondence between lookup table entries
- * ("streams", each of which may be the contents of a file, for example) and
- * resources.  However, a resource with the WIM_RESHDR_FLAG_SOLID flag set is a
- * "solid" resource that may contain multiple streams compressed together.
+ * Normally, there is a one-to-one correspondence between "blobs" (each of which
+ * may be the contents of a file, for example) and resources.  However, a
+ * resource with the WIM_RESHDR_FLAG_SOLID flag set is a "solid" resource that
+ * may contain multiple blobs compressed together.
  */
 struct wim_resource_spec {
 	/* The WIM containing this resource.  @wim->in_fd is expected to be a
@@ -39,8 +39,8 @@ struct wim_resource_spec {
 	 * to.  */
 	u64 uncompressed_size;
 
-	/* The list of streams this resource contains.  */
-	struct list_head stream_list;
+	/* The list of blobs this resource contains.  */
+	struct list_head blob_list;
 
 	/* Flags for this resource (WIM_RESHDR_FLAG_*).  */
 	u32 flags : 8;
@@ -101,13 +101,12 @@ struct wim_reshdr {
  * compression type.  */
 #define WIM_RESHDR_FLAG_COMPRESSED	0x04
 
-/* Unknown meaning; may be intended to indicate a partial stream.  Currently
+/* Unknown meaning; may be intended to indicate a partial blob.  Currently
  * ignored by wimlib.  */
 #define WIM_RESHDR_FLAG_SPANNED         0x08
 
-/* The resource is a solid compressed resource which may contain multiple
- * streams.  This flag is only allowed if the WIM version number is
- * WIM_VERSION_SOLID.  */
+/* The resource is a solid compressed resource which may contain multiple blobs.
+ * This flag is only allowed if the WIM version number is WIM_VERSION_SOLID.  */
 #define WIM_RESHDR_FLAG_SOLID		0x10
 
 /* Magic number in the 'uncompressed_size' field of the resource header that
@@ -184,18 +183,17 @@ get_chunk_entry_size(u64 res_size, bool is_alt)
 		return 8;
 }
 
-/* Functions to read streams  */
+/* Functions to read blobs  */
 
 extern int
-read_partial_wim_stream_into_buf(const struct blob *blob,
-				 size_t size, u64 offset, void *buf);
+read_partial_wim_blob_into_buf(const struct blob *blob,
+			       size_t size, u64 offset, void *buf);
 
 extern int
-read_full_stream_into_buf(const struct blob *blob, void *buf);
+read_full_blob_into_buf(const struct blob *blob, void *buf);
 
 extern int
-read_full_stream_into_alloc_buf(const struct blob *blob,
-				void **buf_ret);
+read_full_blob_into_alloc_buf(const struct blob *blob, void **buf_ret);
 
 extern int
 wim_reshdr_to_data(const struct wim_reshdr *reshdr,
@@ -206,90 +204,87 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 		   u8 hash[SHA1_HASH_SIZE]);
 
 extern int
-skip_wim_stream(struct blob *blob);
+skip_wim_blob(struct blob *blob);
 
 /*
- * Type of callback function for beginning to read a stream.
+ * Type of callback function for beginning to read a blob.
  *
  * @blob:
- *	Stream that is about to be read.
+ *	Blob that is about to be read.
  *
  * @ctx:
  *	User-provided context.
  *
  * Must return 0 on success, a positive error code on failure, or the special
- * value BEGIN_STREAM_STATUS_SKIP_STREAM to indicate that the stream should not
- * be read, and read_stream_list() should continue on to the next stream
- * (without calling @consume_chunk or @end_stream).
+ * value BEGIN_BLOB_STATUS_SKIP_BLOB to indicate that the blob should not be
+ * read, and read_blob_list() should continue on to the next blob (without
+ * calling @consume_chunk or @end_blob).
  */
-typedef int (*read_stream_list_begin_stream_t)(struct blob *blob,
-					       void *ctx);
+typedef int (*read_blob_list_begin_blob_t)(struct blob *blob, void *ctx);
 
-#define BEGIN_STREAM_STATUS_SKIP_STREAM	-1
+#define BEGIN_BLOB_STATUS_SKIP_BLOB	-1
 
 /*
- * Type of callback function for finishing reading a stream.
+ * Type of callback function for finishing reading a blob.
  *
  * @blob:
- *	Stream that has been fully read, or stream that started being read but
- *	could not be fully read due to a read error.
+ *	Blob that has been fully read, or blob that started being read but could
+ *	not be fully read due to a read error.
  *
  * @status:
- *	0 if reading the stream was successful; otherwise a nonzero error code
+ *	0 if reading the blob was successful; otherwise a nonzero error code
  *	that specifies the return status.
  *
  * @ctx:
  *	User-provided context.
  */
-typedef int (*read_stream_list_end_stream_t)(struct blob *blob,
-					     int status,
-					     void *ctx);
+typedef int (*read_blob_list_end_blob_t)(struct blob *blob, int status, void *ctx);
 
 
-/* Callback functions and contexts for read_stream_list().  */
-struct read_stream_list_callbacks {
+/* Callback functions and contexts for read_blob_list().  */
+struct read_blob_list_callbacks {
 
-	/* Called when a stream is about to be read.  */
-	read_stream_list_begin_stream_t begin_stream;
+	/* Called when a blob is about to be read.  */
+	read_blob_list_begin_blob_t begin_blob;
 
 	/* Called when a chunk of data has been read.  */
 	consume_data_callback_t consume_chunk;
 
-	/* Called when a stream has been fully read.  A successful call to
-	 * @begin_stream will always be matched by a call to @end_stream.  */
-	read_stream_list_end_stream_t end_stream;
+	/* Called when a blob has been fully read.  A successful call to
+	 * @begin_blob will always be matched by a call to @end_blob.  */
+	read_blob_list_end_blob_t end_blob;
 
-	/* Parameter passed to @begin_stream.  */
-	void *begin_stream_ctx;
+	/* Parameter passed to @begin_blob.  */
+	void *begin_blob_ctx;
 
 	/* Parameter passed to @consume_chunk.  */
 	void *consume_chunk_ctx;
 
-	/* Parameter passed to @end_stream.  */
-	void *end_stream_ctx;
+	/* Parameter passed to @end_blob.  */
+	void *end_blob_ctx;
 };
 
-/* Flags for read_stream_list()  */
-#define VERIFY_STREAM_HASHES		0x1
-#define COMPUTE_MISSING_STREAM_HASHES	0x2
-#define STREAM_LIST_ALREADY_SORTED	0x4
+/* Flags for read_blob_list()  */
+#define VERIFY_BLOB_HASHES		0x1
+#define COMPUTE_MISSING_BLOB_HASHES	0x2
+#define BLOB_LIST_ALREADY_SORTED	0x4
 
 extern int
-read_stream_list(struct list_head *stream_list,
+read_blob_list(struct list_head *stream_list,
 		 size_t list_head_offset,
-		 const struct read_stream_list_callbacks *cbs,
+		 const struct read_blob_list_callbacks *cbs,
 		 int flags);
 
 /* Functions to extract streams.  */
 
 extern int
-extract_stream(struct blob *blob,
+extract_blob(struct blob *blob,
 	       u64 size,
 	       consume_data_callback_t extract_chunk,
 	       void *extract_chunk_arg);
 
 extern int
-extract_stream_to_fd(struct blob *blob,
+extract_blob_to_fd(struct blob *blob,
 		     struct filedes *fd, u64 size);
 
 extern int

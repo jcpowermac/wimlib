@@ -272,8 +272,8 @@ inode_add_attribute_with_data(struct wim_inode *inode,
 	if (unlikely(!new_attr))
 		return NULL;
 
-	new_attr->attr_lte = new_stream_from_data_buffer(data, size, blob_table);
-	if (unlikely(!new_attr->attr_lte)) {
+	new_attr->attr_blob = new_blob_from_data_buffer(data, size, blob_table);
+	if (unlikely(!new_attr->attr_blob)) {
 		inode_remove_attribute(inode, new_attr, NULL);
 		return NULL;
 	}
@@ -317,7 +317,7 @@ int
 inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 			 bool force)
 {
-	struct blob *ltes[inode->i_num_attrs];
+	struct blob *blobs[inode->i_num_attrs];
 
 	if (inode->i_resolved)
 		return 0;
@@ -339,11 +339,11 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 				blob_table_insert(table, blob);
 			}
 		}
-		ltes[i] = blob;
+		blobs[i] = blob;
 	}
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		inode->i_attrs[i].attr_lte = ltes[i];
+		inode->i_attrs[i].attr_blob = blobs[i];
 	inode->i_resolved = 1;
 	return 0;
 }
@@ -360,9 +360,9 @@ inode_unresolve_attributes(struct wim_inode *inode)
 		return;
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		if (inode->i_attrs[i].attr_lte)
+		if (inode->i_attrs[i].attr_blob)
 			copy_hash(inode->i_attrs[i].attr_hash,
-				  inode->i_attrs[i].attr_lte->hash);
+				  inode->i_attrs[i].attr_blob->hash);
 		else
 			zero_out_hash(inode->i_attrs[i].attr_hash);
 	}
@@ -386,11 +386,11 @@ stream_not_found_error(const struct wim_inode *inode, const u8 *hash)
 }
 
 struct blob *
-inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
+inode_attribute_blob(const struct wim_inode *inode, unsigned attr_idx,
 		    const struct blob_table *table)
 {
 	if (inode->i_resolved)
-		return inode->i_attrs[attr_idx].attr_lte;
+		return inode->i_attrs[attr_idx].attr_blob;
 	else
 		return lookup_blob(table, inode->i_attrs[attr_idx].attr_hash);
 }
@@ -412,8 +412,9 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
 	if (!attr)
 		return NULL;
 
-	*attr_idx_ret = attr - inode->i_attrs;
-	return attr->attr_lte;
+	if (attr_idx_ret)
+		*attr_idx_ret = attr - inode->i_attrs;
+	return attr->attr_blob;
 }
 
 /*
@@ -421,8 +422,8 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
  * NULL if the inode's unnamed data stream is empty or not available.
  */
 struct blob *
-inode_unnamed_lte(const struct wim_inode *inode,
-		  const struct blob_table *table)
+inode_unnamed_stream(const struct wim_inode *inode,
+		     const struct blob_table *table)
 {
 	struct wim_attribute *attr;
 
@@ -431,7 +432,7 @@ inode_unnamed_lte(const struct wim_inode *inode,
 		return NULL;
 
 	if (inode->i_resolved)
-		return attr->attr_lte;
+		return attr->attr_blob;
 	else
 		return lookup_blob(table, attr->attr_hash);
 }
@@ -444,7 +445,7 @@ inode_attribute_hash(const struct wim_inode *inode, unsigned attr_idx)
 	const struct wim_attribute *attr = &inode->i_attrs[attr_idx];
 
 	if (inode->i_resolved)
-		return attr->attr_lte ? attr->attr_lte->hash : zero_hash;
+		return attr->attr_blob ? attr->attr_blob->hash : zero_hash;
 	else
 		return attr->attr_hash;
 }
@@ -473,8 +474,8 @@ inode_ref_attributes(struct wim_inode *inode)
 	wimlib_assert(inode->i_resolved);
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_lte)
-			inode->i_attrs[i].attr_lte->refcnt++;
+		if (inode->i_attrs[i].attr_blob)
+			inode->i_attrs[i].attr_blob->refcnt++;
 }
 
 /* Drop a reference to each single-instance stream referenced by this inode.
@@ -486,7 +487,7 @@ inode_unref_attributes(struct wim_inode *inode,
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		struct blob *blob;
 
-		blob = inode_attribute_lte(inode, i, blob_table);
+		blob = inode_attribute_blob(inode, i, blob_table);
 		if (blob)
 			blob_decrement_refcnt(blob, blob_table);
 	}
@@ -508,8 +509,8 @@ retrieve_blob_pointer(struct blob *blob)
 
 	struct wim_inode *inode = blob->back_inode;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_id == blob->back_stream_id)
-			return &inode->i_attrs[i].attr_lte;
+		if (inode->i_attrs[i].attr_id == blob->back_attr_id)
+			return &inode->i_attrs[i].attr_blob;
 
 	wimlib_assert(0);
 	return NULL;

@@ -371,23 +371,16 @@ extern int
 stream_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
 extern struct blob *
-inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
-		    const struct blob_table *table);
+inode_attribute_blob(const struct wim_inode *inode, unsigned attr_idx,
+		     const struct blob_table *table);
 
 extern struct blob *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
 			      unsigned *attr_idx_ret);
 
-static inline struct blob *
-inode_unnamed_lte_resolved(const struct wim_inode *inode)
-{
-	unsigned attr_idx;
-	return inode_unnamed_stream_resolved(inode, &attr_idx);
-}
-
 extern struct blob *
-inode_unnamed_lte(const struct wim_inode *inode,
-		  const struct blob_table *table);
+inode_unnamed_stream(const struct wim_inode *inode,
+		     const struct blob_table *table);
 
 extern const u8 *
 inode_attribute_hash(const struct wim_inode *inode, unsigned attr_idx);

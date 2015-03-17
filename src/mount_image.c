@@ -700,7 +700,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 		filedes_init(&fd, staging_fd);
 		errno = 0;
 		extract_size = min(old_lte->size, size);
-		result = extract_stream_to_fd(old_lte, &fd, extract_size);
+		result = extract_blob_to_fd(old_lte, &fd, extract_size);
 	} else {
 		extract_size = 0;
 		result = 0;
@@ -717,7 +717,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 
 	/* If an error occurred, unlink the staging file.  */
 	if (unlikely(result)) {
-		/* extract_stream_to_fd() should set errno, but if it didn't,
+		/* extract_blob_to_fd() should set errno, but if it didn't,
 		 * set a default value.  */
 		ret = errno ? -errno : -EIO;
 		goto out_delete_staging_file;

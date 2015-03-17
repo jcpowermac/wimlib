@@ -43,14 +43,15 @@
 #include "wimlib/util.h"
 #include "wimlib/write.h"
 
-/* WIM lookup table:
+/*
+ * Blob table:
  *
- * This is a logical mapping from SHA1 message digests to the data streams
+ * This is a logical mapping from SHA-1 message digests to the binary blobs
  * contained in a WIM.
  *
  * Here it is implemented as a hash table.
  *
- * Note: Everything will break horribly if there is a SHA1 collision.
+ * Note: Everything will break horribly if there is a SHA-1 collision.
  */
 struct blob_table {
 	struct hlist_head *array;
@@ -130,7 +131,7 @@ clone_blob(const struct blob *old)
 
 	switch (new->resource_location) {
 	case RESOURCE_IN_WIM:
-		list_add(&new->rspec_node, &new->rspec->stream_list);
+		list_add(&new->rspec_node, &new->rspec->blob_list);
 		break;
 
 	case RESOURCE_IN_FILE_ON_DISK:
@@ -414,7 +415,7 @@ for_blob(struct blob_table *table,
  * primarily by part number, then secondarily by offset, as to implement optimal
  * reading of either a standalone or split WIM.  */
 int
-cmp_streams_by_sequential_order(const void *p1, const void *p2)
+cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 {
 	const struct blob *lte1, *lte2;
 	int v;
@@ -522,7 +523,7 @@ sort_blob_list_by_sequential_order(struct list_head *stream_list,
 				     size_t list_head_offset)
 {
 	return sort_blob_list(stream_list, list_head_offset,
-				cmp_streams_by_sequential_order);
+			      cmp_blobs_by_sequential_order);
 }
 
 
@@ -578,7 +579,7 @@ struct blob_disk {
 	 * above blob_decrement_refcnt().)  */
 	le32 refcnt;
 
-	/* SHA1 message digest of the uncompressed data of this stream, or
+	/* SHA-1 message digest of the uncompressed data of this stream, or
 	 * optionally all zeroes if this stream is of zero length. */
 	u8 hash[SHA1_HASH_SIZE];
 } _packed_attribute;
@@ -847,7 +848,7 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
 
 /*
  * Reads the lookup table from a WIM file.  Usually, each entry specifies a
- * stream that the WIM file contains, along with its location and SHA1 message
+ * stream that the WIM file contains, along with its location and SHA-1 message
  * digest.
  *
  * Saves lookup table entries for non-metadata streams in a hash table (set to
@@ -903,7 +904,7 @@ read_blob_table(WIMStruct *wim)
 	if (ret)
 		goto out;
 
-	/* Allocate a hash table to map SHA1 message digests into stream
+	/* Allocate a hash table to map SHA-1 message digests into stream
 	 * specifications.  This is the in-memory "lookup table".  */
 	table = new_blob_table(num_entries * 2 + 1);
 	if (!table)
@@ -1096,7 +1097,7 @@ read_blob_table(WIMStruct *wim)
 			}
 
 			/* Insert the stream into the in-memory lookup table,
-			 * keyed by its SHA1 message digest.  */
+			 * keyed by its SHA-1 message digest.  */
 			blob_table_insert(table, cur_entry);
 		}
 
@@ -1302,7 +1303,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 	return blob;
 }
 
-/* Calculate the SHA1 message digest of a stream and move it from the list of
+/* Calculate the SHA-1 message digest of a stream and move it from the list of
  * unhashed streams to the stream lookup table, possibly joining it with an
  * existing lookup table entry for an identical stream.
  *
@@ -1327,8 +1328,8 @@ hash_unhashed_stream(struct blob *blob,
 	wimlib_assert(blob->unhashed);
 
 	/* back_ptr must be saved because @back_inode and @back_stream_id are in
-	 * union with the SHA1 message digest and will no longer be valid once
-	 * the SHA1 has been calculated. */
+	 * union with the SHA-1 message digest and will no longer be valid once
+	 * the SHA-1 has been calculated. */
 	back_ptr = retrieve_blob_pointer(blob);
 
 	ret = sha1_stream(blob);

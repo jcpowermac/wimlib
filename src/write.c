@@ -746,7 +746,7 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 	 * streams, we don't know whether such each such stream really need to
 	 * written until it is actually checksummed, unless it has a unique
 	 * size.  In such cases we read and checksum the stream in this
-	 * function, thereby advancing ahead of read_stream_list(), which will
+	 * function, thereby advancing ahead of read_blob_list(), which will
 	 * still provide the data again to write_stream_process_chunk().  This
 	 * is okay because an unhashed stream cannot be in a WIM resource, which
 	 * might be costly to decompress.  */
@@ -785,13 +785,13 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 				free_blob(blob);
 				if (ret)
 					return ret;
-				return BEGIN_STREAM_STATUS_SKIP_STREAM;
+				return BEGIN_BLOB_STATUS_SKIP_BLOB;
 			} else {
 				/* The duplicate stream can validly be written,
 				 * but was not marked as such.  Discard the
 				 * current stream entry and use the duplicate,
 				 * but actually freeing the current entry must
-				 * wait until read_stream_list() has finished
+				 * wait until read_blob_list() has finished
 				 * reading its data.  */
 				DEBUG("Stream duplicate, but not already "
 				      "selected for writing.");
@@ -1172,8 +1172,8 @@ write_stream_end_read(struct blob *blob, int status, void *_ctx)
 		free_blob(blob);
 	} else if (!status && blob->unhashed && ctx->blob_table != NULL) {
 		/* The 'blob' stream was not a duplicate and was previously
-		 * unhashed.  Since we passed COMPUTE_MISSING_STREAM_HASHES to
-		 * read_stream_list(), blob->hash is now computed and valid.  So
+		 * unhashed.  Since we passed COMPUTE_MISSING_BLOB_HASHES to
+		 * read_blob_list(), blob->hash is now computed and valid.  So
 		 * turn this stream into a "hashed" stream.  */
 		list_del(&blob->unhashed_list);
 		blob_table_insert(ctx->blob_table, blob);
@@ -1482,7 +1482,7 @@ init_done_with_file_info(struct list_head *stream_list)
  * corresponding stream.
  *
  * Each of the streams to write may be in any location supported by the
- * resource-handling code (specifically, read_stream_list()), such as the
+ * resource-handling code (specifically, read_blob_list()), such as the
  * contents of external file that has been logically added to the output WIM, or
  * a stream in another WIM file that has been imported, or even a stream in the
  * "same" WIM file of which a modified copy is being written.  In the case that
@@ -1667,21 +1667,21 @@ write_stream_list(struct list_head *stream_list,
 	/* Read the list of streams needing to be compressed, using the
 	 * specified callbacks to execute processing of the data.  */
 
-	struct read_stream_list_callbacks cbs = {
-		.begin_stream		= write_stream_begin_read,
-		.begin_stream_ctx	= &ctx,
+	struct read_blob_list_callbacks cbs = {
+		.begin_blob		= write_stream_begin_read,
+		.begin_blob_ctx	= &ctx,
 		.consume_chunk		= write_stream_process_chunk,
 		.consume_chunk_ctx	= &ctx,
-		.end_stream		= write_stream_end_read,
-		.end_stream_ctx		= &ctx,
+		.end_blob		= write_stream_end_read,
+		.end_blob_ctx		= &ctx,
 	};
 
-	ret = read_stream_list(stream_list,
+	ret = read_blob_list(stream_list,
 			       offsetof(struct blob, write_streams_list),
 			       &cbs,
-			       STREAM_LIST_ALREADY_SORTED |
-					VERIFY_STREAM_HASHES |
-					COMPUTE_MISSING_STREAM_HASHES);
+			       BLOB_LIST_ALREADY_SORTED |
+					VERIFY_BLOB_HASHES |
+					COMPUTE_MISSING_BLOB_HASHES);
 
 	if (ret)
 		goto out_destroy_context;

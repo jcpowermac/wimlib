@@ -1299,7 +1299,7 @@ retry:
 /* Create empty named data streams.
  *
  * Since these won't have 'struct blob's, they won't show up
- * in the call to extract_stream_list().  Hence the need for the special case.
+ * in the call to extract_blob_list().  Hence the need for the special case.
  */
 static int
 create_any_empty_ads(const struct wim_dentry *dentry,
@@ -1644,7 +1644,7 @@ prepare_data_buffer(struct win32_apply_ctx *ctx, u64 stream_size)
 }
 
 static int
-begin_extract_stream_instance(const struct blob *stream,
+begin_extract_blob_instance(const struct blob *stream,
 			      struct wim_dentry *dentry,
 			      const wchar_t *stream_name,
 			      struct win32_apply_ctx *ctx)
@@ -1714,7 +1714,7 @@ begin_extract_stream_instance(const struct blob *stream,
 
 	if (ctx->num_open_handles == MAX_OPEN_STREAMS) {
 		/* XXX: Fix this.  But because of the checks in
-		 * extract_stream_list(), this can now only happen on a
+		 * extract_blob_list(), this can now only happen on a
 		 * filesystem that does not support hard links.  */
 		ERROR("Can't extract data: too many open files!");
 		return WIMLIB_ERR_UNSUPPORTED;
@@ -2020,7 +2020,7 @@ retry:
 
 /* Called when starting to read a stream for extraction on Windows  */
 static int
-begin_extract_stream(struct blob *stream, void *_ctx)
+begin_extract_blob(struct blob *stream, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	const struct blob_owner *owners = blob_owners(stream);
@@ -2040,7 +2040,7 @@ begin_extract_stream(struct blob *stream, void *_ctx)
 
 		if (ctx->common.supported_features.hard_links) {
 			dentry = inode_first_extraction_dentry(inode);
-			ret = begin_extract_stream_instance(stream, dentry,
+			ret = begin_extract_blob_instance(stream, dentry,
 							    stream_name, ctx);
 			ret = check_apply_error(dentry, ctx, ret);
 			if (ret)
@@ -2054,7 +2054,7 @@ begin_extract_stream(struct blob *stream, void *_ctx)
 			do {
 				dentry = list_entry(next, struct wim_dentry,
 						    d_extraction_alias_node);
-				ret = begin_extract_stream_instance(stream,
+				ret = begin_extract_blob_instance(stream,
 								    dentry,
 								    stream_name,
 								    ctx);
@@ -2110,7 +2110,7 @@ extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a stream has been fully read for extraction on Windows  */
 static int
-end_extract_stream(struct blob *stream, int status, void *_ctx)
+end_extract_blob(struct blob *stream, int status, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	int ret;
@@ -2536,15 +2536,15 @@ win32_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 	if (ret)
 		goto out;
 
-	struct read_stream_list_callbacks cbs = {
-		.begin_stream      = begin_extract_stream,
-		.begin_stream_ctx  = ctx,
+	struct read_blob_list_callbacks cbs = {
+		.begin_blob      = begin_extract_blob,
+		.begin_blob_ctx  = ctx,
 		.consume_chunk     = extract_chunk,
 		.consume_chunk_ctx = ctx,
-		.end_stream        = end_extract_stream,
-		.end_stream_ctx    = ctx,
+		.end_blob        = end_extract_blob,
+		.end_blob_ctx    = ctx,
 	};
-	ret = extract_stream_list(&ctx->common, &cbs);
+	ret = extract_blob_list(&ctx->common, &cbs);
 	if (ret)
 		goto out;
 

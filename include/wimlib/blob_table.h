@@ -270,7 +270,7 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 /* Functions to create, clone, print, and free blob table entries  */
 
 extern struct blob *
-new_blob_table_entry(void) _malloc_attribute;
+new_blob(void) _malloc_attribute;
 
 extern struct blob *
 clone_blob(const struct blob *blob)

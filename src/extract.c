@@ -222,7 +222,7 @@ read_error:
 
 static int
 load_streams_from_pipe(struct apply_ctx *ctx,
-		       const struct read_stream_list_callbacks *cbs)
+		       const struct read_blob_list_callbacks *cbs)
 {
 	struct blob *found_lte = NULL;
 	struct wim_resource_spec *rspec = NULL;
@@ -269,19 +269,19 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 			lte_unbind_wim_resource_spec(found_lte);
 			lte_bind_wim_resource_spec(needed_lte, rspec);
 
-			ret = (*cbs->begin_stream)(needed_lte,
-						   cbs->begin_stream_ctx);
+			ret = (*cbs->begin_blob)(needed_lte,
+						   cbs->begin_blob_ctx);
 			if (ret) {
 				lte_unbind_wim_resource_spec(needed_lte);
 				goto out;
 			}
 
-			ret = extract_stream(needed_lte, needed_lte->size,
+			ret = extract_blob(needed_lte, needed_lte->size,
 					     cbs->consume_chunk,
 					     cbs->consume_chunk_ctx);
 
-			ret = (*cbs->end_stream)(needed_lte, ret,
-						 cbs->end_stream_ctx);
+			ret = (*cbs->end_blob)(needed_lte, ret,
+						 cbs->end_blob_ctx);
 			lte_unbind_wim_resource_spec(needed_lte);
 			if (ret)
 				goto out;
@@ -358,7 +358,7 @@ retry:
 }
 
 static int
-begin_extract_stream_wrapper(struct blob *blob, void *_ctx)
+begin_extract_blob_wrapper(struct blob *blob, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
 
@@ -368,7 +368,7 @@ begin_extract_stream_wrapper(struct blob *blob, void *_ctx)
 	if (unlikely(blob->out_refcnt > MAX_OPEN_STREAMS))
 		return create_temporary_file(&ctx->tmpfile_fd, &ctx->tmpfile_name);
 	else
-		return (*ctx->saved_cbs->begin_stream)(blob, ctx->saved_cbs->begin_stream_ctx);
+		return (*ctx->saved_cbs->begin_blob)(blob, ctx->saved_cbs->begin_blob_ctx);
 }
 
 static int
@@ -453,7 +453,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 {
 	struct blob tmpfile_lte;
 	struct blob *orig_lte = ctx->cur_stream;
-	const struct read_stream_list_callbacks *cbs = ctx->saved_cbs;
+	const struct read_blob_list_callbacks *cbs = ctx->saved_cbs;
 	int ret;
 	const u32 orig_refcnt = orig_lte->out_refcnt;
 
@@ -486,17 +486,17 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 		orig_lte->out_refcnt = 1;
 		orig_lte->inline_blob_owners[0] = owners[i];
 
-		ret = (*cbs->begin_stream)(orig_lte, cbs->begin_stream_ctx);
+		ret = (*cbs->begin_blob)(orig_lte, cbs->begin_blob_ctx);
 		if (ret)
 			break;
 
 		/* Extra SHA-1 isn't necessary here, but it shouldn't hurt as
 		 * this case is very rare anyway.  */
-		ret = extract_stream(&tmpfile_lte, tmpfile_lte.size,
+		ret = extract_blob(&tmpfile_lte, tmpfile_lte.size,
 				     cbs->consume_chunk,
 				     cbs->consume_chunk_ctx);
 
-		ret = (*cbs->end_stream)(orig_lte, ret, cbs->end_stream_ctx);
+		ret = (*cbs->end_blob)(orig_lte, ret, cbs->end_blob_ctx);
 		if (ret)
 			break;
 	}
@@ -506,7 +506,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 }
 
 static int
-end_extract_stream_wrapper(struct blob *stream,
+end_extract_blob_wrapper(struct blob *stream,
 			   int status, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
@@ -520,8 +520,8 @@ end_extract_stream_wrapper(struct blob *stream,
 		FREE(ctx->tmpfile_name);
 		return status;
 	} else {
-		return (*ctx->saved_cbs->end_stream)(stream, status,
-						     ctx->saved_cbs->end_stream_ctx);
+		return (*ctx->saved_cbs->end_blob)(stream, status,
+						     ctx->saved_cbs->end_blob_ctx);
 	}
 }
 
@@ -544,25 +544,25 @@ end_extract_stream_wrapper(struct blob *stream,
  * file system might not support hard links).
  */
 int
-extract_stream_list(struct apply_ctx *ctx,
-		    const struct read_stream_list_callbacks *cbs)
+extract_blob_list(struct apply_ctx *ctx,
+		    const struct read_blob_list_callbacks *cbs)
 {
-	struct read_stream_list_callbacks wrapper_cbs = {
-		.begin_stream      = begin_extract_stream_wrapper,
-		.begin_stream_ctx  = ctx,
+	struct read_blob_list_callbacks wrapper_cbs = {
+		.begin_blob      = begin_extract_blob_wrapper,
+		.begin_blob_ctx  = ctx,
 		.consume_chunk     = extract_chunk_wrapper,
 		.consume_chunk_ctx = ctx,
-		.end_stream        = end_extract_stream_wrapper,
-		.end_stream_ctx    = ctx,
+		.end_blob        = end_extract_blob_wrapper,
+		.end_blob_ctx    = ctx,
 	};
 	ctx->saved_cbs = cbs;
 	if (ctx->extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE) {
 		return load_streams_from_pipe(ctx, &wrapper_cbs);
 	} else {
-		return read_stream_list(&ctx->stream_list,
+		return read_blob_list(&ctx->stream_list,
 					offsetof(struct blob,
 						 extraction_list),
-					&wrapper_cbs, VERIFY_STREAM_HASHES);
+					&wrapper_cbs, VERIFY_BLOB_HASHES);
 	}
 }
 

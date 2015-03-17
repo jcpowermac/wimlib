@@ -116,9 +116,9 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	union wimlib_progress_info progress;
 	struct verify_stream_list_ctx ctx;
 	struct blob *blob;
-	struct read_stream_list_callbacks cbs = {
-		.end_stream = end_verify_stream,
-		.end_stream_ctx = &ctx,
+	struct read_blob_list_callbacks cbs = {
+		.end_blob = end_verify_stream,
+		.end_blob_ctx = &ctx,
 	};
 
 	/* Check parameters  */
@@ -187,8 +187,8 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	if (ret)
 		return ret;
 
-	return read_stream_list(&stream_list,
+	return read_blob_list(&stream_list,
 				offsetof(struct blob,
 					 extraction_list),
-				&cbs, VERIFY_STREAM_HASHES);
+				&cbs, VERIFY_BLOB_HASHES);
 }
