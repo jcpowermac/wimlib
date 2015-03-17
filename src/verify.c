@@ -93,14 +93,14 @@ end_verify_stream(struct blob *blob, int status, void *_ctx)
 }
 
 static int
-verify_image_streams_present(struct wim_image_metadata *imd,
-			     struct blob_table *blob_table)
+verify_image_blobs_present(struct wim_image_metadata *imd,
+			   struct blob_table *blob_table)
 {
 	struct wim_inode *inode;
 	int ret;
 
 	image_for_each_inode(inode, imd) {
-		ret = inode_resolve_streams(inode, blob_table, false);
+		ret = inode_resolve_attributes(inode, blob_table, false);
 		if (ret)
 			return ret;
 	}
@@ -150,8 +150,8 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 			if (ret)
 				return ret;
 
-			ret = verify_image_streams_present(wim_get_current_image_metadata(wim),
-							   wim->blob_table);
+			ret = verify_image_blobs_present(wim_get_current_image_metadata(wim),
+							 wim->blob_table);
 			if (ret)
 				return ret;
 
@@ -188,7 +188,6 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 		return ret;
 
 	return read_blob_list(&blob_list,
-				offsetof(struct blob,
-					 extraction_list),
-				&cbs, VERIFY_BLOB_HASHES);
+			      offsetof(struct blob, extraction_list),
+			      &cbs, VERIFY_BLOB_HASHES);
 }

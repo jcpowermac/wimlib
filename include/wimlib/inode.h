@@ -368,7 +368,7 @@ extern void
 inode_unresolve_attributes(struct wim_inode *inode);
 
 extern int
-stream_not_found_error(const struct wim_inode *inode, const u8 *hash);
+blob_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
 extern struct blob *
 inode_attribute_blob(const struct wim_inode *inode, unsigned attr_idx,

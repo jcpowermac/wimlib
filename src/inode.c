@@ -331,7 +331,7 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 			blob = lookup_blob(table, hash);
 			if (!blob) {
 				if (!force)
-					return stream_not_found_error(inode, hash);
+					return blob_not_found_error(inode, hash);
 				blob = new_blob();
 				if (!blob)
 					return WIMLIB_ERR_NOMEM;
@@ -370,15 +370,15 @@ inode_unresolve_attributes(struct wim_inode *inode)
 }
 
 int
-stream_not_found_error(const struct wim_inode *inode, const u8 *hash)
+blob_not_found_error(const struct wim_inode *inode, const u8 *hash)
 {
 	if (wimlib_print_errors) {
 		tchar hashstr[SHA1_HASH_SIZE * 2 + 1];
 
 		sprint_hash(hash, hashstr);
 
-		ERROR("\"%"TS"\": stream not found\n"
-		      "        SHA-1 message digest of missing stream:\n"
+		ERROR("\"%"TS"\": blob not found\n"
+		      "        SHA-1 message digest of missing blob:\n"
 		      "        %"TS"",
 		      inode_first_full_path(inode), hashstr);
 	}

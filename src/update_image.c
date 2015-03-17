@@ -134,7 +134,7 @@ struct update_command_journal {
 	/* Location of the WIM image's root pointer.  */
 	struct wim_dentry **root_p;
 
-	/* Pointer to the lookup table of the WIM (may needed for rollback)  */
+	/* Pointer to the blob table of the WIM (may needed for rollback)  */
 	struct blob_table *blob_table;
 
 	/* List of dentries that are currently unlinked from the WIM image.
