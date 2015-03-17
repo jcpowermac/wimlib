@@ -218,14 +218,14 @@ out_free_wim:
 static void
 destroy_image_metadata(struct wim_image_metadata *imd,
 		       struct blob_table *table,
-		       bool free_metadata_lte)
+		       bool free_metadata_blob)
 {
 	free_dentry_tree(imd->root_dentry, table);
 	imd->root_dentry = NULL;
 	free_wim_security_data(imd->security_data);
 	imd->security_data = NULL;
 
-	if (free_metadata_lte) {
+	if (free_metadata_blob) {
 		free_blob(imd->metadata_blob);
 		imd->metadata_blob = NULL;
 	}
@@ -812,10 +812,9 @@ wimlib_open_wim(const tchar *wimfile, int open_flags, WIMStruct **wim_ret)
 					     NULL, NULL);
 }
 
-/* Checksum all streams that are unhashed (other than the metadata streams),
- * merging them into the lookup table as needed.  This is a no-op unless the
- * library has previously used to add or mount an image using the same
- * WIMStruct. */
+/* Checksum all blobs that are unhashed (other than the metadata blobs), merging
+ * them into the lookup table as needed.  This is a no-op unless the library has
+ * previously used to add or mount an image using the same WIMStruct. */
 int
 wim_checksum_unhashed_blobs(WIMStruct *wim)
 {
@@ -826,12 +825,12 @@ wim_checksum_unhashed_blobs(WIMStruct *wim)
 	for (int i = 0; i < wim->hdr.image_count; i++) {
 		struct blob *blob, *tmp;
 		struct wim_image_metadata *imd = wim->image_metadata[i];
-		image_for_each_unhashed_stream_safe(blob, tmp, imd) {
-			struct blob *new_lte;
-			ret = hash_unhashed_stream(blob, wim->blob_table, &new_lte);
+		image_for_each_unhashed_blob_safe(blob, tmp, imd) {
+			struct blob *new_blob;
+			ret = hash_unhashed_blob(blob, wim->blob_table, &new_blob);
 			if (ret)
 				return ret;
-			if (new_lte != blob)
+			if (new_blob != blob)
 				free_blob(blob);
 		}
 	}

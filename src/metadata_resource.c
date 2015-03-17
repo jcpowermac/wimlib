@@ -24,9 +24,9 @@
 #endif
 
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/resource.h"
 #include "wimlib/security.h"
@@ -37,7 +37,7 @@
  *
  * @imd:
  *	Pointer to the image metadata structure for the image whose metadata
- *	resource we are reading.  Its `metadata_blob' member specifies the lookup
+ *	resource we are reading.  Its `metadata_blob' member specifies the blob
  *	table entry for the metadata resource.  The rest of the image metadata
  *	entry will be filled in by this function.
  *
@@ -57,14 +57,13 @@ read_metadata_resource(struct wim_image_metadata *imd)
 	int ret;
 	struct wim_security_data *sd;
 	struct wim_dentry *root;
-	struct wim_inode *inode;
 
 	metadata_blob = imd->metadata_blob;
 
 	DEBUG("Reading metadata resource (size=%"PRIu64").", metadata_blob->size);
 
 	/* Read the metadata resource into memory.  (It may be compressed.)  */
-	ret = read_full_stream_into_alloc_buf(metadata_blob, &buf);
+	ret = read_full_blob_into_alloc_buf(metadata_blob, &buf);
 	if (ret)
 		return ret;
 
@@ -103,14 +102,11 @@ read_metadata_resource(struct wim_image_metadata *imd)
 	FREE(buf);
 	buf = NULL;
 
-	/* Calculate and validate inodes.  */
+	/* Calculate inodes.  */
 
 	ret = dentry_tree_fix_inodes(root, &imd->inode_list);
 	if (ret)
 		goto out_free_dentry_tree;
-
-	image_for_each_inode(inode, imd)
-		check_inode(inode, sd);
 
 	/* Success; fill in the image_metadata structure.  */
 	imd->root_dentry = root;
@@ -226,7 +222,7 @@ write_metadata_resource(WIMStruct *wim, int image, int write_resource_flags)
 	imd = wim->image_metadata[image - 1];
 
 	/* Write the metadata resource to the output WIM using the proper
-	 * compression type, in the process updating the lookup table entry for
+	 * compression type, in the process updating the blob table entry for
 	 * the metadata resource.  */
 	ret = write_wim_resource_from_buffer(buf, len, WIM_RESHDR_FLAG_METADATA,
 					     &wim->out_fd,
