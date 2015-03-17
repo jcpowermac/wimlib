@@ -24,9 +24,9 @@
 #endif
 
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/resource.h"
 #include "wimlib/security.h"
@@ -37,7 +37,7 @@
  *
  * @imd:
  *	Pointer to the image metadata structure for the image whose metadata
- *	resource we are reading.  Its `metadata_lte' member specifies the lookup
+ *	resource we are reading.  Its `metadata_blob' member specifies the blob
  *	table entry for the metadata resource.  The rest of the image metadata
  *	entry will be filled in by this function.
  *
@@ -52,28 +52,27 @@
 int
 read_metadata_resource(struct wim_image_metadata *imd)
 {
-	const struct wim_lookup_table_entry *metadata_lte;
+	const struct blob_descriptor *metadata_blob;
 	void *buf;
 	int ret;
 	struct wim_security_data *sd;
 	struct wim_dentry *root;
-	struct wim_inode *inode;
 
-	metadata_lte = imd->metadata_lte;
+	metadata_blob = imd->metadata_blob;
 
-	DEBUG("Reading metadata resource (size=%"PRIu64").", metadata_lte->size);
+	DEBUG("Reading metadata resource (size=%"PRIu64").", metadata_blob->size);
 
 	/* Read the metadata resource into memory.  (It may be compressed.)  */
-	ret = read_full_stream_into_alloc_buf(metadata_lte, &buf);
+	ret = read_full_blob_into_alloc_buf(metadata_blob, &buf);
 	if (ret)
 		return ret;
 
 	/* Checksum the metadata resource.  */
-	if (!metadata_lte->dont_check_metadata_hash) {
+	if (!metadata_blob->dont_check_metadata_hash) {
 		u8 hash[SHA1_HASH_SIZE];
 
-		sha1_buffer(buf, metadata_lte->size, hash);
-		if (!hashes_equal(metadata_lte->hash, hash)) {
+		sha1_buffer(buf, metadata_blob->size, hash);
+		if (!hashes_equal(metadata_blob->hash, hash)) {
 			ERROR("Metadata resource is corrupted "
 			      "(invalid SHA-1 message digest)!");
 			ret = WIMLIB_ERR_INVALID_METADATA_RESOURCE;
@@ -91,11 +90,11 @@ read_metadata_resource(struct wim_image_metadata *imd)
 	 * by a directory entry of length '0', really of length 8, because
 	 * that's how long the 'length' field is.  */
 
-	ret = read_wim_security_data(buf, metadata_lte->size, &sd);
+	ret = read_wim_security_data(buf, metadata_blob->size, &sd);
 	if (ret)
 		goto out_free_buf;
 
-	ret = read_dentry_tree(buf, metadata_lte->size, sd->total_length, &root);
+	ret = read_dentry_tree(buf, metadata_blob->size, sd->total_length, &root);
 	if (ret)
 		goto out_free_security_data;
 
@@ -103,19 +102,16 @@ read_metadata_resource(struct wim_image_metadata *imd)
 	FREE(buf);
 	buf = NULL;
 
-	/* Calculate and validate inodes.  */
+	/* Calculate inodes.  */
 
 	ret = dentry_tree_fix_inodes(root, &imd->inode_list);
 	if (ret)
 		goto out_free_dentry_tree;
 
-	image_for_each_inode(inode, imd)
-		check_inode(inode, sd);
-
 	/* Success; fill in the image_metadata structure.  */
 	imd->root_dentry = root;
 	imd->security_data = sd;
-	INIT_LIST_HEAD(&imd->unhashed_streams);
+	INIT_LIST_HEAD(&imd->unhashed_blobs);
 	DEBUG("Done parsing metadata resource.");
 	return 0;
 
@@ -226,18 +222,18 @@ write_metadata_resource(WIMStruct *wim, int image, int write_resource_flags)
 	imd = wim->image_metadata[image - 1];
 
 	/* Write the metadata resource to the output WIM using the proper
-	 * compression type, in the process updating the lookup table entry for
-	 * the metadata resource.  */
+	 * compression type, in the process updating the blob descriptor for the
+	 * metadata resource.  */
 	ret = write_wim_resource_from_buffer(buf, len, WIM_RESHDR_FLAG_METADATA,
 					     &wim->out_fd,
 					     wim->out_compression_type,
 					     wim->out_chunk_size,
-					     &imd->metadata_lte->out_reshdr,
-					     imd->metadata_lte->hash,
+					     &imd->metadata_blob->out_reshdr,
+					     imd->metadata_blob->hash,
 					     write_resource_flags);
 
 	/* Original checksum was overridden; set a flag so it isn't used.  */
-	imd->metadata_lte->dont_check_metadata_hash = 1;
+	imd->metadata_blob->dont_check_metadata_hash = 1;
 
 	FREE(buf);
 	return ret;
