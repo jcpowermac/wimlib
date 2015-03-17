@@ -1137,12 +1137,12 @@ dentry_ref_streams(struct wim_dentry *dentry, struct apply_ctx *ctx)
 }
 
 /*
- * For each dentry to be extracted, iterate through the data streams of the
- * corresponding inode.  For each such stream that is not to be ignored due to
- * the supported features or extraction flags, add it to the list of streams to
- * be extracted (ctx->stream_list) if not already done so.
+ * For each dentry to be extracted, iterate through the attributes For each such
+ * attribute that is not to be ignored due to the supported features or
+ * extraction flags, add the corresponding single-instance stream to the list of
+ * streams to be extracted (ctx->stream_list) if not already done so.
  *
- * Also builds a mapping from each stream to the inodes referencing it.
+ * Also builds a mapping from each stream to the attributes referencing it.
  *
  * This also initializes the extract progress info with byte and stream
  * information.

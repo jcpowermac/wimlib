@@ -64,7 +64,7 @@ enum resource_location {
 
 struct stream_owner {
 	struct wim_inode *inode;
-	const utf16lechar *stream_name;
+	unsigned attr_idx;
 };
 
 /* Specification for a stream, which may be the contents of a file (unnamed data
