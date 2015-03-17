@@ -35,7 +35,7 @@
 #include "wimlib/assert.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/ntfs_3g.h"
 #include "wimlib/resource.h"
@@ -52,19 +52,19 @@
  *
  * Note: Everything will break horribly if there is a SHA1 collision.
  */
-struct wim_lookup_table {
+struct blob_table {
 	struct hlist_head *array;
 	size_t num_blobs;
 	size_t capacity;
 };
 
-struct wim_lookup_table *
-new_lookup_table(size_t capacity)
+struct blob_table *
+new_blob_table(size_t capacity)
 {
-	struct wim_lookup_table *table;
+	struct blob_table *table;
 	struct hlist_head *array;
 
-	table = MALLOC(sizeof(struct wim_lookup_table));
+	table = MALLOC(sizeof(struct blob_table));
 	if (table == NULL)
 		goto oom;
 
@@ -93,7 +93,7 @@ do_free_blob(struct blob *blob, void *ignore)
 }
 
 void
-free_lookup_table(struct wim_lookup_table *table)
+free_blob_table(struct blob_table *table)
 {
 	if (table) {
 		for_blob(table, do_free_blob, NULL);
@@ -270,7 +270,7 @@ finalize_blob(struct blob *blob)
  */
 void
 blob_decrement_refcnt(struct blob *blob,
-		      struct wim_lookup_table *table)
+		      struct blob_table *table)
 {
 	if (unlikely(blob->refcnt == 0))  /* See comment above  */
 		return;
@@ -289,7 +289,7 @@ blob_decrement_refcnt(struct blob *blob,
 		#endif
 		} else {
 			if (!should_retain_blob(blob))
-				lookup_table_unlink(table, blob);
+				blob_table_unlink(table, blob);
 		}
 
 		/* If FUSE mounts are enabled, we don't actually free the blob
@@ -314,7 +314,7 @@ blob_decrement_num_opened_fds(struct blob *blob)
 #endif
 
 static void
-lookup_table_insert_raw(struct wim_lookup_table *table, struct blob *blob)
+blob_table_insert_raw(struct blob_table *table, struct blob *blob)
 {
 	size_t i = blob->hash_short % table->capacity;
 
@@ -322,7 +322,7 @@ lookup_table_insert_raw(struct wim_lookup_table *table, struct blob *blob)
 }
 
 static void
-enlarge_lookup_table(struct wim_lookup_table *table)
+enlarge_blob_table(struct blob_table *table)
 {
 	size_t old_capacity, new_capacity;
 	struct hlist_head *old_array, *new_array;
@@ -342,7 +342,7 @@ enlarge_lookup_table(struct wim_lookup_table *table)
 	for (i = 0; i < old_capacity; i++) {
 		hlist_for_each_entry_safe(blob, cur, tmp, &old_array[i], hash_list) {
 			hlist_del(&blob->hash_list);
-			lookup_table_insert_raw(table, blob);
+			blob_table_insert_raw(table, blob);
 		}
 	}
 	FREE(old_array);
@@ -350,16 +350,16 @@ enlarge_lookup_table(struct wim_lookup_table *table)
 
 /* Insert a blob into the lookup table.  */
 void
-lookup_table_insert(struct wim_lookup_table *table, struct blob *blob)
+blob_table_insert(struct blob_table *table, struct blob *blob)
 {
-	lookup_table_insert_raw(table, blob);
+	blob_table_insert_raw(table, blob);
 	if (++table->num_blobs > table->capacity)
-		enlarge_lookup_table(table);
+		enlarge_blob_table(table);
 }
 
 /* Unlinks a blob from the lookup table; does not free it.  */
 void
-lookup_table_unlink(struct wim_lookup_table *table, struct blob *blob)
+blob_table_unlink(struct blob_table *table, struct blob *blob)
 {
 	wimlib_assert(!blob->unhashed);
 	wimlib_assert(table->num_blobs != 0);
@@ -371,7 +371,7 @@ lookup_table_unlink(struct wim_lookup_table *table, struct blob *blob)
 /* Given a SHA-1 message digest, return the corresponding blob in the WIM's
  * lookup table, or NULL if there is none.  */
 struct blob *
-lookup_blob(const struct wim_lookup_table *table, const u8 hash[])
+lookup_blob(const struct blob_table *table, const u8 hash[])
 {
 	size_t i;
 	struct blob *blob;
@@ -387,7 +387,7 @@ lookup_blob(const struct wim_lookup_table *table, const u8 hash[])
 /* Calls a function on all the blobs in the WIM lookup table.  Stop early and
  * return nonzero if any call to the function returns nonzero.  */
 int
-for_blob(struct wim_lookup_table *table,
+for_blob(struct blob_table *table,
 	 int (*visitor)(struct blob *, void *), void *arg)
 {
 	struct blob *blob;
@@ -538,7 +538,7 @@ add_lte_to_array(struct blob *blob,
 /* Iterate through the blobs in the specified lookup table, but first sort them
  * in order for sequential reading.  */
 int
-for_blob_pos_sorted(struct wim_lookup_table *table,
+for_blob_pos_sorted(struct blob_table *table,
 		    int (*visitor)(struct blob *, void *),
 		    void *arg)
 {
@@ -851,7 +851,7 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
  * digest.
  *
  * Saves lookup table entries for non-metadata streams in a hash table (set to
- * wim->lookup_table), and saves the metadata entry for each image in a special
+ * wim->blob_table), and saves the metadata entry for each image in a special
  * per-image location (the wim->image_metadata array).
  *
  * This works for both version WIM_VERSION_DEFAULT (68864) and version
@@ -875,12 +875,12 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
  *	file.
  */
 int
-read_wim_lookup_table(WIMStruct *wim)
+read_blob_table(WIMStruct *wim)
 {
 	int ret;
 	size_t num_entries;
 	void *buf = NULL;
-	struct wim_lookup_table *table = NULL;
+	struct blob_table *table = NULL;
 	struct blob *cur_entry = NULL;
 	size_t num_duplicate_entries = 0;
 	size_t num_wrong_part_entries = 0;
@@ -895,17 +895,17 @@ read_wim_lookup_table(WIMStruct *wim)
 		     WIM_LOOKUP_TABLE_ENTRY_DISK_SIZE);
 
 	/* Calculate the number of entries in the lookup table.  */
-	num_entries = wim->hdr.lookup_table_reshdr.uncompressed_size /
+	num_entries = wim->hdr.blob_table_reshdr.uncompressed_size /
 		      sizeof(struct blob_disk);
 
 	/* Read the lookup table into a buffer.  */
-	ret = wim_reshdr_to_data(&wim->hdr.lookup_table_reshdr, wim, &buf);
+	ret = wim_reshdr_to_data(&wim->hdr.blob_table_reshdr, wim, &buf);
 	if (ret)
 		goto out;
 
 	/* Allocate a hash table to map SHA1 message digests into stream
 	 * specifications.  This is the in-memory "lookup table".  */
-	table = new_lookup_table(num_entries * 2 + 1);
+	table = new_blob_table(num_entries * 2 + 1);
 	if (!table)
 		goto oom;
 
@@ -1097,7 +1097,7 @@ read_wim_lookup_table(WIMStruct *wim)
 
 			/* Insert the stream into the in-memory lookup table,
 			 * keyed by its SHA1 message digest.  */
-			lookup_table_insert(table, cur_entry);
+			blob_table_insert(table, cur_entry);
 		}
 
 		continue;
@@ -1136,7 +1136,7 @@ read_wim_lookup_table(WIMStruct *wim)
 	}
 
 	DEBUG("Done reading lookup table.");
-	wim->lookup_table = table;
+	wim->blob_table = table;
 	ret = 0;
 	goto out_free_buf;
 
@@ -1146,7 +1146,7 @@ oom:
 out:
 	free_solid_rspecs(cur_solid_rspecs, cur_num_solid_rspecs);
 	free_blob(cur_entry);
-	free_lookup_table(table);
+	free_blob_table(table);
 out_free_buf:
 	FREE(buf);
 	return ret;
@@ -1168,7 +1168,7 @@ put_blob(struct blob_disk *disk_entry,
  * WIM_RESHDR_FLAG_METADATA set must be in the same order as the indices of the
  * underlying images.  */
 int
-write_wim_lookup_table_from_stream_list(struct list_head *stream_list,
+write_blob_table_from_stream_list(struct list_head *stream_list,
 					struct filedes *out_fd,
 					u16 part_number,
 					struct wim_reshdr *out_reshdr,
@@ -1184,7 +1184,7 @@ write_wim_lookup_table_from_stream_list(struct list_head *stream_list,
 	u64 logical_offset;
 
 	table_size = 0;
-	list_for_each_entry(blob, stream_list, lookup_table_list) {
+	list_for_each_entry(blob, stream_list, blob_table_list) {
 		table_size += sizeof(struct blob_disk);
 
 		if (blob->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID &&
@@ -1209,7 +1209,7 @@ write_wim_lookup_table_from_stream_list(struct list_head *stream_list,
 	prev_res_offset_in_wim = ~0ULL;
 	prev_uncompressed_size = 0;
 	logical_offset = 0;
-	list_for_each_entry(blob, stream_list, lookup_table_list) {
+	list_for_each_entry(blob, stream_list, blob_table_list) {
 		if (blob->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
 			struct wim_reshdr tmp_reshdr;
 
@@ -1269,16 +1269,16 @@ write_wim_lookup_table_from_stream_list(struct list_head *stream_list,
 }
 
 /* Allocate a stream entry for the contents of the buffer, or re-use an existing
- * entry in @lookup_table for the same stream.  */
+ * entry in @blob_table for the same stream.  */
 struct blob *
 new_stream_from_data_buffer(const void *buffer, size_t size,
-			    struct wim_lookup_table *lookup_table)
+			    struct blob_table *blob_table)
 {
 	u8 hash[SHA1_HASH_SIZE];
 	struct blob *blob, *existing_lte;
 
 	sha1_buffer(buffer, size, hash);
-	existing_lte = lookup_blob(lookup_table, hash);
+	existing_lte = lookup_blob(blob_table, hash);
 	if (existing_lte) {
 		wimlib_assert(existing_lte->size == size);
 		blob = existing_lte;
@@ -1297,7 +1297,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
 		blob->attached_buffer    = buffer_copy;
 		blob->size               = size;
 		copy_hash(blob->hash, hash);
-		lookup_table_insert(lookup_table, blob);
+		blob_table_insert(blob_table, blob);
 	}
 	return blob;
 }
@@ -1307,7 +1307,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
  * existing lookup table entry for an identical stream.
  *
  * @blob:  An unhashed lookup table entry.
- * @lookup_table:  Lookup table for the WIM.
+ * @blob_table:  Lookup table for the WIM.
  * @lte_ret:  On success, write a pointer to the resulting lookup table
  *            entry to this location.  This will be the same as @blob
  *            if it was inserted into the lookup table, or different if
@@ -1317,7 +1317,7 @@ new_stream_from_data_buffer(const void *buffer, size_t size,
  */
 int
 hash_unhashed_stream(struct blob *blob,
-		     struct wim_lookup_table *lookup_table,
+		     struct blob_table *blob_table,
 		     struct blob **lte_ret)
 {
 	int ret;
@@ -1336,7 +1336,7 @@ hash_unhashed_stream(struct blob *blob,
 		return ret;
 
 	/* Look for a duplicate stream */
-	duplicate_lte = lookup_blob(lookup_table, blob->hash);
+	duplicate_lte = lookup_blob(blob_table, blob->hash);
 	list_del(&blob->unhashed_list);
 	if (duplicate_lte) {
 		/* We have a duplicate stream.  Transfer the reference counts
@@ -1353,7 +1353,7 @@ hash_unhashed_stream(struct blob *blob,
 	} else {
 		/* No duplicate stream, so we need to insert this stream into
 		 * the lookup table and treat it as a hashed stream. */
-		lookup_table_insert(lookup_table, blob);
+		blob_table_insert(blob_table, blob);
 		blob->unhashed = 0;
 	}
 	*lte_ret = blob;
@@ -1389,15 +1389,15 @@ lte_to_wimlib_resource_entry(const struct blob *blob,
 	wentry->packed = (blob->flags & WIM_RESHDR_FLAG_SOLID) != 0;
 }
 
-struct iterate_lte_context {
+struct iterate_blob_context {
 	wimlib_iterate_lookup_table_callback_t cb;
 	void *user_ctx;
 };
 
 static int
-do_iterate_lte(struct blob *blob, void *_ctx)
+do_iterate_blob(struct blob *blob, void *_ctx)
 {
-	struct iterate_lte_context *ctx = _ctx;
+	struct iterate_blob_context *ctx = _ctx;
 	struct wimlib_resource_entry entry;
 
 	lte_to_wimlib_resource_entry(blob, &entry);
@@ -1413,18 +1413,18 @@ wimlib_iterate_lookup_table(WIMStruct *wim, int flags,
 	if (flags != 0)
 		return WIMLIB_ERR_INVALID_PARAM;
 
-	struct iterate_lte_context ctx = {
+	struct iterate_blob_context ctx = {
 		.cb = cb,
 		.user_ctx = user_ctx,
 	};
 	if (wim_has_metadata(wim)) {
 		int ret;
 		for (int i = 0; i < wim->hdr.image_count; i++) {
-			ret = do_iterate_lte(wim->image_metadata[i]->metadata_blob,
-					     &ctx);
+			ret = do_iterate_blob(wim->image_metadata[i]->metadata_blob,
+					      &ctx);
 			if (ret)
 				return ret;
 		}
 	}
-	return for_blob(wim->lookup_table, do_iterate_lte, &ctx);
+	return for_blob(wim->blob_table, do_iterate_blob, &ctx);
 }

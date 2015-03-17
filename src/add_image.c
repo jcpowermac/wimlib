@@ -25,7 +25,7 @@
 
 #include "wimlib.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/security.h"
 #include "wimlib/xml.h"

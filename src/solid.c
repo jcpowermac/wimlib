@@ -28,7 +28,7 @@
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/solid.h"
@@ -126,15 +126,15 @@ lte_set_solid_sort_name_from_inode(struct blob *blob,
 	blob->solid_sort_name_nbytes = best_name_nbytes;
 }
 
-struct temp_lookup_table {
+struct temp_blob_table {
 	struct hlist_head *table;
 	size_t capacity;
 };
 
 static int
-dentry_fill_in_solid_sort_names(struct wim_dentry *dentry, void *_lookup_table)
+dentry_fill_in_solid_sort_names(struct wim_dentry *dentry, void *_blob_table)
 {
-	const struct temp_lookup_table *lookup_table = _lookup_table;
+	const struct temp_blob_table *blob_table = _blob_table;
 	const struct wim_inode *inode = dentry->d_inode;
 	const u8 *hash;
 	struct hlist_head *head;
@@ -142,8 +142,8 @@ dentry_fill_in_solid_sort_names(struct wim_dentry *dentry, void *_lookup_table)
 	struct blob *blob;
 
 	hash = inode_unnamed_stream_hash(inode);
-	head = &lookup_table->table[load_size_t_unaligned(hash) %
-				    lookup_table->capacity];
+	head = &blob_table->table[load_size_t_unaligned(hash) %
+				    blob_table->capacity];
 	hlist_for_each_entry(blob, cur, head, hash_list_2) {
 		if (hashes_equal(hash, blob->hash)) {
 			lte_set_solid_sort_name_from_inode(blob, inode);
@@ -165,7 +165,7 @@ int
 sort_stream_list_for_solid_compression(struct list_head *stream_list)
 {
 	size_t num_streams = 0;
-	struct temp_lookup_table lookup_table;
+	struct temp_blob_table blob_table;
 	WIMStruct *wims[128];
 	int num_wims = 0;
 	struct blob *blob;
@@ -176,10 +176,10 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 		num_streams++;
 
 	/* Allocate a temporary hash table for mapping stream hash => stream  */
-	lookup_table.capacity = num_streams;
-	lookup_table.table = CALLOC(lookup_table.capacity,
-				    sizeof(lookup_table.table[0]));
-	if (!lookup_table.table)
+	blob_table.capacity = num_streams;
+	blob_table.table = CALLOC(blob_table.capacity,
+				    sizeof(blob_table.table[0]));
+	if (!blob_table.table)
 		return WIMLIB_ERR_NOMEM;
 
 	/*
@@ -203,8 +203,8 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 			wims[num_wims++] = blob->rspec->wim;
 		found_wim:
 			hlist_add_head(&blob->hash_list_2,
-				       &lookup_table.table[load_size_t_unaligned(blob->hash) %
-							   lookup_table.capacity]);
+				       &blob_table.table[load_size_t_unaligned(blob->hash) %
+							   blob_table.capacity]);
 			break;
 		case RESOURCE_IN_FILE_ON_DISK:
 	#ifdef __WIN32__
@@ -223,7 +223,7 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 	for (int i = 0; i < num_wims; i++) {
 		if (!wim_has_metadata(wims[i]))
 			continue;
-		wims[i]->private = &lookup_table;
+		wims[i]->private = &blob_table;
 		ret = for_image(wims[i], WIMLIB_ALL_IMAGES,
 				image_fill_in_solid_sort_names);
 		if (ret)
@@ -239,6 +239,6 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 out:
 	list_for_each_entry(blob, stream_list, write_streams_list)
 		FREE(blob->solid_sort_name);
-	FREE(lookup_table.table);
+	FREE(blob_table.table);
 	return ret;
 }

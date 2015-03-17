@@ -7,7 +7,7 @@
 
 struct avl_tree_node;
 struct wim_dentry;
-struct wim_lookup_table;
+struct blob_table;
 struct blob;
 struct wim_security_data;
 struct wimfs_fd;
@@ -349,20 +349,20 @@ inode_add_attribute(struct wim_inode *inode, int attr_type,
 
 extern void
 inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
-		       struct wim_lookup_table *lookup_table);
+		       struct blob_table *blob_table);
 
 extern struct wim_attribute *
 inode_add_attribute_with_data(struct wim_inode *inode, int attr_type,
 			      const tchar *attr_name,
 			      const void *data, size_t size,
-			      struct wim_lookup_table *lookup_table);
+			      struct blob_table *blob_table);
 
 extern bool
 inode_has_named_data_stream(const struct wim_inode *inode);
 
 extern int
 inode_resolve_attributes(struct wim_inode *inode,
-			 struct wim_lookup_table *table, bool force);
+			 struct blob_table *table, bool force);
 
 extern void
 inode_unresolve_attributes(struct wim_inode *inode);
@@ -372,7 +372,7 @@ stream_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
 extern struct blob *
 inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
-		    const struct wim_lookup_table *table);
+		    const struct blob_table *table);
 
 extern struct blob *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
@@ -387,7 +387,7 @@ inode_unnamed_lte_resolved(const struct wim_inode *inode)
 
 extern struct blob *
 inode_unnamed_lte(const struct wim_inode *inode,
-		  const struct wim_lookup_table *table);
+		  const struct blob_table *table);
 
 extern const u8 *
 inode_attribute_hash(const struct wim_inode *inode, unsigned attr_idx);
@@ -400,7 +400,7 @@ inode_ref_attributes(struct wim_inode *inode);
 
 extern void
 inode_unref_attributes(struct wim_inode *inode,
-		       struct wim_lookup_table *lookup_table);
+		       struct blob_table *blob_table);
 
 /* inode_fixup.c  */
 extern int

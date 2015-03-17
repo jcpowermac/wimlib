@@ -35,7 +35,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/paths.h"
 #include "wimlib/reparse.h"
 
@@ -1372,7 +1372,7 @@ retry_open:
 			inode->i_not_rpfixed = not_rpfixed;
 			inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
 			ret = inode_set_unnamed_stream(inode, rpbuf + 8, rpbuflen - 8,
-						       params->lookup_table);
+						       params->blob_table);
 			if (ret)
 				goto out;
 		}
@@ -1419,7 +1419,7 @@ out:
 	if (likely(h))
 		(*func_NtClose)(h);
 	if (unlikely(ret)) {
-		free_dentry_tree(root, params->lookup_table);
+		free_dentry_tree(root, params->blob_table);
 		root = NULL;
 		ret = report_capture_error(params, ret, full_path);
 	}

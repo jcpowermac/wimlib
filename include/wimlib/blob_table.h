@@ -230,7 +230,7 @@ struct blob {
 	/* Temporary list fields.  */
 	union {
 		/* Links blobs for writing lookup table.  */
-		struct list_head lookup_table_list;
+		struct list_head blob_table_list;
 
 		/* Links blobs being extracted.  */
 		struct list_head extraction_list;
@@ -249,19 +249,19 @@ struct blob {
 
 /* Functions to allocate and free blob tables  */
 
-extern struct wim_lookup_table *
+extern struct blob_table *
 new_blob_table(size_t capacity) _malloc_attribute;
 
 extern void
-free_blob_table(struct wim_blob_table *table);
+free_blob_table(struct blob_table *table);
 
 /* Functions to read or write the lookup table from/to a WIM file  */
 
 extern int
-read_wim_lookup_table(WIMStruct *wim);
+read_blob_table(WIMStruct *wim);
 
 extern int
-write_wim_lookup_table_from_stream_list(struct list_head *stream_list,
+write_blob_table_from_stream_list(struct list_head *stream_list,
 					struct filedes *out_fd,
 					u16 part_number,
 					struct wim_reshdr *out_reshdr,
@@ -270,7 +270,7 @@ write_wim_lookup_table_from_stream_list(struct list_head *stream_list,
 /* Functions to create, clone, print, and free lookup table entries  */
 
 extern struct blob *
-new_lookup_table_entry(void) _malloc_attribute;
+new_blob_table_entry(void) _malloc_attribute;
 
 extern struct blob *
 clone_blob(const struct blob *blob)
@@ -278,7 +278,7 @@ clone_blob(const struct blob *blob)
 
 extern void
 blob_decrement_refcnt(struct blob *blob,
-		     struct wim_lookup_table *table);
+		     struct blob_table *table);
 #ifdef WITH_FUSE
 extern void
 blob_decrement_num_opened_fds(struct blob *blob);
@@ -290,26 +290,26 @@ free_blob(struct blob *blob);
 /* Functions to insert and delete entries from a lookup table  */
 
 extern void
-lookup_table_insert(struct wim_lookup_table *table,
+blob_table_insert(struct blob_table *table,
 		struct blob *blob);
 
 extern void
-lookup_table_unlink(struct wim_lookup_table *table,
+blob_table_unlink(struct blob_table *table,
 		    struct blob *blob);
 
 /* Function to lookup a stream by SHA1 message digest  */
 extern struct blob *
-lookup_blob(const struct wim_lookup_table *table, const u8 hash[]);
+lookup_blob(const struct blob_table *table, const u8 hash[]);
 
 /* Functions to iterate through the entries of a lookup table  */
 
 extern int
-for_blob(struct wim_lookup_table *table,
+for_blob(struct blob_table *table,
 		       int (*visitor)(struct blob *, void *),
 		       void *arg);
 
 extern int
-for_blob_pos_sorted(struct wim_lookup_table *table,
+for_blob_pos_sorted(struct blob_table *table,
 				  int (*visitor)(struct blob *,
 						 void *),
 				  void *arg);
@@ -379,7 +379,7 @@ blob_put_resource(struct blob *blob);
 
 extern struct blob *
 new_stream_from_data_buffer(const void *buffer, size_t size,
-			    struct wim_lookup_table *lookup_table);
+			    struct blob_table *blob_table);
 
 static inline void
 add_unhashed_stream(struct blob *blob,
@@ -395,7 +395,7 @@ add_unhashed_stream(struct blob *blob,
 
 extern int
 hash_unhashed_stream(struct blob *blob,
-		     struct wim_lookup_table *lookup_table,
+		     struct blob_table *blob_table,
 		     struct blob **lte_ret);
 
 extern struct blob **

@@ -1064,9 +1064,9 @@ do_free_dentry(struct wim_dentry *dentry, void *_ignore)
 }
 
 static int
-do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *lookup_table)
+do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *blob_table)
 {
-	inode_unref_streams(dentry->d_inode, lookup_table);
+	inode_unref_streams(dentry->d_inode, blob_table);
 	free_dentry(dentry);
 	return 0;
 }
@@ -1078,7 +1078,7 @@ do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *lookup_table)
  *	The root of the dentry tree to free.  If NULL, this function has no
  *	effect.
  *
- * @lookup_table:
+ * @blob_table:
  *	A pointer to the lookup table for the WIM, or NULL if not specified.  If
  *	specified, this function will decrement the reference counts of the
  *	single-instance streams referenced by the dentries.
@@ -1090,16 +1090,16 @@ do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *lookup_table)
  * function.
  */
 void
-free_dentry_tree(struct wim_dentry *root, struct wim_lookup_table *lookup_table)
+free_dentry_tree(struct wim_dentry *root, struct blob_table *blob_table)
 {
 	int (*f)(struct wim_dentry *, void *);
 
-	if (lookup_table)
+	if (blob_table)
 		f = do_free_dentry_and_unref_streams;
 	else
 		f = do_free_dentry;
 
-	for_dentry_in_tree_depth(root, f, lookup_table);
+	for_dentry_in_tree_depth(root, f, blob_table);
 }
 
 /* Insert the @child dentry into the case sensitive index of the @dir directory.

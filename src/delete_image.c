@@ -46,7 +46,7 @@ delete_wim_image(WIMStruct *wim, int image)
 
 	/* Release the reference to the image metadata and decrement reference
 	 * counts on the streams referenced by files in the image.  */
-	put_image_metadata(wim->image_metadata[image - 1], wim->lookup_table);
+	put_image_metadata(wim->image_metadata[image - 1], wim->blob_table);
 
 	/* Remove the empty slot from the image metadata array.  */
 	memmove(&wim->image_metadata[image - 1], &wim->image_metadata[image],

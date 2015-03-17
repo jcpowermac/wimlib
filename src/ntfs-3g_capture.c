@@ -42,7 +42,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/ntfs_3g.h"
 #include "wimlib/paths.h"
 #include "wimlib/security.h"
@@ -702,7 +702,7 @@ out_progress:
 		ret = do_capture_progress(params, WIMLIB_SCAN_DENTRY_OK, inode);
 out:
 	if (unlikely(ret)) {
-		free_dentry_tree(root, params->lookup_table);
+		free_dentry_tree(root, params->blob_table);
 		root = NULL;
 		ret = report_capture_error(params, ret, path);
 	}

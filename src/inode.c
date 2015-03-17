@@ -35,7 +35,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/error.h"
 #include "wimlib/inode.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/timestamp.h"
 
 /* Allocate a new inode.  Set the timestamps to the current time.  */
@@ -238,7 +238,7 @@ inode_add_attribute(struct wim_inode *inode, int attr_type,
 
 void
 inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
-		       struct wim_lookup_table *lookup_table)
+		       struct blob_table *blob_table)
 {
 	struct blob *blob;
 	unsigned idx = attr - inode->i_attrs;
@@ -248,7 +248,7 @@ inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
 
 	blob = attr->attr_blob;
 	if (blob)
-		blob_decrement_refcnt(blob, lookup_table);
+		blob_decrement_refcnt(blob, blob_table);
 
 	FREE(attr->attr_name);
 
@@ -262,7 +262,7 @@ struct wim_attribute *
 inode_add_attribute_with_data(struct wim_inode *inode,
 			      int attr_type, const tchar *attr_name,
 			      const void *data, size_t size,
-			      struct wim_lookup_table *lookup_table)
+			      struct blob_table *blob_table)
 {
 	struct wim_attribute *new_attr;
 
@@ -272,7 +272,7 @@ inode_add_attribute_with_data(struct wim_inode *inode,
 	if (unlikely(!new_attr))
 		return NULL;
 
-	new_attr->attr_lte = new_stream_from_data_buffer(data, size, lookup_table);
+	new_attr->attr_lte = new_stream_from_data_buffer(data, size, blob_table);
 	if (unlikely(!new_attr->attr_lte)) {
 		inode_remove_attribute(inode, new_attr, NULL);
 		return NULL;
@@ -314,7 +314,7 @@ inode_has_named_data_stream(const struct wim_inode *inode)
  * single-instance stream referenced by the inode was missing.
  */
 int
-inode_resolve_attributes(struct wim_inode *inode, struct wim_lookup_table *table,
+inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 			 bool force)
 {
 	struct blob *ltes[inode->i_num_attrs];
@@ -336,7 +336,7 @@ inode_resolve_attributes(struct wim_inode *inode, struct wim_lookup_table *table
 				if (!blob)
 					return WIMLIB_ERR_NOMEM;
 				copy_hash(blob->hash, hash);
-				lookup_table_insert(table, blob);
+				blob_table_insert(table, blob);
 			}
 		}
 		ltes[i] = blob;
@@ -387,7 +387,7 @@ stream_not_found_error(const struct wim_inode *inode, const u8 *hash)
 
 struct blob *
 inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
-		    const struct wim_lookup_table *table)
+		    const struct blob_table *table)
 {
 	if (inode->i_resolved)
 		return inode->i_attrs[attr_idx].attr_lte;
@@ -422,7 +422,7 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
  */
 struct blob *
 inode_unnamed_lte(const struct wim_inode *inode,
-		  const struct wim_lookup_table *table)
+		  const struct blob_table *table)
 {
 	struct wim_attribute *attr;
 
@@ -481,14 +481,14 @@ inode_ref_attributes(struct wim_inode *inode)
  * This is necessary when deleting a hard link to this inode.  */
 void
 inode_unref_attributes(struct wim_inode *inode,
-		       struct wim_lookup_table *lookup_table)
+		       struct blob_table *blob_table)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		struct blob *blob;
 
-		blob = inode_attribute_lte(inode, i, lookup_table);
+		blob = inode_attribute_lte(inode, i, blob_table);
 		if (blob)
-			blob_decrement_refcnt(blob, lookup_table);
+			blob_decrement_refcnt(blob, blob_table);
 	}
 }
 

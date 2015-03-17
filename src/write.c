@@ -46,7 +46,7 @@
 #include "wimlib/header.h"
 #include "wimlib/inode.h"
 #include "wimlib/integrity.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/progress.h"
@@ -354,7 +354,7 @@ struct write_streams_ctx {
 
 	/* Lookup table for the WIMStruct on whose behalf the streams are being
 	 * written.  */
-	struct wim_lookup_table *lookup_table;
+	struct blob_table *blob_table;
 
 	/* Compression format to use.  */
 	int out_ctype;
@@ -750,11 +750,11 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 	 * still provide the data again to write_stream_process_chunk().  This
 	 * is okay because an unhashed stream cannot be in a WIM resource, which
 	 * might be costly to decompress.  */
-	if (ctx->lookup_table != NULL && blob->unhashed && !blob->unique_size) {
+	if (ctx->blob_table != NULL && blob->unhashed && !blob->unique_size) {
 
 		struct blob *lte_new;
 
-		ret = hash_unhashed_stream(blob, ctx->lookup_table, &lte_new);
+		ret = hash_unhashed_stream(blob, ctx->blob_table, &lte_new);
 		if (ret)
 			return ret;
 		if (lte_new != blob) {
@@ -775,7 +775,7 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 								blob->size,
 								1, true);
 				list_del(&blob->write_streams_list);
-				list_del(&blob->lookup_table_list);
+				list_del(&blob->blob_table_list);
 				if (lte_new->will_be_in_output_wim)
 					lte_new->out_refcnt += blob->out_refcnt;
 				if (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID)
@@ -797,8 +797,8 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 				      "selected for writing.");
 				list_replace(&blob->write_streams_list,
 					     &lte_new->write_streams_list);
-				list_replace(&blob->lookup_table_list,
-					     &lte_new->lookup_table_list);
+				list_replace(&blob->blob_table_list,
+					     &lte_new->blob_table_list);
 				blob->will_be_in_output_wim = 0;
 				lte_new->out_refcnt = blob->out_refcnt;
 				lte_new->will_be_in_output_wim = 1;
@@ -1170,13 +1170,13 @@ write_stream_end_read(struct blob *blob, int status, void *_ctx)
 		if (!status)
 			status = done_with_stream(blob, ctx);
 		free_blob(blob);
-	} else if (!status && blob->unhashed && ctx->lookup_table != NULL) {
+	} else if (!status && blob->unhashed && ctx->blob_table != NULL) {
 		/* The 'blob' stream was not a duplicate and was previously
 		 * unhashed.  Since we passed COMPUTE_MISSING_STREAM_HASHES to
 		 * read_stream_list(), blob->hash is now computed and valid.  So
 		 * turn this stream into a "hashed" stream.  */
 		list_del(&blob->unhashed_list);
-		lookup_table_insert(ctx->lookup_table, blob);
+		blob_table_insert(ctx->blob_table, blob);
 		blob->unhashed = 0;
 	}
 	return status;
@@ -1457,7 +1457,7 @@ init_done_with_file_info(struct list_head *stream_list)
  *	threads will be chosen.  The number of threads still may be decreased
  *	from the specified value if insufficient memory is detected.
  *
- * @lookup_table
+ * @blob_table
  *	If on-the-fly deduplication of unhashed streams is desired, this
  *	parameter must be pointer to the lookup table for the WIMStruct on whose
  *	behalf the streams are being written.  Otherwise, this parameter can be
@@ -1497,12 +1497,12 @@ init_done_with_file_info(struct list_head *stream_list)
  * file, but set to 0 on any other streams in the output WIM's lookup table or
  * sharing a solid resource with a stream in @stream_list.  Still furthermore,
  * if on-the-fly deduplication of streams is possible, then all streams in
- * @stream_list must also be linked by @lookup_table_list along with any other
+ * @stream_list must also be linked by @blob_table_list along with any other
  * streams that have @will_be_in_output_wim set.
  *
  * This function handles on-the-fly deduplication of streams for which SHA1
  * message digests have not yet been calculated.  Such streams may or may not
- * need to be written.  If @lookup_table is non-NULL, then each stream in
+ * need to be written.  If @blob_table is non-NULL, then each stream in
  * @stream_list that has @unhashed set but not @unique_size set is checksummed
  * immediately before it would otherwise be read for writing in order to
  * determine if it is identical to another stream already being written or one
@@ -1510,10 +1510,10 @@ init_done_with_file_info(struct list_head *stream_list)
  * context @filter_ctx.  Each such duplicate stream will be removed from
  * @stream_list, its reference count transfered to the pre-existing duplicate
  * stream, its memory freed, and will not be written.  Alternatively, if a
- * stream in @stream_list is a duplicate with any stream in @lookup_table that
+ * stream in @stream_list is a duplicate with any stream in @blob_table that
  * has not been marked for writing or would not be hard-filtered, it is freed
  * and the pre-existing duplicate is written instead, taking ownership of the
- * reference count and slot in the @lookup_table_list.
+ * reference count and slot in the @blob_table_list.
  *
  * Returns 0 if every stream was either written successfully or did not need to
  * be written; otherwise returns a non-zero error code.
@@ -1525,7 +1525,7 @@ write_stream_list(struct list_head *stream_list,
 		  int out_ctype,
 		  u32 out_chunk_size,
 		  unsigned num_threads,
-		  struct wim_lookup_table *lookup_table,
+		  struct blob_table *blob_table,
 		  struct filter_context *filter_ctx,
 		  wimlib_progress_func_t progfunc,
 		  void *progctx)
@@ -1555,7 +1555,7 @@ write_stream_list(struct list_head *stream_list,
 	memset(&ctx, 0, sizeof(ctx));
 
 	ctx.out_fd = out_fd;
-	ctx.lookup_table = lookup_table;
+	ctx.blob_table = blob_table;
 	ctx.out_ctype = out_ctype;
 	ctx.out_chunk_size = out_chunk_size;
 	ctx.write_resource_flags = write_resource_flags;
@@ -1742,7 +1742,7 @@ is_stream_in_solid_resource(struct blob *blob, void *_ignore)
 static bool
 wim_has_solid_resources(WIMStruct *wim)
 {
-	return for_blob(wim->lookup_table,
+	return for_blob(wim->blob_table,
 				      is_stream_in_solid_resource, NULL);
 }
 
@@ -1783,7 +1783,7 @@ wim_write_stream_list(WIMStruct *wim,
 				 out_ctype,
 				 out_chunk_size,
 				 num_threads,
-				 wim->lookup_table,
+				 wim->blob_table,
 				 filter_ctx,
 				 wim->progfunc,
 				 wim->progctx);
@@ -1935,7 +1935,7 @@ fully_reference_stream_for_write(struct blob *blob,
 
 static int
 inode_find_streams_to_reference(const struct wim_inode *inode,
-				const struct wim_lookup_table *table,
+				const struct blob_table *table,
 				struct list_head *stream_list)
 {
 	struct blob *blob;
@@ -1978,7 +1978,7 @@ image_find_streams_to_reference(WIMStruct *wim)
 	stream_list = wim->private;
 	image_for_each_inode(inode, imd) {
 		ret = inode_find_streams_to_reference(inode,
-						      wim->lookup_table,
+						      wim->blob_table,
 						      stream_list);
 		if (ret)
 			return ret;
@@ -2005,7 +2005,7 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 		struct wim_image_metadata *imd;
 		unsigned i;
 
-		for_blob(wim->lookup_table,
+		for_blob(wim->blob_table,
 				       fully_reference_stream_for_write,
 				       stream_list_ret);
 
@@ -2017,7 +2017,7 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 	} else {
 		/* Slow case:  Walk through the images being written and
 		 * determine the streams referenced.  */
-		for_blob(wim->lookup_table,
+		for_blob(wim->blob_table,
 				       do_stream_set_not_in_output_wim, NULL);
 		wim->private = stream_list_ret;
 		ret = for_image(wim, image, image_find_streams_to_reference);
@@ -2046,7 +2046,7 @@ insert_other_if_hard_filtered(struct blob *blob, void *_ctx)
 
 static int
 determine_stream_size_uniquity(struct list_head *stream_list,
-			       struct wim_lookup_table *lt,
+			       struct blob_table *lt,
 			       struct filter_context *filter_ctx)
 {
 	int ret;
@@ -2092,7 +2092,7 @@ filter_stream_list_for_write(struct list_head *stream_list,
 			} else {
 				/* Hard filtered.  */
 				blob->will_be_in_output_wim = 0;
-				list_del(&blob->lookup_table_list);
+				list_del(&blob->blob_table_list);
 			}
 			list_del(&blob->write_streams_list);
 		}
@@ -2125,7 +2125,7 @@ filter_stream_list_for_write(struct list_head *stream_list,
  *
  *	SKIP_EXTERNAL_WIMS:  Streams already present in a WIM file, but not
  *	@wim, shall be returned in neither @stream_list_ret nor
- *	@lookup_table_list_ret.
+ *	@blob_table_list_ret.
  *
  * @stream_list_ret
  *	List of streams, linked by write_streams_list, that need to be written
@@ -2135,8 +2135,8 @@ filter_stream_list_for_write(struct list_head *stream_list,
  *	it does not take into account that they may become duplicates when
  *	actually hashed.
  *
- * @lookup_table_list_ret
- *	List of streams, linked by lookup_table_list, that need to be included
+ * @blob_table_list_ret
+ *	List of streams, linked by blob_table_list, that need to be included
  *	in the WIM's lookup table will be returned here.  This will be a
  *	superset of the streams in @stream_list_ret.
  *
@@ -2155,8 +2155,8 @@ filter_stream_list_for_write(struct list_head *stream_list,
  *	returned in this location.
  *
  * In addition, @will_be_in_output_wim will be set to 1 in all stream entries
- * inserted into @lookup_table_list_ret and to 0 in all stream entries in the
- * lookup table of @wim not inserted into @lookup_table_list_ret.
+ * inserted into @blob_table_list_ret and to 0 in all stream entries in the
+ * lookup table of @wim not inserted into @blob_table_list_ret.
  *
  * Still furthermore, @unique_size will be set to 1 on all stream entries in
  * @stream_list_ret that have unique size among all stream entries in
@@ -2170,7 +2170,7 @@ static int
 prepare_stream_list_for_write(WIMStruct *wim, int image,
 			      int write_flags,
 			      struct list_head *stream_list_ret,
-			      struct list_head *lookup_table_list_ret,
+			      struct list_head *blob_table_list_ret,
 			      struct filter_context *filter_ctx_ret)
 {
 	int ret;
@@ -2187,11 +2187,11 @@ prepare_stream_list_for_write(WIMStruct *wim, int image,
 	if (ret)
 		return ret;
 
-	INIT_LIST_HEAD(lookup_table_list_ret);
+	INIT_LIST_HEAD(blob_table_list_ret);
 	list_for_each_entry(blob, stream_list_ret, write_streams_list)
-		list_add_tail(&blob->lookup_table_list, lookup_table_list_ret);
+		list_add_tail(&blob->blob_table_list, blob_table_list_ret);
 
-	ret = determine_stream_size_uniquity(stream_list_ret, wim->lookup_table,
+	ret = determine_stream_size_uniquity(stream_list_ret, wim->blob_table,
 					     filter_ctx_ret);
 	if (ret)
 		return ret;
@@ -2206,7 +2206,7 @@ static int
 write_wim_streams(WIMStruct *wim, int image, int write_flags,
 		  unsigned num_threads,
 		  struct list_head *stream_list_override,
-		  struct list_head *lookup_table_list_ret)
+		  struct list_head *blob_table_list_ret)
 {
 	int ret;
 	struct list_head _stream_list;
@@ -2222,7 +2222,7 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 		filter_ctx = &_filter_ctx;
 		ret = prepare_stream_list_for_write(wim, image, write_flags,
 						    stream_list,
-						    lookup_table_list_ret,
+						    blob_table_list_ret,
 						    filter_ctx);
 		if (ret)
 			return ret;
@@ -2232,12 +2232,12 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 		 * reference counts.  */
 		stream_list = stream_list_override;
 		filter_ctx = NULL;
-		INIT_LIST_HEAD(lookup_table_list_ret);
+		INIT_LIST_HEAD(blob_table_list_ret);
 		list_for_each_entry(blob, stream_list, write_streams_list) {
 			blob->out_refcnt = blob->refcnt;
 			blob->will_be_in_output_wim = 1;
 			blob->unique_size = 0;
-			list_add_tail(&blob->lookup_table_list, lookup_table_list_ret);
+			list_add_tail(&blob->blob_table_list, blob_table_list_ret);
 		}
 	}
 
@@ -2372,16 +2372,16 @@ cmp_streams_by_out_rspec(const void *p1, const void *p2)
 }
 
 static int
-write_wim_lookup_table(WIMStruct *wim, int image, int write_flags,
+write_blob_table(WIMStruct *wim, int image, int write_flags,
 		       struct wim_reshdr *out_reshdr,
-		       struct list_head *lookup_table_list)
+		       struct list_head *blob_table_list)
 {
 	int ret;
 
 	/* Set output resource metadata for streams already present in WIM.  */
 	if (write_flags & WIMLIB_WRITE_FLAG_OVERWRITE) {
 		struct blob *blob;
-		list_for_each_entry(blob, lookup_table_list, lookup_table_list)
+		list_for_each_entry(blob, blob_table_list, blob_table_list)
 		{
 			if (blob->resource_location == RESOURCE_IN_WIM &&
 			    blob->rspec->wim == wim)
@@ -2391,8 +2391,8 @@ write_wim_lookup_table(WIMStruct *wim, int image, int write_flags,
 		}
 	}
 
-	ret = sort_stream_list(lookup_table_list,
-			       offsetof(struct blob, lookup_table_list),
+	ret = sort_stream_list(blob_table_list,
+			       offsetof(struct blob, blob_table_list),
 			       cmp_streams_by_out_rspec);
 	if (ret)
 		return ret;
@@ -2419,11 +2419,11 @@ write_wim_lookup_table(WIMStruct *wim, int image, int write_flags,
 			metadata_blob = wim->image_metadata[i - 1]->metadata_blob;
 			wimlib_assert(metadata_blob->out_reshdr.flags & WIM_RESHDR_FLAG_METADATA);
 			metadata_blob->out_refcnt = 1;
-			list_add(&metadata_blob->lookup_table_list, lookup_table_list);
+			list_add(&metadata_blob->blob_table_list, blob_table_list);
 		}
 	}
 
-	return write_wim_lookup_table_from_stream_list(lookup_table_list,
+	return write_blob_table_from_stream_list(blob_table_list,
 						       &wim->out_fd,
 						       wim->hdr.part_number,
 						       out_reshdr,
@@ -2477,13 +2477,13 @@ write_wim_lookup_table(WIMStruct *wim, int image, int write_flags,
  */
 static int
 finish_write(WIMStruct *wim, int image, int write_flags,
-	     struct list_head *lookup_table_list)
+	     struct list_head *blob_table_list)
 {
 	int ret;
 	off_t hdr_offset;
 	int write_resource_flags;
-	off_t old_lookup_table_end = 0;
-	off_t new_lookup_table_end;
+	off_t old_blob_table_end = 0;
+	off_t new_blob_table_end;
 	u64 xml_totalbytes;
 	struct integrity_table *old_integrity_table = NULL;
 
@@ -2515,10 +2515,10 @@ finish_write(WIMStruct *wim, int image, int write_flags,
 		 WIMLIB_WRITE_FLAG_CHECK_INTEGRITY)
 	    && wim_has_integrity_table(wim))
 	{
-		old_lookup_table_end = wim->hdr.lookup_table_reshdr.offset_in_wim +
-				       wim->hdr.lookup_table_reshdr.size_in_wim;
+		old_blob_table_end = wim->hdr.blob_table_reshdr.offset_in_wim +
+				       wim->hdr.blob_table_reshdr.size_in_wim;
 		(void)read_integrity_table(wim,
-					   old_lookup_table_end - WIM_HEADER_DISK_SIZE,
+					   old_blob_table_end - WIM_HEADER_DISK_SIZE,
 					   &old_integrity_table);
 		/* If we couldn't read the old integrity table, we can still
 		 * re-calculate the full integrity table ourselves.  Hence the
@@ -2527,9 +2527,9 @@ finish_write(WIMStruct *wim, int image, int write_flags,
 
 	/* Write lookup table.  */
 	if (!(write_flags & WIMLIB_WRITE_FLAG_NO_LOOKUP_TABLE)) {
-		ret = write_wim_lookup_table(wim, image, write_flags,
-					     &wim->hdr.lookup_table_reshdr,
-					     lookup_table_list);
+		ret = write_blob_table(wim, image, write_flags,
+					     &wim->hdr.blob_table_reshdr,
+					     blob_table_list);
 		if (ret) {
 			free_integrity_table(old_integrity_table);
 			return ret;
@@ -2563,12 +2563,12 @@ finish_write(WIMStruct *wim, int image, int write_flags,
 			}
 		}
 
-		new_lookup_table_end = wim->hdr.lookup_table_reshdr.offset_in_wim +
-				       wim->hdr.lookup_table_reshdr.size_in_wim;
+		new_blob_table_end = wim->hdr.blob_table_reshdr.offset_in_wim +
+				       wim->hdr.blob_table_reshdr.size_in_wim;
 
 		ret = write_integrity_table(wim,
-					    new_lookup_table_end,
-					    old_lookup_table_end,
+					    new_blob_table_end,
+					    old_blob_table_end,
 					    old_integrity_table);
 		free_integrity_table(old_integrity_table);
 		if (ret)
@@ -2723,7 +2723,7 @@ static int
 write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 		  unsigned num_threads,
 		  struct list_head *stream_list_override,
-		  struct list_head *lookup_table_list_ret)
+		  struct list_head *blob_table_list_ret)
 {
 	int ret;
 	struct wim_reshdr xml_reshdr;
@@ -2763,7 +2763,7 @@ write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 	/* Write streams needed for the image(s) being included in the output
 	 * WIM, or streams needed for the split WIM part.  */
 	return write_wim_streams(wim, image, write_flags, num_threads,
-				 stream_list_override, lookup_table_list_ret);
+				 stream_list_override, blob_table_list_ret);
 
 	/* The lookup table, XML data, and header at end are handled by
 	 * finish_write().  */
@@ -2784,7 +2784,7 @@ write_wim_part(WIMStruct *wim,
 {
 	int ret;
 	struct wim_header hdr_save;
-	struct list_head lookup_table_list;
+	struct list_head blob_table_list;
 
 	if (total_parts == 1)
 		DEBUG("Writing standalone WIM.");
@@ -2961,7 +2961,7 @@ write_wim_part(WIMStruct *wim,
 	}
 
 	/* Clear references to resources that have not been written yet.  */
-	zero_reshdr(&wim->hdr.lookup_table_reshdr);
+	zero_reshdr(&wim->hdr.blob_table_reshdr);
 	zero_reshdr(&wim->hdr.xml_data_reshdr);
 	zero_reshdr(&wim->hdr.boot_metadata_reshdr);
 	zero_reshdr(&wim->hdr.integrity_table_reshdr);
@@ -3021,7 +3021,7 @@ write_wim_part(WIMStruct *wim,
 		/* Default case: create a normal (non-pipable) WIM.  */
 		ret = write_wim_streams(wim, image, write_flags, num_threads,
 					stream_list_override,
-					&lookup_table_list);
+					&blob_table_list);
 		if (ret)
 			goto out_restore_hdr;
 
@@ -3032,7 +3032,7 @@ write_wim_part(WIMStruct *wim,
 		/* Non-default case: create pipable WIM.  */
 		ret = write_pipable_wim(wim, image, write_flags, num_threads,
 					stream_list_override,
-					&lookup_table_list);
+					&blob_table_list);
 		if (ret)
 			goto out_restore_hdr;
 		write_flags |= WIMLIB_WRITE_FLAG_HEADER_AT_END;
@@ -3040,7 +3040,7 @@ write_wim_part(WIMStruct *wim,
 
 
 	/* Write lookup table, XML data, and (optional) integrity table.  */
-	ret = finish_write(wim, image, write_flags, &lookup_table_list);
+	ret = finish_write(wim, image, write_flags, &blob_table_list);
 out_restore_hdr:
 	memcpy(&wim->hdr, &hdr_save, sizeof(struct wim_header));
 	(void)close_wim_writable(wim, write_flags);
@@ -3118,7 +3118,7 @@ check_resource_offsets(WIMStruct *wim, off_t end_offset)
 	unsigned i;
 
 	wim->private = &end_offset;
-	ret = for_blob(wim->lookup_table, check_resource_offset, wim);
+	ret = for_blob(wim->blob_table, check_resource_offset, wim);
 	if (ret)
 		return ret;
 
@@ -3192,10 +3192,10 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 {
 	int ret;
 	off_t old_wim_end;
-	u64 old_lookup_table_end, old_xml_begin, old_xml_end;
+	u64 old_blob_table_end, old_xml_begin, old_xml_end;
 	struct wim_header hdr_save;
 	struct list_head stream_list;
-	struct list_head lookup_table_list;
+	struct list_head blob_table_list;
 	struct filter_context filter_ctx;
 
 	DEBUG("Overwriting `%"TS"' in-place", wim->filename);
@@ -3223,8 +3223,8 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 	 * overwritten. */
 	old_xml_begin = wim->hdr.xml_data_reshdr.offset_in_wim;
 	old_xml_end = old_xml_begin + wim->hdr.xml_data_reshdr.size_in_wim;
-	old_lookup_table_end = wim->hdr.lookup_table_reshdr.offset_in_wim +
-			       wim->hdr.lookup_table_reshdr.size_in_wim;
+	old_blob_table_end = wim->hdr.blob_table_reshdr.offset_in_wim +
+			       wim->hdr.blob_table_reshdr.size_in_wim;
 	if (wim->hdr.integrity_table_reshdr.offset_in_wim != 0 &&
 	    wim->hdr.integrity_table_reshdr.offset_in_wim < old_xml_end) {
 		WARNING("Didn't expect the integrity table to be before the XML data");
@@ -3232,7 +3232,7 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 		goto out_restore_memory_hdr;
 	}
 
-	if (old_lookup_table_end > old_xml_begin) {
+	if (old_blob_table_end > old_xml_begin) {
 		WARNING("Didn't expect the lookup table to be after the XML data");
 		ret = WIMLIB_ERR_RESOURCE_ORDER;
 		goto out_restore_memory_hdr;
@@ -3250,7 +3250,7 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 		 * overwrite an existing integrity table. */
 		DEBUG("Skipping writing lookup table "
 		      "(no images modified or deleted)");
-		old_wim_end = old_lookup_table_end;
+		old_wim_end = old_blob_table_end;
 		write_flags |= WIMLIB_WRITE_FLAG_NO_LOOKUP_TABLE |
 			       WIMLIB_WRITE_FLAG_CHECKPOINT_AFTER_XML;
 	} else if (wim->hdr.integrity_table_reshdr.offset_in_wim != 0) {
@@ -3269,7 +3269,7 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 		goto out_restore_memory_hdr;
 
 	ret = prepare_stream_list_for_write(wim, WIMLIB_ALL_IMAGES, write_flags,
-					    &stream_list, &lookup_table_list,
+					    &stream_list, &blob_table_list,
 					    &filter_ctx);
 	if (ret)
 		goto out_restore_memory_hdr;
@@ -3309,7 +3309,7 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 		goto out_truncate;
 
 	ret = finish_write(wim, WIMLIB_ALL_IMAGES, write_flags,
-			   &lookup_table_list);
+			   &blob_table_list);
 	if (ret)
 		goto out_truncate;
 

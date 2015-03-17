@@ -28,7 +28,7 @@
 #include "wimlib.h"
 #include "wimlib/error.h"
 #include "wimlib/glob.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/wim.h"
 
 #define WIMLIB_REF_MASK_PUBLIC (WIMLIB_REF_FLAG_GLOB_ENABLE | \
@@ -39,7 +39,7 @@ struct reference_info {
 	struct list_head new_streams;
 	struct list_head new_subwims;
 	int ref_flags;
-	struct wim_lookup_table *src_table;
+	struct blob_table *src_table;
 };
 
 static void
@@ -74,9 +74,9 @@ rollback_reference_info(struct reference_info *info)
 	while (!list_empty(&info->new_streams)) {
 		blob = list_first_entry(&info->new_streams,
 				       struct blob,
-				       lookup_table_list);
-		list_del(&blob->lookup_table_list);
-		lookup_table_unlink(info->dest_wim->lookup_table, blob);
+				       blob_table_list);
+		list_del(&blob->blob_table_list);
+		blob_table_unlink(info->dest_wim->blob_table, blob);
 		free_blob(blob);
 	}
 }
@@ -95,15 +95,15 @@ static bool
 need_stream(const struct reference_info *info,
 	    const struct blob *blob)
 {
-	return !lookup_blob(info->dest_wim->lookup_table, blob->hash);
+	return !lookup_blob(info->dest_wim->blob_table, blob->hash);
 }
 
 static void
 reference_stream(struct reference_info *info,
 		 struct blob *blob)
 {
-	lookup_table_insert(info->dest_wim->lookup_table, blob);
-	list_add(&blob->lookup_table_list, &info->new_streams);
+	blob_table_insert(info->dest_wim->blob_table, blob);
+	list_add(&blob->blob_table_list, &info->new_streams);
 }
 
 static void
@@ -151,7 +151,7 @@ wimlib_reference_resources(WIMStruct *wim, WIMStruct **resource_wims,
 	init_reference_info(&info, wim, ref_flags);
 
 	for (i = 0; i < num_resource_wims; i++) {
-		ret = for_blob(resource_wims[i]->lookup_table,
+		ret = for_blob(resource_wims[i]->blob_table,
 					     lte_clone_if_new, &info);
 		if (ret)
 			break;
@@ -165,7 +165,7 @@ lte_gift(struct blob *blob, void *_info)
 {
 	struct reference_info *info = _info;
 
-	lookup_table_unlink(info->src_table, blob);
+	blob_table_unlink(info->src_table, blob);
 	if (need_stream(info, blob))
 		reference_stream(info, blob);
 	else
@@ -186,8 +186,8 @@ reference_resource_path(struct reference_info *info, const tchar *path,
 	if (ret)
 		return ret;
 
-	info->src_table = src_wim->lookup_table;
-	for_blob(src_wim->lookup_table, lte_gift, info);
+	info->src_table = src_wim->blob_table;
+	for_blob(src_wim->blob_table, lte_gift, info);
 	reference_subwim(info, src_wim);
 	return 0;
 }

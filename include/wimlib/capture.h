@@ -9,7 +9,7 @@
 #include "wimlib/textfile.h"
 #include "wimlib/util.h"
 
-struct wim_lookup_table;
+struct blob_table;
 struct wim_dentry;
 struct wim_inode;
 
@@ -23,7 +23,7 @@ struct capture_config {
  * from an on-disk directory structure. */
 struct capture_params {
 	/* Pointer to the lookup table of the WIM.  */
-	struct wim_lookup_table *lookup_table;
+	struct blob_table *blob_table;
 
 	/* List of streams that have been added so far, but without their SHA1
 	 * message digests being calculated (as a shortcut).  */

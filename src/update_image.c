@@ -60,7 +60,7 @@
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/lookup_table.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #ifdef WITH_NTFS_3G
 #  include "wimlib/ntfs_3g.h" /* for do_ntfs_umount() */
@@ -135,7 +135,7 @@ struct update_command_journal {
 	struct wim_dentry **root_p;
 
 	/* Pointer to the lookup table of the WIM (may needed for rollback)  */
-	struct wim_lookup_table *lookup_table;
+	struct blob_table *blob_table;
 
 	/* List of dentries that are currently unlinked from the WIM image.
 	 * These must be freed when no longer needed for commit or rollback.  */
@@ -157,7 +157,7 @@ init_update_primitive_list(struct update_primitive_list *l)
  * commands.  */
 static struct update_command_journal *
 new_update_command_journal(size_t num_cmds, struct wim_dentry **root_p,
-			   struct wim_lookup_table *lookup_table)
+			   struct blob_table *blob_table)
 {
 	struct update_command_journal *j;
 
@@ -166,7 +166,7 @@ new_update_command_journal(size_t num_cmds, struct wim_dentry **root_p,
 		j->num_cmds = num_cmds;
 		j->cur_cmd = 0;
 		j->root_p = root_p;
-		j->lookup_table = lookup_table;
+		j->blob_table = blob_table;
 		INIT_LIST_HEAD(&j->orphans);
 		for (size_t i = 0; i < num_cmds; i++)
 			init_update_primitive_list(&j->cmd_prims[i]);
@@ -186,7 +186,7 @@ free_update_command_journal(struct update_command_journal *j)
 		orphan = list_first_entry(&j->orphans,
 					  struct wim_dentry, tmp_list);
 		list_del(&orphan->tmp_list);
-		free_dentry_tree(orphan, j->lookup_table);
+		free_dentry_tree(orphan, j->blob_table);
 	}
 
 	for (size_t i = 0; i < j->num_cmds; i++)
@@ -532,7 +532,7 @@ handle_conflict(struct wim_dentry *branch, struct wim_dentry *existing,
 				return ret;
 			}
 		}
-		free_dentry_tree(branch, j->lookup_table);
+		free_dentry_tree(branch, j->blob_table);
 		return 0;
 	} else if (add_flags & WIMLIB_ADD_FLAG_NO_REPLACE) {
 		/* Can't replace nondirectory file  */
@@ -705,7 +705,7 @@ attach_branch(struct wim_dentry *branch, const tchar *target_tstr,
 out_free_target:
 	tstr_put_utf16le(target);
 out_free_branch:
-	free_dentry_tree(branch, j->lookup_table);
+	free_dentry_tree(branch, j->blob_table);
 out:
 	return ret;
 }
@@ -825,7 +825,7 @@ execute_add_command(struct update_command_journal *j,
 	if (ret)
 		goto out;
 
-	params.lookup_table = wim->lookup_table;
+	params.blob_table = wim->blob_table;
 	params.unhashed_streams = unhashed_streams;
 	params.inode_table = inode_table;
 	params.sd_set = sd_set;
@@ -851,7 +851,7 @@ execute_add_command(struct update_command_journal *j,
 	ret = call_progress(params.progfunc, WIMLIB_PROGRESS_MSG_SCAN_END,
 			    &params.progress, params.progctx);
 	if (ret) {
-		free_dentry_tree(branch, wim->lookup_table);
+		free_dentry_tree(branch, wim->blob_table);
 		goto out_cleanup_after_capture;
 	}
 
@@ -860,7 +860,7 @@ execute_add_command(struct update_command_journal *j,
 	{
 		ERROR("\"%"TS"\" is not a directory!", fs_source_path);
 		ret = WIMLIB_ERR_NOTDIR;
-		free_dentry_tree(branch, wim->lookup_table);
+		free_dentry_tree(branch, wim->blob_table);
 		goto out_cleanup_after_capture;
 	}
 
@@ -1036,7 +1036,7 @@ rename_wim_path(WIMStruct *wim, const tchar *from, const tchar *to,
 			return -ENOMEM;
 		if (dst) {
 			unlink_dentry(dst);
-			free_dentry_tree(dst, wim->lookup_table);
+			free_dentry_tree(dst, wim->blob_table);
 		}
 		unlink_dentry(src);
 		dentry_add_child(parent_of_dst, src);
@@ -1152,7 +1152,7 @@ execute_update_commands(WIMStruct *wim,
 	 */
 	j = new_update_command_journal(num_cmds,
 				       &wim_get_current_image_metadata(wim)->root_dentry,
-				       wim->lookup_table);
+				       wim->blob_table);
 	if (!j) {
 		ret = WIMLIB_ERR_NOMEM;
 		goto out_destroy_sd_set;
