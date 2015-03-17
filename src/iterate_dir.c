@@ -98,7 +98,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 		wdentry->streams[0].resource.is_missing = 1;
 	}
 
-	for (unsigned i = 0; i < inode->i_num_ads; i++) {
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		if (!inode->i_ads_entries[i].stream_name_nbytes)
 			continue;
 		lte = inode_stream_lte(inode, i + 1, wim->lookup_table);

@@ -1223,6 +1223,143 @@ read_extra_data(const u8 *p, const u8 *end, struct wim_inode *inode)
 	return 0;
 }
 
+/*
+ * Read the alternate data stream entries of a WIM dentry.
+ *
+ * @p:
+ *	Pointer to buffer that starts with the first alternate stream entry.
+ *
+ * @inode:
+ *	Inode to load the alternate data streams into.  @inode->i_num_ads must
+ *	have been set to the number of alternate data streams that are expected.
+ *
+ * @nbytes_remaining_p:
+ *	Number of bytes of data remaining in the buffer pointed to by @p.
+ *	On success this will be updated to point just past the ADS entries.
+ *
+ * On success, inode->i_ads_entries is set to an array of `struct
+ * wim_ads_entry's of length inode->i_num_ads.  On failure, @inode is not
+ * modified.
+ *
+ * Return values:
+ *	WIMLIB_ERR_SUCCESS (0)
+ *	WIMLIB_ERR_INVALID_METADATA_RESOURCE
+ *	WIMLIB_ERR_NOMEM
+ */
+static int
+read_ads_entries(const u8 * restrict p, struct wim_inode * restrict inode,
+		 size_t *nbytes_remaining_p)
+{
+	size_t nbytes_remaining = *nbytes_remaining_p;
+	unsigned num_ads;
+	struct wim_ads_entry *ads_entries;
+	int ret;
+
+	BUILD_BUG_ON(sizeof(struct wim_ads_entry_on_disk) != WIM_ADS_ENTRY_DISK_SIZE);
+
+	/* Allocate an array for our in-memory representation of the alternate
+	 * data stream entries. */
+	num_ads = inode->i_num_ads;
+	ads_entries = CALLOC(num_ads, sizeof(inode->i_ads_entries[0]));
+	if (!ads_entries)
+		goto out_of_memory;
+
+	/* Read the entries into our newly allocated buffer. */
+	for (unsigned i = 0; i < num_ads; i++) {
+		u64 length;
+		struct wim_ads_entry *cur_entry;
+		const struct wim_ads_entry_on_disk *disk_entry =
+			(const struct wim_ads_entry_on_disk*)p;
+
+		cur_entry = &ads_entries[i];
+		ads_entries[i].stream_id = i + 1;
+
+		/* Do we have at least the size of the fixed-length data we know
+		 * need? */
+		if (nbytes_remaining < sizeof(struct wim_ads_entry_on_disk))
+			goto out_invalid;
+
+		/* Read the length field */
+		length = le64_to_cpu(disk_entry->length);
+
+		/* Make sure the length field is neither so small it doesn't
+		 * include all the fixed-length data nor so large it overflows
+		 * the metadata resource buffer. */
+		if (length < sizeof(struct wim_ads_entry_on_disk) ||
+		    length > nbytes_remaining)
+			goto out_invalid;
+
+		/* Read the rest of the fixed-length data. */
+
+		cur_entry->reserved = le64_to_cpu(disk_entry->reserved);
+		copy_hash(cur_entry->hash, disk_entry->hash);
+		cur_entry->stream_name_nbytes = le16_to_cpu(disk_entry->stream_name_nbytes);
+
+		/* If stream_name_nbytes != 0, this is a named stream.
+		 * Otherwise this is an unnamed stream, or in some cases (bugs
+		 * in Microsoft's software I guess) a meaningless entry
+		 * distinguished from the real unnamed stream entry, if any, by
+		 * the fact that the real unnamed stream entry has a nonzero
+		 * hash field. */
+		if (cur_entry->stream_name_nbytes) {
+			/* The name is encoded in UTF16-LE, which uses 2-byte
+			 * coding units, so the length of the name had better be
+			 * an even number of bytes... */
+			if (cur_entry->stream_name_nbytes & 1)
+				goto out_invalid;
+
+			/* Add the length of the stream name to get the length
+			 * we actually need to read.  Make sure this isn't more
+			 * than the specified length of the entry. */
+			if (sizeof(struct wim_ads_entry_on_disk) +
+			    cur_entry->stream_name_nbytes > length)
+				goto out_invalid;
+
+			cur_entry->stream_name = utf16le_dupz(disk_entry->stream_name,
+							      cur_entry->stream_name_nbytes);
+			if (!cur_entry->stream_name)
+				goto out_of_memory;
+		} else {
+			/* Mark inode as having weird stream entries.  */
+			inode->i_canonical_streams = 0;
+		}
+
+		/* It's expected that the size of every ADS entry is a multiple
+		 * of 8.  However, to be safe, I'm allowing the possibility of
+		 * an ADS entry at the very end of the metadata resource ending
+		 * unaligned.  So although we still need to increment the input
+		 * pointer by @length to reach the next ADS entry, it's possible
+		 * that less than @length is actually remaining in the metadata
+		 * resource. We should set the remaining bytes to 0 if this
+		 * happens. */
+		length = (length + 7) & ~7;
+		p += length;
+		if (nbytes_remaining < length)
+			nbytes_remaining = 0;
+		else
+			nbytes_remaining -= length;
+	}
+	inode->i_ads_entries = ads_entries;
+	inode->i_next_stream_id = inode->i_num_ads + 1;
+	*nbytes_remaining_p = nbytes_remaining;
+	ret = 0;
+	goto out;
+out_of_memory:
+	ret = WIMLIB_ERR_NOMEM;
+	goto out_free_ads_entries;
+out_invalid:
+	ERROR("An alternate data stream entry is invalid");
+	ret = WIMLIB_ERR_INVALID_METADATA_RESOURCE;
+out_free_ads_entries:
+	if (ads_entries) {
+		for (unsigned i = 0; i < num_ads; i++)
+			destroy_ads_entry(&ads_entries[i]);
+		FREE(ads_entries);
+	}
+out:
+	return ret;
+}
+
 /* Read a dentry, including all alternate data stream entries that follow it,
  * from an uncompressed metadata resource buffer.  */
 static int
