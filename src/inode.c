@@ -246,9 +246,9 @@ inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
 	wimlib_assert(idx < inode->i_num_attrs);
 	wimlib_assert(inode->i_resolved);
 
-	blob = attr->attr_lte;
+	blob = attr->attr_blob;
 	if (blob)
-		lte_decrement_refcnt(blob, lookup_table);
+		blob_decrement_refcnt(blob, lookup_table);
 
 	FREE(attr->attr_name);
 
@@ -328,11 +328,11 @@ inode_resolve_attributes(struct wim_inode *inode, struct wim_lookup_table *table
 		struct blob *blob = NULL;
 
 		if (!is_zero_hash(hash)) {
-			blob = lookup_stream(table, hash);
+			blob = lookup_blob(table, hash);
 			if (!blob) {
 				if (!force)
 					return stream_not_found_error(inode, hash);
-				blob = new_lookup_table_entry();
+				blob = new_blob();
 				if (!blob)
 					return WIMLIB_ERR_NOMEM;
 				copy_hash(blob->hash, hash);
@@ -392,7 +392,7 @@ inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
 	if (inode->i_resolved)
 		return inode->i_attrs[attr_idx].attr_lte;
 	else
-		return lookup_stream(table, inode->i_attrs[attr_idx].attr_hash);
+		return lookup_blob(table, inode->i_attrs[attr_idx].attr_hash);
 }
 
 /*
@@ -433,7 +433,7 @@ inode_unnamed_lte(const struct wim_inode *inode,
 	if (inode->i_resolved)
 		return attr->attr_lte;
 	else
-		return lookup_stream(table, attr->attr_hash);
+		return lookup_blob(table, attr->attr_hash);
 }
 
 /* Return the SHA-1 message digest of the specified attribute of the inode, or a
@@ -488,7 +488,7 @@ inode_unref_attributes(struct wim_inode *inode,
 
 		blob = inode_attribute_lte(inode, i, lookup_table);
 		if (blob)
-			lte_decrement_refcnt(blob, lookup_table);
+			blob_decrement_refcnt(blob, lookup_table);
 	}
 }
 

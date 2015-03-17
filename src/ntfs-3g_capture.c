@@ -209,7 +209,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 				ntfs_loc->stream_name_nchars = name_length;
 			}
 
-			blob = new_lookup_table_entry();
+			blob = new_blob();
 			if (!blob) {
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
@@ -251,7 +251,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 							inode->i_lte->size,
 							blob->size);
 					}
-					free_lookup_table_entry(blob);
+					free_blob(blob);
 					continue;
 				}
 			} else {
@@ -287,7 +287,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 	}
 	goto out_put_actx;
 out_free_lte:
-	free_lookup_table_entry(blob);
+	free_blob(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {
 		FREE(ntfs_loc->path);

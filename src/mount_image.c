@@ -314,7 +314,7 @@ close_wimfs_fd(struct wimfs_fd *fd)
 
 	/* Release this file descriptor from its lookup table entry.  */
 	if (fd->f_lte)
-		lte_decrement_num_opened_fds(fd->f_lte);
+		blob_decrement_num_opened_fds(fd->f_lte);
 
 	wimfs_dec_num_open_fds();
 
@@ -735,14 +735,14 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 		 * table entry correspond to the stream we're trying to extract,
 		 * so the lookup table entry can be re-used.  */
 		lookup_table_unlink(ctx->wim->lookup_table, old_lte);
-		lte_put_resource(old_lte);
+		blob_put_resource(old_lte);
 		new_lte = old_lte;
 	} else {
 		/* We need to split the old lookup table entry because it also
 		 * has other references.  Or, there was no old lookup table
 		 * entry, so we need to create a new one anyway.  */
 
-		new_lte = new_lookup_table_entry();
+		new_lte = new_blob();
 		if (unlikely(!new_lte)) {
 			ret = -ENOMEM;
 			goto out_delete_staging_file;
@@ -816,7 +816,7 @@ out_revert_fd_changes:
 			new_lte->num_opened_fds--;
 		}
 	}
-	free_lookup_table_entry(new_lte);
+	free_blob(new_lte);
 out_delete_staging_file:
 	unlinkat(ctx->staging_dir_fd, staging_file_name, 0);
 	FREE(staging_file_name);
@@ -978,7 +978,7 @@ release_extra_refcnts(struct wimfs_context *ctx)
 	list_for_each_entry_safe(blob, tmp, list, orig_stream_list) {
 		u32 n = blob->out_refcnt;
 		while (n--)
-			lte_decrement_refcnt(blob, lookup_table);
+			blob_decrement_refcnt(blob, lookup_table);
 	}
 }
 
@@ -996,7 +996,7 @@ delete_empty_streams(struct wimfs_context *ctx)
                 if (!blob->size) {
                         *retrieve_lte_pointer(blob) = NULL;
                         list_del(&blob->unhashed_list);
-                        free_lookup_table_entry(blob);
+                        free_blob(blob);
                 }
         }
 }
@@ -1052,7 +1052,7 @@ renew_current_image(struct wimfs_context *ctx)
 	/* Create new stream reference for the modified image's metadata
 	 * resource, which doesn't exist yet.  */
 	ret = WIMLIB_ERR_NOMEM;
-	new_lte = new_lookup_table_entry();
+	new_lte = new_blob();
 	if (!new_lte)
 		goto err_put_replace_imd;
 	new_lte->flags = WIM_RESHDR_FLAG_METADATA;
@@ -1078,7 +1078,7 @@ renew_current_image(struct wimfs_context *ctx)
 err_undo_append:
 	wim->hdr.image_count--;
 err_free_new_lte:
-	free_lookup_table_entry(new_lte);
+	free_blob(new_lte);
 err_put_replace_imd:
 	put_image_metadata(replace_imd, NULL);
 err:

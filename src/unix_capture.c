@@ -115,7 +115,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 	file_on_disk = STRDUP(path);
 	if (!file_on_disk)
 		return WIMLIB_ERR_NOMEM;
-	blob = new_lookup_table_entry();
+	blob = new_blob();
 	if (!blob) {
 		FREE(file_on_disk);
 		return WIMLIB_ERR_NOMEM;

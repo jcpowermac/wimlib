@@ -133,12 +133,12 @@ inode_copy_checksums(struct wim_inode *inode,
 		if (wim == template_wim)
 			replace_lte = template_lte;
 		else
-			replace_lte = lookup_stream(wim->lookup_table,
+			replace_lte = lookup_blob(wim->lookup_table,
 						    template_lte->hash);
 
 		list_del(&blob->unhashed_list);
 		if (replace_lte) {
-			free_lookup_table_entry(blob);
+			free_blob(blob);
 		} else {
 			copy_hash(blob->hash, template_lte->hash);
 			blob->unhashed = 0;

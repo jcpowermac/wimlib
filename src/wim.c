@@ -226,13 +226,13 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 	imd->security_data = NULL;
 
 	if (free_metadata_lte) {
-		free_lookup_table_entry(imd->metadata_blob);
+		free_blob(imd->metadata_blob);
 		imd->metadata_blob = NULL;
 	}
 	if (!table) {
 		struct blob *blob, *tmp;
 		list_for_each_entry_safe(blob, tmp, &imd->unhashed_streams, unhashed_list)
-			free_lookup_table_entry(blob);
+			free_blob(blob);
 	}
 	INIT_LIST_HEAD(&imd->unhashed_streams);
 	INIT_LIST_HEAD(&imd->inode_list);
@@ -832,7 +832,7 @@ wim_checksum_unhashed_streams(WIMStruct *wim)
 			if (ret)
 				return ret;
 			if (new_lte != blob)
-				free_lookup_table_entry(blob);
+				free_blob(blob);
 		}
 	}
 	return 0;

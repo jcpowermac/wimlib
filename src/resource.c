@@ -918,7 +918,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	int ret;
 	struct blob *blob;
 
-	blob = new_lookup_table_entry();
+	blob = new_blob();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -930,7 +930,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	ret = read_full_stream_into_alloc_buf(blob, buf_ret);
 
 	lte_unbind_wim_resource_spec(blob);
-	free_lookup_table_entry(blob);
+	free_blob(blob);
 	return ret;
 }
 
@@ -960,7 +960,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 
 	wim_res_hdr_to_spec(reshdr, wim, &rspec);
 
-	blob = new_lookup_table_entry();
+	blob = new_blob();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -974,7 +974,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 
 	lte_unbind_wim_resource_spec(blob);
 	copy_hash(hash, blob->hash);
-	free_lookup_table_entry(blob);
+	free_blob(blob);
 	return ret;
 }
 

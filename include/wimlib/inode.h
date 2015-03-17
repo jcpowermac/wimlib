@@ -34,7 +34,7 @@ struct wim_attribute {
 	utf16lechar *attr_name;
 	union {
 		u8 attr_hash[SHA1_HASH_SIZE];
-		struct blob *attr_lte;
+		struct blob *attr_blob;
 	};
 	u32 attr_id : 28;
 	u32 attr_type : 4;

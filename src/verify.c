@@ -167,7 +167,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 
 	/* Verify the streams  */
 
-	for_lookup_table_entry(wim->lookup_table, append_lte_to_list, &stream_list);
+	for_blob(wim->lookup_table, append_lte_to_list, &stream_list);
 
 	memset(&progress, 0, sizeof(progress));
 

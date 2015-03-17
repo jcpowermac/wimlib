@@ -782,7 +782,7 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 					ctx->cur_write_res_size -= blob->size;
 				if (!ret)
 					ret = done_with_stream(blob, ctx);
-				free_lookup_table_entry(blob);
+				free_blob(blob);
 				if (ret)
 					return ret;
 				return BEGIN_STREAM_STATUS_SKIP_STREAM;
@@ -1169,7 +1169,7 @@ write_stream_end_read(struct blob *blob, int status, void *_ctx)
 		 * it does not compress to less than its original size.  */
 		if (!status)
 			status = done_with_stream(blob, ctx);
-		free_lookup_table_entry(blob);
+		free_blob(blob);
 	} else if (!status && blob->unhashed && ctx->lookup_table != NULL) {
 		/* The 'blob' stream was not a duplicate and was previously
 		 * unhashed.  Since we passed COMPUTE_MISSING_STREAM_HASHES to
@@ -1742,7 +1742,7 @@ is_stream_in_solid_resource(struct blob *blob, void *_ignore)
 static bool
 wim_has_solid_resources(WIMStruct *wim)
 {
-	return for_lookup_table_entry(wim->lookup_table,
+	return for_blob(wim->lookup_table,
 				      is_stream_in_solid_resource, NULL);
 }
 
@@ -1826,7 +1826,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	/* Set up a temporary lookup table entry to provide to
 	 * write_wim_resource().  */
 
-	blob = new_lookup_table_entry();
+	blob = new_blob();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -1854,7 +1854,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	ret = 0;
 out_free_lte:
 	blob->resource_location = RESOURCE_NONEXISTENT;
-	free_lookup_table_entry(blob);
+	free_blob(blob);
 	return ret;
 }
 
@@ -2005,7 +2005,7 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 		struct wim_image_metadata *imd;
 		unsigned i;
 
-		for_lookup_table_entry(wim->lookup_table,
+		for_blob(wim->lookup_table,
 				       fully_reference_stream_for_write,
 				       stream_list_ret);
 
@@ -2017,7 +2017,7 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 	} else {
 		/* Slow case:  Walk through the images being written and
 		 * determine the streams referenced.  */
-		for_lookup_table_entry(wim->lookup_table,
+		for_blob(wim->lookup_table,
 				       do_stream_set_not_in_output_wim, NULL);
 		wim->private = stream_list_ret;
 		ret = for_image(wim, image, image_find_streams_to_reference);
@@ -2062,7 +2062,7 @@ determine_stream_size_uniquity(struct list_head *stream_list,
 			.tab = &tab,
 			.filter_ctx = filter_ctx,
 		};
-		for_lookup_table_entry(lt, insert_other_if_hard_filtered, &ctx);
+		for_blob(lt, insert_other_if_hard_filtered, &ctx);
 	}
 
 	list_for_each_entry(blob, stream_list, write_streams_list)
@@ -3118,7 +3118,7 @@ check_resource_offsets(WIMStruct *wim, off_t end_offset)
 	unsigned i;
 
 	wim->private = &end_offset;
-	ret = for_lookup_table_entry(wim->lookup_table, check_resource_offset, wim);
+	ret = for_blob(wim->lookup_table, check_resource_offset, wim);
 	if (ret)
 		return ret;
 

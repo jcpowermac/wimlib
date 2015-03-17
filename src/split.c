@@ -228,7 +228,7 @@ wimlib_split(WIMStruct *wim, const tchar *swm_name,
 			goto out_free_swm_info;
 	}
 
-	ret = for_lookup_table_entry_pos_sorted(wim->lookup_table,
+	ret = for_blob_pos_sorted(wim->lookup_table,
 						add_stream_to_swm,
 						&swm_info);
 	if (ret)

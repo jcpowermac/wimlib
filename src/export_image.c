@@ -46,7 +46,7 @@ lte_rollback_export(struct blob *blob, void *_lookup_table)
 	blob->refcnt -= blob->out_refcnt;
 	if (blob->was_exported) {
 		lookup_table_unlink(lookup_table, blob);
-		free_lookup_table_entry(blob);
+		free_blob(blob);
 	}
 	return 0;
 }
@@ -71,12 +71,12 @@ inode_export_streams(struct wim_inode *inode,
 
 		/* Search for the stream (via SHA1 message digest) in the
 		 * destination WIM.  */
-		dest_lte = lookup_stream(dest_lookup_table, hash);
+		dest_lte = lookup_blob(dest_lookup_table, hash);
 		if (!dest_lte) {
 			/* Stream not yet present in destination WIM.  Search
 			 * for it in the source WIM, then export it into the
 			 * destination WIM.  */
-			src_lte = lookup_stream(src_lookup_table, hash);
+			src_lte = lookup_blob(src_lookup_table, hash);
 			if (!src_lte)
 				return stream_not_found_error(inode, hash);
 
@@ -84,7 +84,7 @@ inode_export_streams(struct wim_inode *inode,
 				dest_lte = src_lte;
 				lookup_table_unlink(src_lookup_table, src_lte);
 			} else {
-				dest_lte = clone_lookup_table_entry(src_lte);
+				dest_lte = clone_blob(src_lte);
 				if (!dest_lte)
 					return WIMLIB_ERR_NOMEM;
 			}
@@ -164,7 +164,7 @@ wimlib_export_image(WIMStruct *src_wim,
 		return ret;
 
 	/* Enable rollbacks  */
-	for_lookup_table_entry(dest_wim->lookup_table, lte_set_not_exported, NULL);
+	for_blob(dest_wim->lookup_table, lte_set_not_exported, NULL);
 
 	/* Export each requested image.  */
 	for (src_image = start_src_image;
@@ -275,7 +275,7 @@ out_rollback:
 		put_image_metadata(dest_wim->image_metadata[
 					--dest_wim->hdr.image_count], NULL);
 	}
-	for_lookup_table_entry(dest_wim->lookup_table, lte_rollback_export,
+	for_blob(dest_wim->lookup_table, lte_rollback_export,
 			       dest_wim->lookup_table);
 	return ret;
 }
