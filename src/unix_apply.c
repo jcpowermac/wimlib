@@ -500,7 +500,7 @@ unix_create_symlink(const struct wim_inode *inode, const char *path,
 {
 	char link_target[REPARSE_DATA_MAX_SIZE];
 	int ret;
-	struct wim_lookup_table_entry lte_override;
+	struct blob lte_override;
 
 	lte_override.resource_location = RESOURCE_IN_ATTACHED_BUFFER;
 	lte_override.attached_buffer = (void *)rpdata;
@@ -546,7 +546,7 @@ unix_cleanup_open_fds(struct unix_apply_ctx *ctx, unsigned offset)
 }
 
 static int
-unix_begin_extract_stream_instance(const struct wim_lookup_table_entry *stream,
+unix_begin_extract_stream_instance(const struct blob *stream,
 				   const struct wim_inode *inode,
 				   struct unix_apply_ctx *ctx)
 {
@@ -587,7 +587,7 @@ retry_create:
 
 /* Called when starting to read a single-instance stream for extraction  */
 static int
-unix_begin_extract_stream(struct wim_lookup_table_entry *stream, void *_ctx)
+unix_begin_extract_stream(struct blob *stream, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
 	const struct stream_owner *owners = stream_owners(stream);
@@ -628,7 +628,7 @@ unix_extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a single-instance stream has been fully read for extraction  */
 static int
-unix_end_extract_stream(struct wim_lookup_table_entry *stream, int status,
+unix_end_extract_stream(struct blob *stream, int status,
 			void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;

@@ -7,14 +7,14 @@
 #include "wimlib/types.h"
 
 struct filedes;
-struct wim_lookup_table_entry;
+struct blob;
 struct wim_image_metadata;
 
 /*
  * Specification of a resource in a WIM file.
  *
- * If a `struct wim_lookup_table_entry' lte has (lte->resource_location ==
- * RESOURCE_IN_WIM), then lte->rspec points to an instance of this structure.
+ * If a `struct blob' blob has (blob->resource_location ==
+ * RESOURCE_IN_WIM), then blob->rspec points to an instance of this structure.
  *
  * Normally, there is a one-to-one correspondence between lookup table entries
  * ("streams", each of which may be the contents of a file, for example) and
@@ -187,14 +187,14 @@ get_chunk_entry_size(u64 res_size, bool is_alt)
 /* Functions to read streams  */
 
 extern int
-read_partial_wim_stream_into_buf(const struct wim_lookup_table_entry *lte,
+read_partial_wim_stream_into_buf(const struct blob *blob,
 				 size_t size, u64 offset, void *buf);
 
 extern int
-read_full_stream_into_buf(const struct wim_lookup_table_entry *lte, void *buf);
+read_full_stream_into_buf(const struct blob *blob, void *buf);
 
 extern int
-read_full_stream_into_alloc_buf(const struct wim_lookup_table_entry *lte,
+read_full_stream_into_alloc_buf(const struct blob *blob,
 				void **buf_ret);
 
 extern int
@@ -206,12 +206,12 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 		   u8 hash[SHA1_HASH_SIZE]);
 
 extern int
-skip_wim_stream(struct wim_lookup_table_entry *lte);
+skip_wim_stream(struct blob *blob);
 
 /*
  * Type of callback function for beginning to read a stream.
  *
- * @lte:
+ * @blob:
  *	Stream that is about to be read.
  *
  * @ctx:
@@ -222,7 +222,7 @@ skip_wim_stream(struct wim_lookup_table_entry *lte);
  * be read, and read_stream_list() should continue on to the next stream
  * (without calling @consume_chunk or @end_stream).
  */
-typedef int (*read_stream_list_begin_stream_t)(struct wim_lookup_table_entry *lte,
+typedef int (*read_stream_list_begin_stream_t)(struct blob *blob,
 					       void *ctx);
 
 #define BEGIN_STREAM_STATUS_SKIP_STREAM	-1
@@ -230,7 +230,7 @@ typedef int (*read_stream_list_begin_stream_t)(struct wim_lookup_table_entry *lt
 /*
  * Type of callback function for finishing reading a stream.
  *
- * @lte:
+ * @blob:
  *	Stream that has been fully read, or stream that started being read but
  *	could not be fully read due to a read error.
  *
@@ -241,7 +241,7 @@ typedef int (*read_stream_list_begin_stream_t)(struct wim_lookup_table_entry *lt
  * @ctx:
  *	User-provided context.
  */
-typedef int (*read_stream_list_end_stream_t)(struct wim_lookup_table_entry *lte,
+typedef int (*read_stream_list_end_stream_t)(struct blob *blob,
 					     int status,
 					     void *ctx);
 
@@ -283,23 +283,23 @@ read_stream_list(struct list_head *stream_list,
 /* Functions to extract streams.  */
 
 extern int
-extract_stream(struct wim_lookup_table_entry *lte,
+extract_stream(struct blob *blob,
 	       u64 size,
 	       consume_data_callback_t extract_chunk,
 	       void *extract_chunk_arg);
 
 extern int
-extract_stream_to_fd(struct wim_lookup_table_entry *lte,
+extract_stream_to_fd(struct blob *blob,
 		     struct filedes *fd, u64 size);
 
 extern int
-extract_full_stream_to_fd(struct wim_lookup_table_entry *lte,
+extract_full_stream_to_fd(struct blob *blob,
 			  struct filedes *fd);
 
 /* Miscellaneous stream functions.  */
 
 extern int
-sha1_stream(struct wim_lookup_table_entry *lte);
+sha1_stream(struct blob *blob);
 
 /* Functions to read/write metadata resources.  */
 

@@ -6,7 +6,7 @@
 #include "wimlib/types.h"
 #include "wimlib/win32_common.h"
 
-struct wim_lookup_table_entry;
+struct blob;
 
 extern int
 wimboot_alloc_data_source_id(const wchar_t *wim_path,
@@ -16,7 +16,7 @@ wimboot_alloc_data_source_id(const wchar_t *wim_path,
 
 extern bool
 wimboot_set_pointer(HANDLE h,
-		    const struct wim_lookup_table_entry *lte,
+		    const struct blob *blob,
 		    u64 data_source_id,
 		    const u8 lookup_table_hash[SHA1_HASH_SIZE],
 		    bool wof_running);

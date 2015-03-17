@@ -145,20 +145,20 @@ write_split_wim(WIMStruct *orig_wim, const tchar *swm_name,
 }
 
 static int
-add_stream_to_swm(struct wim_lookup_table_entry *lte, void *_swm_info)
+add_stream_to_swm(struct blob *blob, void *_swm_info)
 {
 	struct swm_info *swm_info = _swm_info;
 	u64 stream_size;
 
-	if (lte_is_partial(lte)) {
+	if (lte_is_partial(blob)) {
 		ERROR("Splitting of WIM containing solid resources is not supported.\n"
 		      "        Export it in non-solid format first.");
 		return WIMLIB_ERR_UNSUPPORTED;
 	}
-	if (lte->resource_location == RESOURCE_IN_WIM)
-		stream_size = lte->rspec->size_in_wim;
+	if (blob->resource_location == RESOURCE_IN_WIM)
+		stream_size = blob->rspec->size_in_wim;
 	else
-		stream_size = lte->size;
+		stream_size = blob->size;
 
 	/* - Start first part if no parts have been started so far;
 	 * - Start next part if adding this stream exceeds maximum part size,
@@ -168,7 +168,7 @@ add_stream_to_swm(struct wim_lookup_table_entry *lte, void *_swm_info)
 	if (swm_info->num_parts == 0 ||
 	    ((swm_info->parts[swm_info->num_parts - 1].size +
 			stream_size >= swm_info->max_part_size)
-	     && !((lte->flags & WIM_RESHDR_FLAG_METADATA) ||
+	     && !((blob->flags & WIM_RESHDR_FLAG_METADATA) ||
 		   swm_info->parts[swm_info->num_parts - 1].size == 0)))
 	{
 		if (swm_info->num_parts == swm_info->num_alloc_parts) {
@@ -192,8 +192,8 @@ add_stream_to_swm(struct wim_lookup_table_entry *lte, void *_swm_info)
 		swm_info->parts[swm_info->num_parts - 1].size = 0;
 	}
 	swm_info->parts[swm_info->num_parts - 1].size += stream_size;
-	if (!(lte->flags & WIM_RESHDR_FLAG_METADATA)) {
-		list_add_tail(&lte->write_streams_list,
+	if (!(blob->flags & WIM_RESHDR_FLAG_METADATA)) {
+		list_add_tail(&blob->write_streams_list,
 			      &swm_info->parts[swm_info->num_parts - 1].stream_list);
 	}
 	swm_info->total_bytes += stream_size;
@@ -222,7 +222,7 @@ wimlib_split(WIMStruct *wim, const tchar *swm_name,
 	swm_info.max_part_size = part_size;
 
 	for (i = 0; i < wim->hdr.image_count; i++) {
-		ret = add_stream_to_swm(wim->image_metadata[i]->metadata_lte,
+		ret = add_stream_to_swm(wim->image_metadata[i]->metadata_blob,
 					&swm_info);
 		if (ret)
 			goto out_free_swm_info;

@@ -276,7 +276,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 {
 	const wchar_t *path = L"\\Windows\\System32\\WimBootCompress.ini";
 	struct wim_dentry *dentry;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	int ret;
 	void *buf;
 	struct string_set *s;
@@ -290,13 +290,13 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 	    (dentry->d_inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 					      FILE_ATTRIBUTE_REPARSE_POINT |
 					      FILE_ATTRIBUTE_ENCRYPTED)) ||
-	    !(lte = inode_unnamed_lte(dentry->d_inode, ctx->common.wim->lookup_table)))
+	    !(blob = inode_unnamed_lte(dentry->d_inode, ctx->common.wim->lookup_table)))
 	{
 		WARNING("%ls does not exist in WIM image!", path);
 		return WIMLIB_ERR_PATH_DOES_NOT_EXIST;
 	}
 
-	ret = read_full_stream_into_alloc_buf(lte, &buf);
+	ret = read_full_stream_into_alloc_buf(blob, &buf);
 	if (ret)
 		return ret;
 
@@ -309,7 +309,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 	sec.name = T("PrepopulateList");
 	sec.strings = s;
 
-	ret = do_load_text_file(path, buf, lte->size, &mem, &sec, 1,
+	ret = do_load_text_file(path, buf, blob->size, &mem, &sec, 1,
 				LOAD_TEXT_FILE_REMOVE_QUOTES |
 					LOAD_TEXT_FILE_NO_WARNINGS,
 				mangle_pat);
@@ -374,7 +374,7 @@ will_externally_back_inode(struct wim_inode *inode, struct win32_apply_ctx *ctx,
 {
 	struct list_head *next;
 	struct wim_dentry *dentry;
-	struct wim_lookup_table_entry *stream;
+	struct blob *stream;
 	int ret;
 
 	if (inode->i_can_externally_back)
@@ -1298,7 +1298,7 @@ retry:
 
 /* Create empty named data streams.
  *
- * Since these won't have 'struct wim_lookup_table_entry's, they won't show up
+ * Since these won't have 'struct blob's, they won't show up
  * in the call to extract_stream_list().  Hence the need for the special case.
  */
 static int
@@ -1323,7 +1323,7 @@ create_any_empty_ads(const struct wim_dentry *dentry,
 			continue;
 
 		/* Not empty?  */
-		if (entry->lte)
+		if (entry->blob)
 			continue;
 
 		build_extraction_path_with_ads(dentry, ctx,
@@ -1644,7 +1644,7 @@ prepare_data_buffer(struct win32_apply_ctx *ctx, u64 stream_size)
 }
 
 static int
-begin_extract_stream_instance(const struct wim_lookup_table_entry *stream,
+begin_extract_stream_instance(const struct blob *stream,
 			      struct wim_dentry *dentry,
 			      const wchar_t *stream_name,
 			      struct win32_apply_ctx *ctx)
@@ -2020,7 +2020,7 @@ retry:
 
 /* Called when starting to read a stream for extraction on Windows  */
 static int
-begin_extract_stream(struct wim_lookup_table_entry *stream, void *_ctx)
+begin_extract_stream(struct blob *stream, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	const struct stream_owner *owners = stream_owners(stream);
@@ -2110,7 +2110,7 @@ extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a stream has been fully read for extraction on Windows  */
 static int
-end_extract_stream(struct wim_lookup_table_entry *stream, int status, void *_ctx)
+end_extract_stream(struct blob *stream, int status, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	int ret;

@@ -168,7 +168,7 @@ dentry_is_supported(struct wim_dentry *dentry,
 
 /* Read the header from a stream in a pipable WIM.  */
 static int
-read_pwm_stream_header(WIMStruct *pwm, struct wim_lookup_table_entry *lte,
+read_pwm_stream_header(WIMStruct *pwm, struct blob *blob,
 		       struct wim_resource_spec *rspec,
 		       int flags, struct wim_header_disk *hdr_ret)
 {
@@ -192,7 +192,7 @@ read_pwm_stream_header(WIMStruct *pwm, struct wim_lookup_table_entry *lte,
 
 		if (ret)
 			goto read_error;
-		lte->resource_location = RESOURCE_NONEXISTENT;
+		blob->resource_location = RESOURCE_NONEXISTENT;
 		memcpy(hdr_ret, &buf.pwm_hdr, sizeof(buf.pwm_hdr));
 		return 0;
 	}
@@ -202,17 +202,17 @@ read_pwm_stream_header(WIMStruct *pwm, struct wim_lookup_table_entry *lte,
 		return WIMLIB_ERR_INVALID_PIPABLE_WIM;
 	}
 
-	copy_hash(lte->hash, buf.stream_hdr.hash);
+	copy_hash(blob->hash, buf.stream_hdr.hash);
 
 	reshdr.size_in_wim = 0;
 	reshdr.flags = le32_to_cpu(buf.stream_hdr.flags);
 	reshdr.offset_in_wim = pwm->in_fd.offset;
 	reshdr.uncompressed_size = le64_to_cpu(buf.stream_hdr.uncompressed_size);
 	wim_res_hdr_to_spec(&reshdr, pwm, rspec);
-	lte_bind_wim_resource_spec(lte, rspec);
-	lte->flags = rspec->flags;
-	lte->size = rspec->uncompressed_size;
-	lte->offset_in_res = 0;
+	lte_bind_wim_resource_spec(blob, rspec);
+	blob->flags = rspec->flags;
+	blob->size = rspec->uncompressed_size;
+	blob->offset_in_res = 0;
 	return 0;
 
 read_error:
@@ -224,7 +224,7 @@ static int
 load_streams_from_pipe(struct apply_ctx *ctx,
 		       const struct read_stream_list_callbacks *cbs)
 {
-	struct wim_lookup_table_entry *found_lte = NULL;
+	struct blob *found_lte = NULL;
 	struct wim_resource_spec *rspec = NULL;
 	struct wim_lookup_table *lookup_table;
 	int ret;
@@ -248,7 +248,7 @@ load_streams_from_pipe(struct apply_ctx *ctx,
 
 	while (ctx->num_streams_remaining) {
 		struct wim_header_disk pwm_hdr;
-		struct wim_lookup_table_entry *needed_lte;
+		struct blob *needed_lte;
 
 		if (found_lte->resource_location != RESOURCE_NONEXISTENT)
 			lte_unbind_wim_resource_spec(found_lte);
@@ -358,17 +358,17 @@ retry:
 }
 
 static int
-begin_extract_stream_wrapper(struct wim_lookup_table_entry *lte, void *_ctx)
+begin_extract_stream_wrapper(struct blob *blob, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
 
-	ctx->cur_stream = lte;
+	ctx->cur_stream = blob;
 	ctx->cur_stream_offset = 0;
 
-	if (unlikely(lte->out_refcnt > MAX_OPEN_STREAMS))
+	if (unlikely(blob->out_refcnt > MAX_OPEN_STREAMS))
 		return create_temporary_file(&ctx->tmpfile_fd, &ctx->tmpfile_name);
 	else
-		return (*ctx->saved_cbs->begin_stream)(lte, ctx->saved_cbs->begin_stream_ctx);
+		return (*ctx->saved_cbs->begin_stream)(blob, ctx->saved_cbs->begin_stream_ctx);
 }
 
 static int
@@ -451,8 +451,8 @@ extract_chunk_wrapper(const void *chunk, size_t size, void *_ctx)
 static int
 extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 {
-	struct wim_lookup_table_entry tmpfile_lte;
-	struct wim_lookup_table_entry *orig_lte = ctx->cur_stream;
+	struct blob tmpfile_lte;
+	struct blob *orig_lte = ctx->cur_stream;
 	const struct read_stream_list_callbacks *cbs = ctx->saved_cbs;
 	int ret;
 	const u32 orig_refcnt = orig_lte->out_refcnt;
@@ -468,7 +468,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 	 * single-instance stream is being extracted to more than
 	 * MAX_OPEN_STREAMS locations!  */
 
-	memcpy(&tmpfile_lte, orig_lte, sizeof(struct wim_lookup_table_entry));
+	memcpy(&tmpfile_lte, orig_lte, sizeof(struct blob));
 	tmpfile_lte.resource_location = RESOURCE_IN_FILE_ON_DISK;
 	tmpfile_lte.file_on_disk = ctx->tmpfile_name;
 	ret = 0;
@@ -506,7 +506,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 }
 
 static int
-end_extract_stream_wrapper(struct wim_lookup_table_entry *stream,
+end_extract_stream_wrapper(struct blob *stream,
 			   int status, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
@@ -560,7 +560,7 @@ extract_stream_list(struct apply_ctx *ctx,
 		return load_streams_from_pipe(ctx, &wrapper_cbs);
 	} else {
 		return read_stream_list(&ctx->stream_list,
-					offsetof(struct wim_lookup_table_entry,
+					offsetof(struct blob,
 						 extraction_list),
 					&wrapper_cbs, VERIFY_STREAM_HASHES);
 	}
@@ -576,7 +576,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 			 const struct wim_lookup_table *lookup_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	struct filedes _stdout;
 
 	if (inode->i_attributes & (FILE_ATTRIBUTE_REPARSE_POINT |
@@ -587,8 +587,8 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 		return WIMLIB_ERR_NOT_A_REGULAR_FILE;
 	}
 
-	lte = inode_unnamed_lte(inode, lookup_table);
-	if (!lte) {
+	blob = inode_unnamed_lte(inode, lookup_table);
+	if (!blob) {
 		const u8 *hash = inode_unnamed_stream_hash(inode);
 		if (!is_zero_hash(hash))
 			return stream_not_found_error(inode, hash);
@@ -596,7 +596,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 	}
 
 	filedes_init(&_stdout, STDOUT_FILENO);
-	return extract_full_stream_to_fd(lte, &_stdout);
+	return extract_full_stream_to_fd(blob, &_stdout);
 }
 
 static int
@@ -754,11 +754,11 @@ destroy_dentry_list(struct list_head *dentry_list)
 static void
 destroy_stream_list(struct list_head *stream_list)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 
-	list_for_each_entry(lte, stream_list, extraction_list)
-		if (lte->out_refcnt > ARRAY_LEN(lte->inline_stream_owners))
-			FREE(lte->stream_owners);
+	list_for_each_entry(blob, stream_list, extraction_list)
+		if (blob->out_refcnt > ARRAY_LEN(blob->inline_stream_owners))
+			FREE(blob->stream_owners);
 }
 
 #ifdef __WIN32__
@@ -968,7 +968,7 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 			  struct wim_lookup_table *lookup_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	int ret;
 	bool force = false;
 
@@ -983,9 +983,9 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 	if (ret)
 		return ret;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		lte = inode->i_attrs[i].attr_lte;
-		if (lte)
-			lte->out_refcnt = 0;
+		blob = inode->i_attrs[i].attr_lte;
+		if (blob)
+			blob->out_refcnt = 0;
 	}
 	return 0;
 }
@@ -1014,13 +1014,13 @@ dentry_list_resolve_attributes(struct list_head *dentry_list,
 }
 
 static int
-ref_stream(struct wim_lookup_table_entry *lte, unsigned stream_idx,
+ref_stream(struct blob *blob, unsigned stream_idx,
 	   struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct stream_owner *stream_owners;
 
-	if (!lte)
+	if (!blob)
 		return 0;
 
 	/* Tally the size only for each extraction of the stream (not hard
@@ -1028,7 +1028,7 @@ ref_stream(struct wim_lookup_table_entry *lte, unsigned stream_idx,
 	if (inode->i_visited && ctx->supported_features.hard_links)
 		return 0;
 
-	ctx->progress.extract.total_bytes += lte->size;
+	ctx->progress.extract.total_bytes += blob->size;
 	ctx->progress.extract.total_streams++;
 
 	if (inode->i_visited)
@@ -1036,27 +1036,27 @@ ref_stream(struct wim_lookup_table_entry *lte, unsigned stream_idx,
 
 	/* Add stream to the dentry_list only one time, even if it's going
 	 * to be extracted to multiple inodes.  */
-	if (lte->out_refcnt == 0) {
-		list_add_tail(&lte->extraction_list, &ctx->stream_list);
+	if (blob->out_refcnt == 0) {
+		list_add_tail(&blob->extraction_list, &ctx->stream_list);
 		ctx->num_streams_remaining++;
 	}
 
 	/* If inode not yet been visited, append it to the stream_owners array.  */
-	if (lte->out_refcnt < ARRAY_LEN(lte->inline_stream_owners)) {
-		stream_owners = lte->inline_stream_owners;
+	if (blob->out_refcnt < ARRAY_LEN(blob->inline_stream_owners)) {
+		stream_owners = blob->inline_stream_owners;
 	} else {
 		struct stream_owner *prev_stream_owners;
 		size_t alloc_stream_owners;
 
-		if (lte->out_refcnt == ARRAY_LEN(lte->inline_stream_owners)) {
+		if (blob->out_refcnt == ARRAY_LEN(blob->inline_stream_owners)) {
 			prev_stream_owners = NULL;
-			alloc_stream_owners = ARRAY_LEN(lte->inline_stream_owners);
+			alloc_stream_owners = ARRAY_LEN(blob->inline_stream_owners);
 		} else {
-			prev_stream_owners = lte->stream_owners;
-			alloc_stream_owners = lte->alloc_stream_owners;
+			prev_stream_owners = blob->stream_owners;
+			alloc_stream_owners = blob->alloc_stream_owners;
 		}
 
-		if (lte->out_refcnt == alloc_stream_owners) {
+		if (blob->out_refcnt == alloc_stream_owners) {
 			alloc_stream_owners *= 2;
 			stream_owners = REALLOC(prev_stream_owners,
 					       alloc_stream_owners *
@@ -1065,22 +1065,22 @@ ref_stream(struct wim_lookup_table_entry *lte, unsigned stream_idx,
 				return WIMLIB_ERR_NOMEM;
 			if (!prev_stream_owners) {
 				memcpy(stream_owners,
-				       lte->inline_stream_owners,
-				       sizeof(lte->inline_stream_owners));
+				       blob->inline_stream_owners,
+				       sizeof(blob->inline_stream_owners));
 			}
-			lte->stream_owners = stream_owners;
-			lte->alloc_stream_owners = alloc_stream_owners;
+			blob->stream_owners = stream_owners;
+			blob->alloc_stream_owners = alloc_stream_owners;
 		}
-		stream_owners = lte->stream_owners;
+		stream_owners = blob->stream_owners;
 	}
-	stream_owners[lte->out_refcnt].inode = inode;
+	stream_owners[blob->out_refcnt].inode = inode;
 	if (stream_idx == 0) {
-		stream_owners[lte->out_refcnt].stream_name = NULL;
+		stream_owners[blob->out_refcnt].stream_name = NULL;
 	} else {
-		stream_owners[lte->out_refcnt].stream_name =
+		stream_owners[blob->out_refcnt].stream_name =
 			inode->i_ads_entries[stream_idx - 1].stream_name;
 	}
-	lte->out_refcnt++;
+	blob->out_refcnt++;
 	return 0;
 }
 
@@ -1090,7 +1090,7 @@ ref_unnamed_stream(struct wim_dentry *dentry, struct apply_ctx *ctx)
 	struct wim_inode *inode = dentry->d_inode;
 	int ret;
 	unsigned stream_idx;
-	struct wim_lookup_table_entry *stream;
+	struct blob *stream;
 
 	if (unlikely(ctx->apply_ops->will_externally_back)) {
 		ret = (*ctx->apply_ops->will_externally_back)(dentry, ctx);
@@ -1126,7 +1126,7 @@ dentry_ref_streams(struct wim_dentry *dentry, struct apply_ctx *ctx)
 		for (unsigned i = 0; i < inode->i_num_ads; i++) {
 			if (!inode->i_ads_entries[i].stream_name_nbytes)
 				continue;
-			ret = ref_stream(inode->i_ads_entries[i].lte, i + 1,
+			ret = ref_stream(inode->i_ads_entries[i].blob, i + 1,
 					 dentry, ctx);
 			if (ret)
 				return ret;
@@ -1938,7 +1938,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 	 * write_pipable_wim() for more details about the format of pipable
 	 * WIMs.)  */
 	{
-		struct wim_lookup_table_entry xml_lte;
+		struct blob xml_lte;
 		struct wim_resource_spec xml_rspec;
 		ret = read_pwm_stream_header(pwm, &xml_lte, &xml_rspec, 0, NULL);
 		if (ret)
@@ -1991,31 +1991,31 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 
 	/* Load the needed metadata resource.  */
 	for (i = 1; i <= pwm->hdr.image_count; i++) {
-		struct wim_lookup_table_entry *metadata_lte;
+		struct blob *metadata_blob;
 		struct wim_image_metadata *imd;
 		struct wim_resource_spec *metadata_rspec;
 
-		metadata_lte = new_lookup_table_entry();
-		if (metadata_lte == NULL) {
+		metadata_blob = new_lookup_table_entry();
+		if (metadata_blob == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_wimlib_free;
 		}
 		metadata_rspec = MALLOC(sizeof(struct wim_resource_spec));
 		if (metadata_rspec == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
-			free_lookup_table_entry(metadata_lte);
+			free_lookup_table_entry(metadata_blob);
 			goto out_wimlib_free;
 		}
 
-		ret = read_pwm_stream_header(pwm, metadata_lte, metadata_rspec, 0, NULL);
+		ret = read_pwm_stream_header(pwm, metadata_blob, metadata_rspec, 0, NULL);
 		imd = pwm->image_metadata[i - 1];
-		imd->metadata_lte = metadata_lte;
+		imd->metadata_blob = metadata_blob;
 		if (ret) {
 			FREE(metadata_rspec);
 			goto out_wimlib_free;
 		}
 
-		if (!(metadata_lte->flags & WIM_RESHDR_FLAG_METADATA)) {
+		if (!(metadata_blob->flags & WIM_RESHDR_FLAG_METADATA)) {
 			ERROR("Expected metadata resource, but found "
 			      "non-metadata stream.");
 			ret = WIMLIB_ERR_INVALID_PIPABLE_WIM;
@@ -2032,7 +2032,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 		} else {
 			/* Metadata resource is not for the image being
 			 * extracted.  Skip over it.  */
-			ret = skip_wim_stream(metadata_lte);
+			ret = skip_wim_stream(metadata_blob);
 			if (ret)
 				goto out_wimlib_free;
 		}

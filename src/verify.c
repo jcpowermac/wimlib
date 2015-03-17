@@ -33,9 +33,9 @@
 #include "wimlib/security.h"
 
 static int
-append_lte_to_list(struct wim_lookup_table_entry *lte, void *_list)
+append_lte_to_list(struct blob *blob, void *_list)
 {
-	list_add(&lte->extraction_list, (struct list_head *)_list);
+	list_add(&blob->extraction_list, (struct list_head *)_list);
 	return 0;
 }
 
@@ -47,7 +47,7 @@ struct verify_stream_list_ctx {
 };
 
 static int
-end_verify_stream(struct wim_lookup_table_entry *lte, int status, void *_ctx)
+end_verify_stream(struct blob *blob, int status, void *_ctx)
 {
 	struct verify_stream_list_ctx *ctx = _ctx;
 	union wimlib_progress_info *progress = ctx->progress;
@@ -56,7 +56,7 @@ end_verify_stream(struct wim_lookup_table_entry *lte, int status, void *_ctx)
 		return status;
 
 	progress->verify_streams.completed_streams++;
-	progress->verify_streams.completed_bytes += lte->size;
+	progress->verify_streams.completed_bytes += blob->size;
 
 	/* Handle rate-limiting of progress messages  */
 
@@ -115,7 +115,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	LIST_HEAD(stream_list);
 	union wimlib_progress_info progress;
 	struct verify_stream_list_ctx ctx;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	struct read_stream_list_callbacks cbs = {
 		.end_stream = end_verify_stream,
 		.end_stream_ctx = &ctx,
@@ -172,9 +172,9 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	memset(&progress, 0, sizeof(progress));
 
 	progress.verify_streams.wimfile = wim->filename;
-	list_for_each_entry(lte, &stream_list, extraction_list) {
+	list_for_each_entry(blob, &stream_list, extraction_list) {
 		progress.verify_streams.total_streams++;
-		progress.verify_streams.total_bytes += lte->size;
+		progress.verify_streams.total_bytes += blob->size;
 	}
 
 	ctx.progfunc = wim->progfunc;
@@ -188,7 +188,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 		return ret;
 
 	return read_stream_list(&stream_list,
-				offsetof(struct wim_lookup_table_entry,
+				offsetof(struct blob,
 					 extraction_list),
 				&cbs, VERIFY_STREAM_HASHES);
 }

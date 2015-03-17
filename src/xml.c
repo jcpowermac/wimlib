@@ -1214,22 +1214,22 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 	if (!(inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 				     FILE_ATTRIBUTE_REPARSE_POINT)))
 	{
-		struct wim_lookup_table_entry *lte;
+		struct blob *blob;
 
-		lte = inode_unnamed_lte(inode, info->lookup_table);
-		if (lte) {
-			info->total_bytes += lte->size;
+		blob = inode_unnamed_lte(inode, info->lookup_table);
+		if (blob) {
+			info->total_bytes += blob->size;
 			if (!dentry_is_first_in_inode(dentry))
-				info->hard_link_bytes += lte->size;
+				info->hard_link_bytes += blob->size;
 		}
 
 		if (inode->i_nlink >= 2 && dentry_is_first_in_inode(dentry)) {
 			for (unsigned i = 0; i < inode->i_num_ads; i++) {
 				if (inode->i_ads_entries[i].stream_name_nbytes) {
-					lte = inode_stream_lte(inode, i + 1, info->lookup_table);
-					if (lte) {
+					blob = inode_stream_lte(inode, i + 1, info->lookup_table);
+					if (blob) {
 						info->hard_link_bytes += inode->i_nlink *
-									 lte->size;
+									 blob->size;
 					}
 				}
 			}

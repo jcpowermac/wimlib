@@ -38,19 +38,19 @@ static int
 add_empty_image_metadata(WIMStruct *wim)
 {
 	int ret;
-	struct wim_lookup_table_entry *metadata_lte;
+	struct blob *metadata_blob;
 	struct wim_security_data *sd;
 	struct wim_image_metadata *imd;
 
 	/* Create lookup table entry for this metadata resource (for now really
 	 * just a dummy entry).  */
 	ret = WIMLIB_ERR_NOMEM;
-	metadata_lte = new_lookup_table_entry();
-	if (!metadata_lte)
+	metadata_blob = new_lookup_table_entry();
+	if (!metadata_blob)
 		goto out;
 
-	metadata_lte->flags = WIM_RESHDR_FLAG_METADATA;
-	metadata_lte->unhashed = 1;
+	metadata_blob->flags = WIM_RESHDR_FLAG_METADATA;
+	metadata_blob->unhashed = 1;
 
 	/* Create empty security data (no security descriptors).  */
 	sd = new_wim_security_data();
@@ -64,7 +64,7 @@ add_empty_image_metadata(WIMStruct *wim)
 	/* A NULL root_dentry indicates a completely empty image, without even a
 	 * root directory.  */
 	imd->root_dentry = NULL;
-	imd->metadata_lte = metadata_lte;
+	imd->metadata_blob = metadata_blob;
 	imd->security_data = sd;
 	imd->modified = 1;
 
@@ -77,7 +77,7 @@ add_empty_image_metadata(WIMStruct *wim)
 out_free_security_data:
 	free_wim_security_data(sd);
 out_free_metadata_lte:
-	free_lookup_table_entry(metadata_lte);
+	free_lookup_table_entry(metadata_blob);
 out:
 	return ret;
 }

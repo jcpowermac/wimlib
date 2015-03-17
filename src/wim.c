@@ -226,13 +226,13 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 	imd->security_data = NULL;
 
 	if (free_metadata_lte) {
-		free_lookup_table_entry(imd->metadata_lte);
-		imd->metadata_lte = NULL;
+		free_lookup_table_entry(imd->metadata_blob);
+		imd->metadata_blob = NULL;
 	}
 	if (!table) {
-		struct wim_lookup_table_entry *lte, *tmp;
-		list_for_each_entry_safe(lte, tmp, &imd->unhashed_streams, unhashed_list)
-			free_lookup_table_entry(lte);
+		struct blob *blob, *tmp;
+		list_for_each_entry_safe(blob, tmp, &imd->unhashed_streams, unhashed_list)
+			free_lookup_table_entry(blob);
 	}
 	INIT_LIST_HEAD(&imd->unhashed_streams);
 	INIT_LIST_HEAD(&imd->inode_list);
@@ -824,15 +824,15 @@ wim_checksum_unhashed_streams(WIMStruct *wim)
 	if (!wim_has_metadata(wim))
 		return 0;
 	for (int i = 0; i < wim->hdr.image_count; i++) {
-		struct wim_lookup_table_entry *lte, *tmp;
+		struct blob *blob, *tmp;
 		struct wim_image_metadata *imd = wim->image_metadata[i];
-		image_for_each_unhashed_stream_safe(lte, tmp, imd) {
-			struct wim_lookup_table_entry *new_lte;
-			ret = hash_unhashed_stream(lte, wim->lookup_table, &new_lte);
+		image_for_each_unhashed_stream_safe(blob, tmp, imd) {
+			struct blob *new_lte;
+			ret = hash_unhashed_stream(blob, wim->lookup_table, &new_lte);
 			if (ret)
 				return ret;
-			if (new_lte != lte)
-				free_lookup_table_entry(lte);
+			if (new_lte != blob)
+				free_lookup_table_entry(blob);
 		}
 	}
 	return 0;

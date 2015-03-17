@@ -240,15 +240,15 @@ void
 inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
 		       struct wim_lookup_table *lookup_table)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	unsigned idx = attr - inode->i_attrs;
 
 	wimlib_assert(idx < inode->i_num_attrs);
 	wimlib_assert(inode->i_resolved);
 
-	lte = attr->attr_lte;
-	if (lte)
-		lte_decrement_refcnt(lte, lookup_table);
+	blob = attr->attr_lte;
+	if (blob)
+		lte_decrement_refcnt(blob, lookup_table);
 
 	FREE(attr->attr_name);
 
@@ -295,7 +295,7 @@ inode_has_named_data_stream(const struct wim_inode *inode)
  *
  * This takes each SHA-1 message digest stored in the inode or one of its ADS
  * entries and replaces it with a pointer directly to the appropriate 'struct
- * wim_lookup_table_entry' currently inserted into @table to represent the
+ * blob' currently inserted into @table to represent the
  * single-instance stream having that SHA-1 message digest.
  *
  * If @force is %false:
@@ -317,7 +317,7 @@ int
 inode_resolve_attributes(struct wim_inode *inode, struct wim_lookup_table *table,
 			 bool force)
 {
-	struct wim_lookup_table_entry *ltes[inode->i_num_attrs];
+	struct blob *ltes[inode->i_num_attrs];
 
 	if (inode->i_resolved)
 		return 0;
@@ -325,21 +325,21 @@ inode_resolve_attributes(struct wim_inode *inode, struct wim_lookup_table *table
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 
 		const u8 *hash = inode->i_attrs[i].attr_hash;
-		struct wim_lookup_table_entry *lte = NULL;
+		struct blob *blob = NULL;
 
 		if (!is_zero_hash(hash)) {
-			lte = lookup_stream(table, hash);
-			if (!lte) {
+			blob = lookup_stream(table, hash);
+			if (!blob) {
 				if (!force)
 					return stream_not_found_error(inode, hash);
-				lte = new_lookup_table_entry();
-				if (!lte)
+				blob = new_lookup_table_entry();
+				if (!blob)
 					return WIMLIB_ERR_NOMEM;
-				copy_hash(lte->hash, hash);
-				lookup_table_insert(table, lte);
+				copy_hash(blob->hash, hash);
+				lookup_table_insert(table, blob);
 			}
 		}
-		ltes[i] = lte;
+		ltes[i] = blob;
 	}
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
@@ -385,7 +385,7 @@ stream_not_found_error(const struct wim_inode *inode, const u8 *hash)
 	return WIMLIB_ERR_RESOURCE_NOT_FOUND;
 }
 
-struct wim_lookup_table_entry *
+struct blob *
 inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
 		    const struct wim_lookup_table *table)
 {
@@ -400,7 +400,7 @@ inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
  * inode, or NULL if the inode's unnamed data stream is empty.  Also return the
  * 0-based index of the unnamed data stream in *stream_idx_ret.
  */
-struct wim_lookup_table_entry *
+struct blob *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
 			      unsigned *attr_idx_ret)
 {
@@ -420,7 +420,7 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
  * Return the lookup table entry for the unnamed data stream of an inode, or
  * NULL if the inode's unnamed data stream is empty or not available.
  */
-struct wim_lookup_table_entry *
+struct blob *
 inode_unnamed_lte(const struct wim_inode *inode,
 		  const struct wim_lookup_table *table)
 {
@@ -484,11 +484,11 @@ inode_unref_attributes(struct wim_inode *inode,
 		       struct wim_lookup_table *lookup_table)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		struct wim_lookup_table_entry *lte;
+		struct blob *blob;
 
-		lte = inode_attribute_lte(inode, i, lookup_table);
-		if (lte)
-			lte_decrement_refcnt(lte, lookup_table);
+		blob = inode_attribute_lte(inode, i, lookup_table);
+		if (blob)
+			lte_decrement_refcnt(blob, lookup_table);
 	}
 }
 
@@ -501,14 +501,14 @@ inode_unref_attributes(struct wim_inode *inode,
  * inode.  (It can't be in an unresolved inode, since that would imply the hash
  * is known!)
  */
-struct wim_lookup_table_entry **
-retrieve_lte_pointer(struct wim_lookup_table_entry *lte)
+struct blob **
+retrieve_lte_pointer(struct blob *blob)
 {
-	wimlib_assert(lte->unhashed);
+	wimlib_assert(blob->unhashed);
 
-	struct wim_inode *inode = lte->back_inode;
+	struct wim_inode *inode = blob->back_inode;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_id == lte->back_stream_id)
+		if (inode->i_attrs[i].attr_id == blob->back_stream_id)
 			return &inode->i_attrs[i].attr_lte;
 
 	wimlib_assert(0);

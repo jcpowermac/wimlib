@@ -317,7 +317,7 @@ out_close:
 
 /* Create empty named data streams.
  *
- * Since these won't have 'struct wim_lookup_table_entry's, they won't show up
+ * Since these won't have 'struct blob's, they won't show up
  * in the call to extract_stream_list().  Hence the need for the special case.
  */
 static int
@@ -334,7 +334,7 @@ ntfs_3g_create_any_empty_ads(ntfs_inode *ni, const struct wim_inode *inode,
 			continue;
 
 		/* Not empty?  */
-		if (entry->lte)
+		if (entry->blob)
 			continue;
 
 		if (ntfs_attr_add(ni, AT_DATA, entry->stream_name,
@@ -686,7 +686,7 @@ ntfs_3g_create_nondirectories(struct list_head *dentry_list,
 }
 
 static int
-ntfs_3g_begin_extract_stream_to_attr(struct wim_lookup_table_entry *stream,
+ntfs_3g_begin_extract_stream_to_attr(struct blob *stream,
 				     ntfs_inode *ni,
 				     struct wim_inode *inode,
 				     ntfschar *stream_name,
@@ -798,7 +798,7 @@ ntfs_3g_open_inode(struct wim_inode *inode, struct ntfs_3g_apply_ctx *ctx)
 }
 
 static int
-ntfs_3g_begin_extract_stream(struct wim_lookup_table_entry *stream, void *_ctx)
+ntfs_3g_begin_extract_stream(struct blob *stream, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
 	const struct stream_owner *owners = stream_owners(stream);
@@ -851,7 +851,7 @@ ntfs_3g_extract_chunk(const void *chunk, size_t size, void *_ctx)
 }
 
 static int
-ntfs_3g_end_extract_stream(struct wim_lookup_table_entry *stream,
+ntfs_3g_end_extract_stream(struct blob *stream,
 			   int status, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;

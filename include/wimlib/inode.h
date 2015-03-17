@@ -8,7 +8,7 @@
 struct avl_tree_node;
 struct wim_dentry;
 struct wim_lookup_table;
-struct wim_lookup_table_entry;
+struct blob;
 struct wim_security_data;
 struct wimfs_fd;
 
@@ -34,7 +34,7 @@ struct wim_attribute {
 	utf16lechar *attr_name;
 	union {
 		u8 attr_hash[SHA1_HASH_SIZE];
-		struct wim_lookup_table_entry *attr_lte;
+		struct blob *attr_lte;
 	};
 	u32 attr_id : 28;
 	u32 attr_type : 4;
@@ -105,10 +105,10 @@ struct wim_inode {
 	 * "resolved".  By default, the inode starts as "unresolved", meaning
 	 * that the i_hash field, along with the hash field of any associated
 	 * wim_attribute's, are valid and should be used as keys in the WIM
-	 * lookup table to find the associated `struct wim_lookup_table_entry'.
+	 * lookup table to find the associated `struct blob'.
 	 * But if the inode has been resolved, then each of these fields is
 	 * replaced with a pointer directly to the appropriate `struct
-	 * wim_lookup_table_entry', or NULL if the stream is empty.  */
+	 * blob', or NULL if the stream is empty.  */
 	u8 i_resolved : 1;
 
 	/* Flag used to mark this inode as visited; this is used when visiting
@@ -370,22 +370,22 @@ inode_unresolve_attributes(struct wim_inode *inode);
 extern int
 stream_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
-extern struct wim_lookup_table_entry *
+extern struct blob *
 inode_attribute_lte(const struct wim_inode *inode, unsigned attr_idx,
 		    const struct wim_lookup_table *table);
 
-extern struct wim_lookup_table_entry *
+extern struct blob *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
 			      unsigned *attr_idx_ret);
 
-static inline struct wim_lookup_table_entry *
+static inline struct blob *
 inode_unnamed_lte_resolved(const struct wim_inode *inode)
 {
 	unsigned attr_idx;
 	return inode_unnamed_stream_resolved(inode, &attr_idx);
 }
 
-extern struct wim_lookup_table_entry *
+extern struct blob *
 inode_unnamed_lte(const struct wim_inode *inode,
 		  const struct wim_lookup_table *table);
 

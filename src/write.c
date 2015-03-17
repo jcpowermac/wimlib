@@ -102,7 +102,7 @@ struct filter_context {
  *	  WIM file and may not need to be written again.
  */
 static int
-stream_filtered(const struct wim_lookup_table_entry *lte,
+stream_filtered(const struct blob *blob,
 		const struct filter_context *ctx)
 {
 	int write_flags;
@@ -115,23 +115,23 @@ stream_filtered(const struct wim_lookup_table_entry *lte,
 	wim = ctx->wim;
 
 	if (write_flags & WIMLIB_WRITE_FLAG_OVERWRITE &&
-	    lte->resource_location == RESOURCE_IN_WIM &&
-	    lte->rspec->wim == wim)
+	    blob->resource_location == RESOURCE_IN_WIM &&
+	    blob->rspec->wim == wim)
 		return 1;
 
 	if (write_flags & WIMLIB_WRITE_FLAG_SKIP_EXTERNAL_WIMS &&
-	    lte->resource_location == RESOURCE_IN_WIM &&
-	    lte->rspec->wim != wim)
+	    blob->resource_location == RESOURCE_IN_WIM &&
+	    blob->rspec->wim != wim)
 		return -1;
 
 	return 0;
 }
 
 static bool
-stream_hard_filtered(const struct wim_lookup_table_entry *lte,
+stream_hard_filtered(const struct blob *blob,
 		     struct filter_context *ctx)
 {
-	return stream_filtered(lte, ctx) < 0;
+	return stream_filtered(blob, ctx) < 0;
 }
 
 static inline int
@@ -161,7 +161,7 @@ may_filter_streams(const struct filter_context *ctx)
 /* Return true if the specified resource is compressed and the compressed data
  * can be reused with the specified output parameters.  */
 static bool
-can_raw_copy(const struct wim_lookup_table_entry *lte,
+can_raw_copy(const struct blob *blob,
 	     int write_resource_flags, int out_ctype, u32 out_chunk_size)
 {
 	const struct wim_resource_spec *rspec;
@@ -172,10 +172,10 @@ can_raw_copy(const struct wim_lookup_table_entry *lte,
 	if (out_ctype == WIMLIB_COMPRESSION_TYPE_NONE)
 		return false;
 
-	if (lte->resource_location != RESOURCE_IN_WIM)
+	if (blob->resource_location != RESOURCE_IN_WIM)
 		return false;
 
-	rspec = lte->rspec;
+	rspec = blob->rspec;
 
 	if (rspec->is_pipable != !!(write_resource_flags & WRITE_RESOURCE_FLAG_PIPABLE))
 		return false;
@@ -200,7 +200,7 @@ can_raw_copy(const struct wim_lookup_table_entry *lte,
 		 * check if they are compatible with @out_ctype and
 		 * @out_chunk_size.  */
 
-		struct wim_lookup_table_entry *res_stream;
+		struct blob *res_stream;
 		u64 write_size = 0;
 
 		list_for_each_entry(res_stream, &rspec->stream_list, rspec_node)
@@ -223,38 +223,38 @@ filter_resource_flags(u8 flags)
 }
 
 static void
-stream_set_out_reshdr_for_reuse(struct wim_lookup_table_entry *lte)
+stream_set_out_reshdr_for_reuse(struct blob *blob)
 {
 	const struct wim_resource_spec *rspec;
 
-	wimlib_assert(lte->resource_location == RESOURCE_IN_WIM);
-	rspec = lte->rspec;
+	wimlib_assert(blob->resource_location == RESOURCE_IN_WIM);
+	rspec = blob->rspec;
 
 	if (rspec->flags & WIM_RESHDR_FLAG_SOLID) {
 
-		wimlib_assert(lte->flags & WIM_RESHDR_FLAG_SOLID);
+		wimlib_assert(blob->flags & WIM_RESHDR_FLAG_SOLID);
 
-		lte->out_reshdr.offset_in_wim = lte->offset_in_res;
-		lte->out_reshdr.uncompressed_size = 0;
-		lte->out_reshdr.size_in_wim = lte->size;
+		blob->out_reshdr.offset_in_wim = blob->offset_in_res;
+		blob->out_reshdr.uncompressed_size = 0;
+		blob->out_reshdr.size_in_wim = blob->size;
 
-		lte->out_res_offset_in_wim = rspec->offset_in_wim;
-		lte->out_res_size_in_wim = rspec->size_in_wim;
-		lte->out_res_uncompressed_size = rspec->uncompressed_size;
+		blob->out_res_offset_in_wim = rspec->offset_in_wim;
+		blob->out_res_size_in_wim = rspec->size_in_wim;
+		blob->out_res_uncompressed_size = rspec->uncompressed_size;
 	} else {
-		wimlib_assert(!(lte->flags & WIM_RESHDR_FLAG_SOLID));
+		wimlib_assert(!(blob->flags & WIM_RESHDR_FLAG_SOLID));
 
-		lte->out_reshdr.offset_in_wim = rspec->offset_in_wim;
-		lte->out_reshdr.uncompressed_size = rspec->uncompressed_size;
-		lte->out_reshdr.size_in_wim = rspec->size_in_wim;
+		blob->out_reshdr.offset_in_wim = rspec->offset_in_wim;
+		blob->out_reshdr.uncompressed_size = rspec->uncompressed_size;
+		blob->out_reshdr.size_in_wim = rspec->size_in_wim;
 	}
-	lte->out_reshdr.flags = lte->flags;
+	blob->out_reshdr.flags = blob->flags;
 }
 
 
 /* Write the header for a stream in a pipable WIM.  */
 static int
-write_pwm_stream_header(const struct wim_lookup_table_entry *lte,
+write_pwm_stream_header(const struct blob *blob,
 			struct filedes *out_fd,
 			int additional_reshdr_flags)
 {
@@ -263,15 +263,15 @@ write_pwm_stream_header(const struct wim_lookup_table_entry *lte,
 	int ret;
 
 	stream_hdr.magic = cpu_to_le64(PWM_STREAM_MAGIC);
-	stream_hdr.uncompressed_size = cpu_to_le64(lte->size);
+	stream_hdr.uncompressed_size = cpu_to_le64(blob->size);
 	if (additional_reshdr_flags & PWM_RESHDR_FLAG_UNHASHED) {
 		zero_out_hash(stream_hdr.hash);
 	} else {
-		wimlib_assert(!lte->unhashed);
-		copy_hash(stream_hdr.hash, lte->hash);
+		wimlib_assert(!blob->unhashed);
+		copy_hash(stream_hdr.hash, blob->hash);
 	}
 
-	reshdr_flags = filter_resource_flags(lte->flags);
+	reshdr_flags = filter_resource_flags(blob->flags);
 	reshdr_flags |= additional_reshdr_flags;
 	stream_hdr.flags = cpu_to_le32(reshdr_flags);
 	ret = full_write(out_fd, &stream_hdr, sizeof(stream_hdr));
@@ -653,27 +653,27 @@ done_with_file(const tchar *path, wimlib_progress_func_t progfunc, void *progctx
 }
 
 static inline bool
-is_file_stream(const struct wim_lookup_table_entry *lte)
+is_file_stream(const struct blob *blob)
 {
-	return lte->resource_location == RESOURCE_IN_FILE_ON_DISK
+	return blob->resource_location == RESOURCE_IN_FILE_ON_DISK
 #ifdef __WIN32__
-	    || lte->resource_location == RESOURCE_IN_WINNT_FILE_ON_DISK
-	    || lte->resource_location == RESOURCE_WIN32_ENCRYPTED
+	    || blob->resource_location == RESOURCE_IN_WINNT_FILE_ON_DISK
+	    || blob->resource_location == RESOURCE_WIN32_ENCRYPTED
 #endif
 	   ;
 }
 
 static int
-do_done_with_stream(struct wim_lookup_table_entry *lte,
+do_done_with_stream(struct blob *blob,
 		    wimlib_progress_func_t progfunc, void *progctx)
 {
 	int ret;
 	struct wim_inode *inode;
 
-	if (!lte->may_send_done_with_file)
+	if (!blob->may_send_done_with_file)
 		return 0;
 
-	inode = lte->file_inode;
+	inode = blob->file_inode;
 
 	wimlib_assert(inode != NULL);
 	wimlib_assert(inode->num_remaining_streams > 0);
@@ -683,14 +683,14 @@ do_done_with_stream(struct wim_lookup_table_entry *lte,
 #ifdef __WIN32__
 	/* XXX: This logic really should be somewhere else.  */
 
-	/* We want the path to the file, but lte->file_on_disk might actually
+	/* We want the path to the file, but blob->file_on_disk might actually
 	 * refer to a named data stream.  Temporarily strip the named data
 	 * stream from the path.  */
 	wchar_t *p_colon = NULL;
 	wchar_t *p_question_mark = NULL;
 	const wchar_t *p_stream_name;
 
-	p_stream_name = path_stream_name(lte->file_on_disk);
+	p_stream_name = path_stream_name(blob->file_on_disk);
 	if (unlikely(p_stream_name)) {
 		p_colon = (wchar_t *)(p_stream_name - 1);
 		wimlib_assert(*p_colon == L':');
@@ -698,13 +698,13 @@ do_done_with_stream(struct wim_lookup_table_entry *lte,
 	}
 
 	/* We also should use a fake Win32 path instead of a NT path  */
-	if (!wcsncmp(lte->file_on_disk, L"\\??\\", 4)) {
-		p_question_mark = &lte->file_on_disk[1];
+	if (!wcsncmp(blob->file_on_disk, L"\\??\\", 4)) {
+		p_question_mark = &blob->file_on_disk[1];
 		*p_question_mark = L'\\';
 	}
 #endif
 
-	ret = done_with_file(lte->file_on_disk, progfunc, progctx);
+	ret = done_with_file(blob->file_on_disk, progfunc, progctx);
 
 #ifdef __WIN32__
 	if (p_colon)
@@ -717,27 +717,27 @@ do_done_with_stream(struct wim_lookup_table_entry *lte,
 
 /* Handle WIMLIB_WRITE_FLAG_SEND_DONE_WITH_FILE_MESSAGES mode.  */
 static inline int
-done_with_stream(struct wim_lookup_table_entry *lte,
+done_with_stream(struct blob *blob,
 		 struct write_streams_ctx *ctx)
 {
 	if (likely(!(ctx->write_resource_flags &
 		     WRITE_RESOURCE_FLAG_SEND_DONE_WITH_FILE)))
 		return 0;
-	return do_done_with_stream(lte, ctx->progress_data.progfunc,
+	return do_done_with_stream(blob, ctx->progress_data.progfunc,
 				   ctx->progress_data.progctx);
 }
 
 /* Begin processing a stream for writing.  */
 static int
-write_stream_begin_read(struct wim_lookup_table_entry *lte, void *_ctx)
+write_stream_begin_read(struct blob *blob, void *_ctx)
 {
 	struct write_streams_ctx *ctx = _ctx;
 	int ret;
 
-	wimlib_assert(lte->size > 0);
+	wimlib_assert(blob->size > 0);
 
 	ctx->cur_read_stream_offset = 0;
-	ctx->cur_read_stream_size = lte->size;
+	ctx->cur_read_stream_size = blob->size;
 
 	/* As an optimization, we allow some streams to be "unhashed", meaning
 	 * their SHA1 message digests are unknown.  This is the case with
@@ -750,14 +750,14 @@ write_stream_begin_read(struct wim_lookup_table_entry *lte, void *_ctx)
 	 * still provide the data again to write_stream_process_chunk().  This
 	 * is okay because an unhashed stream cannot be in a WIM resource, which
 	 * might be costly to decompress.  */
-	if (ctx->lookup_table != NULL && lte->unhashed && !lte->unique_size) {
+	if (ctx->lookup_table != NULL && blob->unhashed && !blob->unique_size) {
 
-		struct wim_lookup_table_entry *lte_new;
+		struct blob *lte_new;
 
-		ret = hash_unhashed_stream(lte, ctx->lookup_table, &lte_new);
+		ret = hash_unhashed_stream(blob, ctx->lookup_table, &lte_new);
 		if (ret)
 			return ret;
-		if (lte_new != lte) {
+		if (lte_new != blob) {
 			/* Duplicate stream detected.  */
 
 			if (lte_new->will_be_in_output_wim ||
@@ -770,19 +770,19 @@ write_stream_begin_read(struct wim_lookup_table_entry *lte, void *_ctx)
 				 * passing its output reference count to the
 				 * duplicate stream in the former case.  */
 				DEBUG("Discarding duplicate stream of "
-				      "length %"PRIu64, lte->size);
+				      "length %"PRIu64, blob->size);
 				ret = do_write_streams_progress(&ctx->progress_data,
-								lte->size,
+								blob->size,
 								1, true);
-				list_del(&lte->write_streams_list);
-				list_del(&lte->lookup_table_list);
+				list_del(&blob->write_streams_list);
+				list_del(&blob->lookup_table_list);
 				if (lte_new->will_be_in_output_wim)
-					lte_new->out_refcnt += lte->out_refcnt;
+					lte_new->out_refcnt += blob->out_refcnt;
 				if (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID)
-					ctx->cur_write_res_size -= lte->size;
+					ctx->cur_write_res_size -= blob->size;
 				if (!ret)
-					ret = done_with_stream(lte, ctx);
-				free_lookup_table_entry(lte);
+					ret = done_with_stream(blob, ctx);
+				free_lookup_table_entry(blob);
 				if (ret)
 					return ret;
 				return BEGIN_STREAM_STATUS_SKIP_STREAM;
@@ -795,19 +795,19 @@ write_stream_begin_read(struct wim_lookup_table_entry *lte, void *_ctx)
 				 * reading its data.  */
 				DEBUG("Stream duplicate, but not already "
 				      "selected for writing.");
-				list_replace(&lte->write_streams_list,
+				list_replace(&blob->write_streams_list,
 					     &lte_new->write_streams_list);
-				list_replace(&lte->lookup_table_list,
+				list_replace(&blob->lookup_table_list,
 					     &lte_new->lookup_table_list);
-				lte->will_be_in_output_wim = 0;
-				lte_new->out_refcnt = lte->out_refcnt;
+				blob->will_be_in_output_wim = 0;
+				lte_new->out_refcnt = blob->out_refcnt;
 				lte_new->will_be_in_output_wim = 1;
 				lte_new->may_send_done_with_file = 0;
-				lte = lte_new;
+				blob = lte_new;
 			}
 		}
 	}
-	list_move_tail(&lte->write_streams_list, &ctx->pending_streams);
+	list_move_tail(&blob->write_streams_list, &ctx->pending_streams);
 	return 0;
 }
 
@@ -815,17 +815,17 @@ write_stream_begin_read(struct wim_lookup_table_entry *lte, void *_ctx)
  * This function is optional, but if a stream did not compress to less than its
  * original size, it might as well be written uncompressed.  */
 static int
-write_stream_uncompressed(struct wim_lookup_table_entry *lte,
+write_stream_uncompressed(struct blob *blob,
 			  struct filedes *out_fd)
 {
 	int ret;
-	u64 begin_offset = lte->out_reshdr.offset_in_wim;
+	u64 begin_offset = blob->out_reshdr.offset_in_wim;
 	u64 end_offset = out_fd->offset;
 
 	if (filedes_seek(out_fd, begin_offset) == -1)
 		return 0;
 
-	ret = extract_full_stream_to_fd(lte, out_fd);
+	ret = extract_full_stream_to_fd(blob, out_fd);
 	if (ret) {
 		/* Error reading the uncompressed data.  */
 		if (out_fd->offset == begin_offset &&
@@ -837,13 +837,13 @@ write_stream_uncompressed(struct wim_lookup_table_entry *lte,
 			 * resource instead.  */
 			WARNING("Recovered compressed stream of "
 				"size %"PRIu64", continuing on.",
-				lte->size);
+				blob->size);
 			return 0;
 		}
 		return ret;
 	}
 
-	wimlib_assert(out_fd->offset - begin_offset == lte->size);
+	wimlib_assert(out_fd->offset - begin_offset == blob->size);
 
 	if (out_fd->offset < end_offset &&
 	    0 != ftruncate(out_fd->fd, out_fd->offset))
@@ -853,22 +853,22 @@ write_stream_uncompressed(struct wim_lookup_table_entry *lte,
 		return WIMLIB_ERR_WRITE;
 	}
 
-	lte->out_reshdr.size_in_wim = lte->size;
-	lte->out_reshdr.flags &= ~(WIM_RESHDR_FLAG_COMPRESSED |
+	blob->out_reshdr.size_in_wim = blob->size;
+	blob->out_reshdr.flags &= ~(WIM_RESHDR_FLAG_COMPRESSED |
 				   WIM_RESHDR_FLAG_SOLID);
 	return 0;
 }
 
 /* Returns true if the specified stream should be truncated from the WIM file
- * and re-written as uncompressed.  lte->out_reshdr must be filled in from the
+ * and re-written as uncompressed.  blob->out_reshdr must be filled in from the
  * initial write of the stream.  */
 static bool
 should_rewrite_stream_uncompressed(const struct write_streams_ctx *ctx,
-				   const struct wim_lookup_table_entry *lte)
+				   const struct blob *blob)
 {
 	/* If the compressed data is smaller than the uncompressed data, prefer
 	 * the compressed data.  */
-	if (lte->out_reshdr.size_in_wim < lte->out_reshdr.uncompressed_size)
+	if (blob->out_reshdr.size_in_wim < blob->out_reshdr.uncompressed_size)
 		return false;
 
 	/* If we're not actually writing compressed data, then there's no need
@@ -897,8 +897,8 @@ should_rewrite_stream_uncompressed(const struct write_streams_ctx *ctx,
 	 * obtain the uncompressed data by decompressing the compressed data we
 	 * wrote to the output file.
 	 */
-	if ((lte->flags & WIM_RESHDR_FLAG_SOLID) &&
-	    (lte->out_reshdr.size_in_wim != lte->out_reshdr.uncompressed_size))
+	if ((blob->flags & WIM_RESHDR_FLAG_SOLID) &&
+	    (blob->out_reshdr.size_in_wim != blob->out_reshdr.uncompressed_size))
 		return false;
 
 	return true;
@@ -906,9 +906,9 @@ should_rewrite_stream_uncompressed(const struct write_streams_ctx *ctx,
 
 static int
 maybe_rewrite_stream_uncompressed(struct write_streams_ctx *ctx,
-				  struct wim_lookup_table_entry *lte)
+				  struct blob *blob)
 {
-	if (!should_rewrite_stream_uncompressed(ctx, lte))
+	if (!should_rewrite_stream_uncompressed(ctx, blob))
 		return 0;
 
 	/* Regular (non-solid) WIM resources with exactly one chunk and
@@ -917,13 +917,13 @@ maybe_rewrite_stream_uncompressed(struct write_streams_ctx *ctx,
 	 * in the chunk table and the only chunk must be stored uncompressed.
 	 * In this case, there's no need to rewrite anything.  */
 	if (ctx->chunk_index == 1 &&
-	    lte->out_reshdr.size_in_wim == lte->out_reshdr.uncompressed_size)
+	    blob->out_reshdr.size_in_wim == blob->out_reshdr.uncompressed_size)
 	{
-		lte->out_reshdr.flags &= ~WIM_RESHDR_FLAG_COMPRESSED;
+		blob->out_reshdr.flags &= ~WIM_RESHDR_FLAG_COMPRESSED;
 		return 0;
 	}
 
-	return write_stream_uncompressed(lte, ctx->out_fd);
+	return write_stream_uncompressed(blob, ctx->out_fd);
 }
 
 /* Write the next chunk of (typically compressed) data to the output WIM,
@@ -934,12 +934,12 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 {
 	int ret;
 
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	u32 completed_stream_count;
 	u32 completed_size;
 
-	lte = list_entry(ctx->pending_streams.next,
-			 struct wim_lookup_table_entry, write_streams_list);
+	blob = list_entry(ctx->pending_streams.next,
+			 struct blob, write_streams_list);
 
 	if (ctx->cur_write_stream_offset == 0 &&
 	    !(ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID))
@@ -954,13 +954,13 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 			DEBUG("Writing pipable WIM stream header "
 			      "(offset=%"PRIu64")", ctx->out_fd->offset);
 
-			ret = write_pwm_stream_header(lte, ctx->out_fd,
+			ret = write_pwm_stream_header(blob, ctx->out_fd,
 						      additional_reshdr_flags);
 			if (ret)
 				return ret;
 		}
 
-		ret = begin_write_resource(ctx, lte->size);
+		ret = begin_write_resource(ctx, blob->size);
 		if (ret)
 			return ret;
 	}
@@ -995,55 +995,55 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 	if (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID) {
 		/* Wrote chunk in solid mode.  It may have finished multiple
 		 * streams.  */
-		struct wim_lookup_table_entry *next_lte;
+		struct blob *next_lte;
 
-		while (lte && ctx->cur_write_stream_offset >= lte->size) {
+		while (blob && ctx->cur_write_stream_offset >= blob->size) {
 
-			ctx->cur_write_stream_offset -= lte->size;
+			ctx->cur_write_stream_offset -= blob->size;
 
 			if (ctx->cur_write_stream_offset)
-				next_lte = list_entry(lte->write_streams_list.next,
-						      struct wim_lookup_table_entry,
+				next_lte = list_entry(blob->write_streams_list.next,
+						      struct blob,
 						      write_streams_list);
 			else
 				next_lte = NULL;
 
-			ret = done_with_stream(lte, ctx);
+			ret = done_with_stream(blob, ctx);
 			if (ret)
 				return ret;
-			list_move_tail(&lte->write_streams_list, &ctx->solid_streams);
+			list_move_tail(&blob->write_streams_list, &ctx->solid_streams);
 			completed_stream_count++;
 
-			lte = next_lte;
+			blob = next_lte;
 		}
 	} else {
 		/* Wrote chunk in non-solid mode.  It may have finished a
 		 * stream.  */
-		if (ctx->cur_write_stream_offset == lte->size) {
+		if (ctx->cur_write_stream_offset == blob->size) {
 
 			wimlib_assert(ctx->cur_write_stream_offset ==
 				      ctx->cur_write_res_size);
 
-			ret = end_write_resource(ctx, &lte->out_reshdr);
+			ret = end_write_resource(ctx, &blob->out_reshdr);
 			if (ret)
 				return ret;
 
-			lte->out_reshdr.flags = filter_resource_flags(lte->flags);
+			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
 			if (ctx->compressor != NULL)
-				lte->out_reshdr.flags |= WIM_RESHDR_FLAG_COMPRESSED;
+				blob->out_reshdr.flags |= WIM_RESHDR_FLAG_COMPRESSED;
 
-			ret = maybe_rewrite_stream_uncompressed(ctx, lte);
+			ret = maybe_rewrite_stream_uncompressed(ctx, blob);
 			if (ret)
 				return ret;
 
-			wimlib_assert(lte->out_reshdr.uncompressed_size == lte->size);
+			wimlib_assert(blob->out_reshdr.uncompressed_size == blob->size);
 
 			ctx->cur_write_stream_offset = 0;
 
-			ret = done_with_stream(lte, ctx);
+			ret = done_with_stream(blob, ctx);
 			if (ret)
 				return ret;
-			list_del(&lte->write_streams_list);
+			list_del(&blob->write_streams_list);
 			completed_stream_count++;
 		}
 	}
@@ -1151,14 +1151,14 @@ write_stream_process_chunk(const void *chunk, size_t size, void *_ctx)
  * written yet, as the chunk_compressor implementation may still have chunks
  * buffered or being compressed.  */
 static int
-write_stream_end_read(struct wim_lookup_table_entry *lte, int status, void *_ctx)
+write_stream_end_read(struct blob *blob, int status, void *_ctx)
 {
 	struct write_streams_ctx *ctx = _ctx;
 
 	wimlib_assert(ctx->cur_read_stream_offset == ctx->cur_read_stream_size || status);
 
-	if (!lte->will_be_in_output_wim) {
-		/* The 'lte' stream was a duplicate.  Now that its data has
+	if (!blob->will_be_in_output_wim) {
+		/* The 'blob' stream was a duplicate.  Now that its data has
 		 * finished being read, it is being discarded in favor of the
 		 * duplicate entry.  It therefore is no longer needed, and we
 		 * can fire the DONE_WITH_FILE callback because the file will
@@ -1168,16 +1168,16 @@ write_stream_end_read(struct wim_lookup_table_entry *lte, int status, void *_ctx
 		 * streams, since it needs to be possible to re-read the file if
 		 * it does not compress to less than its original size.  */
 		if (!status)
-			status = done_with_stream(lte, ctx);
-		free_lookup_table_entry(lte);
-	} else if (!status && lte->unhashed && ctx->lookup_table != NULL) {
-		/* The 'lte' stream was not a duplicate and was previously
+			status = done_with_stream(blob, ctx);
+		free_lookup_table_entry(blob);
+	} else if (!status && blob->unhashed && ctx->lookup_table != NULL) {
+		/* The 'blob' stream was not a duplicate and was previously
 		 * unhashed.  Since we passed COMPUTE_MISSING_STREAM_HASHES to
-		 * read_stream_list(), lte->hash is now computed and valid.  So
+		 * read_stream_list(), blob->hash is now computed and valid.  So
 		 * turn this stream into a "hashed" stream.  */
-		list_del(&lte->unhashed_list);
-		lookup_table_insert(ctx->lookup_table, lte);
-		lte->unhashed = 0;
+		list_del(&blob->unhashed_list);
+		lookup_table_insert(ctx->lookup_table, blob);
+		blob->unhashed = 0;
 	}
 	return status;
 }
@@ -1190,18 +1190,18 @@ static void
 compute_stream_list_stats(struct list_head *stream_list,
 			  struct write_streams_ctx *ctx)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	u64 total_bytes = 0;
 	u64 num_streams = 0;
 	u64 total_parts = 0;
 	WIMStruct *prev_wim_part = NULL;
 
-	list_for_each_entry(lte, stream_list, write_streams_list) {
+	list_for_each_entry(blob, stream_list, write_streams_list) {
 		num_streams++;
-		total_bytes += lte->size;
-		if (lte->resource_location == RESOURCE_IN_WIM) {
-			if (prev_wim_part != lte->rspec->wim) {
-				prev_wim_part = lte->rspec->wim;
+		total_bytes += blob->size;
+		if (blob->resource_location == RESOURCE_IN_WIM) {
+			if (prev_wim_part != blob->rspec->wim) {
+				prev_wim_part = blob->rspec->wim;
 				total_parts++;
 			}
 		}
@@ -1227,30 +1227,30 @@ find_raw_copy_streams(struct list_head *stream_list,
 		      u32 out_chunk_size,
 		      struct list_head *raw_copy_streams)
 {
-	struct wim_lookup_table_entry *lte, *tmp;
+	struct blob *blob, *tmp;
 	u64 num_bytes_to_compress = 0;
 
 	INIT_LIST_HEAD(raw_copy_streams);
 
 	/* Initialize temporary raw_copy_ok flag.  */
-	list_for_each_entry(lte, stream_list, write_streams_list)
-		if (lte->resource_location == RESOURCE_IN_WIM)
-			lte->rspec->raw_copy_ok = 0;
+	list_for_each_entry(blob, stream_list, write_streams_list)
+		if (blob->resource_location == RESOURCE_IN_WIM)
+			blob->rspec->raw_copy_ok = 0;
 
-	list_for_each_entry_safe(lte, tmp, stream_list, write_streams_list) {
-		if (lte->resource_location == RESOURCE_IN_WIM &&
-		    lte->rspec->raw_copy_ok)
+	list_for_each_entry_safe(blob, tmp, stream_list, write_streams_list) {
+		if (blob->resource_location == RESOURCE_IN_WIM &&
+		    blob->rspec->raw_copy_ok)
 		{
-			list_move_tail(&lte->write_streams_list,
+			list_move_tail(&blob->write_streams_list,
 				       raw_copy_streams);
-		} else if (can_raw_copy(lte, write_resource_flags,
+		} else if (can_raw_copy(blob, write_resource_flags,
 				 out_ctype, out_chunk_size))
 		{
-			lte->rspec->raw_copy_ok = 1;
-			list_move_tail(&lte->write_streams_list,
+			blob->rspec->raw_copy_ok = 1;
+			list_move_tail(&blob->write_streams_list,
 				       raw_copy_streams);
 		} else {
-			num_bytes_to_compress += lte->size;
+			num_bytes_to_compress += blob->size;
 		}
 	}
 
@@ -1269,7 +1269,7 @@ write_raw_copy_resource(struct wim_resource_spec *in_rspec,
 	size_t bytes_to_read;
 	int ret;
 	struct filedes *in_fd;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	u64 out_offset_in_wim;
 
 	DEBUG("Copying raw compressed data (size_in_wim=%"PRIu64", "
@@ -1306,13 +1306,13 @@ write_raw_copy_resource(struct wim_resource_spec *in_rspec,
 
 	} while (cur_read_offset != end_read_offset);
 
-	list_for_each_entry(lte, &in_rspec->stream_list, rspec_node) {
-		if (lte->will_be_in_output_wim) {
-			stream_set_out_reshdr_for_reuse(lte);
+	list_for_each_entry(blob, &in_rspec->stream_list, rspec_node) {
+		if (blob->will_be_in_output_wim) {
+			stream_set_out_reshdr_for_reuse(blob);
 			if (in_rspec->flags & WIM_RESHDR_FLAG_SOLID)
-				lte->out_res_offset_in_wim = out_offset_in_wim;
+				blob->out_res_offset_in_wim = out_offset_in_wim;
 			else
-				lte->out_reshdr.offset_in_wim = out_offset_in_wim;
+				blob->out_reshdr.offset_in_wim = out_offset_in_wim;
 
 		}
 	}
@@ -1326,22 +1326,22 @@ write_raw_copy_resources(struct list_head *raw_copy_streams,
 			 struct filedes *out_fd,
 			 struct write_streams_progress_data *progress_data)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	int ret;
 
-	list_for_each_entry(lte, raw_copy_streams, write_streams_list)
-		lte->rspec->raw_copy_ok = 1;
+	list_for_each_entry(blob, raw_copy_streams, write_streams_list)
+		blob->rspec->raw_copy_ok = 1;
 
-	list_for_each_entry(lte, raw_copy_streams, write_streams_list) {
-		if (lte->rspec->raw_copy_ok) {
+	list_for_each_entry(blob, raw_copy_streams, write_streams_list) {
+		if (blob->rspec->raw_copy_ok) {
 			/* Write each solid resource only one time, no matter
 			 * how many streams reference it.  */
-			ret = write_raw_copy_resource(lte->rspec, out_fd);
+			ret = write_raw_copy_resource(blob->rspec, out_fd);
 			if (ret)
 				return ret;
-			lte->rspec->raw_copy_ok = 0;
+			blob->rspec->raw_copy_ok = 0;
 		}
-		ret = do_write_streams_progress(progress_data, lte->size,
+		ret = do_write_streams_progress(progress_data, blob->size,
 						1, false);
 		if (ret)
 			return ret;
@@ -1379,16 +1379,16 @@ finish_remaining_chunks(struct write_streams_ctx *ctx)
 static void
 remove_zero_length_streams(struct list_head *stream_list)
 {
-	struct wim_lookup_table_entry *lte, *tmp;
+	struct blob *blob, *tmp;
 
-	list_for_each_entry_safe(lte, tmp, stream_list, write_streams_list) {
-		wimlib_assert(lte->will_be_in_output_wim);
-		if (lte->size == 0) {
-			list_del(&lte->write_streams_list);
-			lte->out_reshdr.offset_in_wim = 0;
-			lte->out_reshdr.size_in_wim = 0;
-			lte->out_reshdr.uncompressed_size = 0;
-			lte->out_reshdr.flags = filter_resource_flags(lte->flags);
+	list_for_each_entry_safe(blob, tmp, stream_list, write_streams_list) {
+		wimlib_assert(blob->will_be_in_output_wim);
+		if (blob->size == 0) {
+			list_del(&blob->write_streams_list);
+			blob->out_reshdr.offset_in_wim = 0;
+			blob->out_reshdr.size_in_wim = 0;
+			blob->out_reshdr.uncompressed_size = 0;
+			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
 		}
 	}
 }
@@ -1396,20 +1396,20 @@ remove_zero_length_streams(struct list_head *stream_list)
 static void
 init_done_with_file_info(struct list_head *stream_list)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 
-	list_for_each_entry(lte, stream_list, write_streams_list) {
-		if (is_file_stream(lte)) {
-			lte->file_inode->num_remaining_streams = 0;
-			lte->may_send_done_with_file = 1;
+	list_for_each_entry(blob, stream_list, write_streams_list) {
+		if (is_file_stream(blob)) {
+			blob->file_inode->num_remaining_streams = 0;
+			blob->may_send_done_with_file = 1;
 		} else {
-			lte->may_send_done_with_file = 0;
+			blob->may_send_done_with_file = 0;
 		}
 	}
 
-	list_for_each_entry(lte, stream_list, write_streams_list)
-		if (lte->may_send_done_with_file)
-			lte->file_inode->num_remaining_streams++;
+	list_for_each_entry(blob, stream_list, write_streams_list)
+		if (blob->may_send_done_with_file)
+			blob->file_inode->num_remaining_streams++;
 }
 
 /*
@@ -1417,7 +1417,7 @@ init_done_with_file_info(struct list_head *stream_list)
  *
  * @stream_list
  *	The list of streams to write, specified by a list of `struct
- *	wim_lookup_table_entry's linked by the 'write_streams_list' member.
+ *	blob's linked by the 'write_streams_list' member.
  *
  * @out_fd
  *	The file descriptor, opened for writing, to which to write the streams.
@@ -1473,7 +1473,7 @@ init_done_with_file_info(struct list_head *stream_list)
  * This function will write the streams in @stream_list to resources in
  * consecutive positions in the output WIM file, or to a single solid resource
  * if WRITE_RESOURCE_FLAG_SOLID was specified in @write_resource_flags.  In both
- * cases, the @out_reshdr of the `struct wim_lookup_table_entry' for each stream
+ * cases, the @out_reshdr of the `struct blob' for each stream
  * written will be updated to specify its location, size, and flags in the
  * output WIM.  In the solid resource case, WIM_RESHDR_FLAG_SOLID will be set in
  * the @flags field of each @out_reshdr, and furthermore @out_res_offset_in_wim
@@ -1575,7 +1575,7 @@ write_stream_list(struct list_head *stream_list,
 	 */
 
 	ret = sort_stream_list_by_sequential_order(stream_list,
-						   offsetof(struct wim_lookup_table_entry,
+						   offsetof(struct blob,
 							    write_streams_list));
 	if (ret)
 		return ret;
@@ -1677,7 +1677,7 @@ write_stream_list(struct list_head *stream_list,
 	};
 
 	ret = read_stream_list(stream_list,
-			       offsetof(struct wim_lookup_table_entry, write_streams_list),
+			       offsetof(struct blob, write_streams_list),
 			       &cbs,
 			       STREAM_LIST_ALREADY_SORTED |
 					VERIFY_STREAM_HASHES |
@@ -1692,7 +1692,7 @@ write_stream_list(struct list_head *stream_list,
 
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_SOLID) {
 		struct wim_reshdr reshdr;
-		struct wim_lookup_table_entry *lte;
+		struct blob *blob;
 		u64 offset_in_res;
 
 		ret = end_write_resource(&ctx, &reshdr);
@@ -1705,16 +1705,16 @@ write_stream_list(struct list_head *stream_list,
 		      reshdr.uncompressed_size);
 
 		offset_in_res = 0;
-		list_for_each_entry(lte, &ctx.solid_streams, write_streams_list) {
-			lte->out_reshdr.size_in_wim = lte->size;
-			lte->out_reshdr.flags = filter_resource_flags(lte->flags);
-			lte->out_reshdr.flags |= WIM_RESHDR_FLAG_SOLID;
-			lte->out_reshdr.uncompressed_size = 0;
-			lte->out_reshdr.offset_in_wim = offset_in_res;
-			lte->out_res_offset_in_wim = reshdr.offset_in_wim;
-			lte->out_res_size_in_wim = reshdr.size_in_wim;
-			lte->out_res_uncompressed_size = reshdr.uncompressed_size;
-			offset_in_res += lte->size;
+		list_for_each_entry(blob, &ctx.solid_streams, write_streams_list) {
+			blob->out_reshdr.size_in_wim = blob->size;
+			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
+			blob->out_reshdr.flags |= WIM_RESHDR_FLAG_SOLID;
+			blob->out_reshdr.uncompressed_size = 0;
+			blob->out_reshdr.offset_in_wim = offset_in_res;
+			blob->out_res_offset_in_wim = reshdr.offset_in_wim;
+			blob->out_res_size_in_wim = reshdr.size_in_wim;
+			blob->out_res_uncompressed_size = reshdr.uncompressed_size;
+			offset_in_res += blob->size;
 		}
 		wimlib_assert(offset_in_res == reshdr.uncompressed_size);
 	}
@@ -1734,9 +1734,9 @@ out_destroy_context:
 }
 
 static int
-is_stream_in_solid_resource(struct wim_lookup_table_entry *lte, void *_ignore)
+is_stream_in_solid_resource(struct blob *blob, void *_ignore)
 {
-	return lte_is_partial(lte);
+	return lte_is_partial(blob);
 }
 
 static bool
@@ -1790,15 +1790,15 @@ wim_write_stream_list(WIMStruct *wim,
 }
 
 static int
-write_wim_resource(struct wim_lookup_table_entry *lte,
+write_wim_resource(struct blob *blob,
 		   struct filedes *out_fd,
 		   int out_ctype,
 		   u32 out_chunk_size,
 		   int write_resource_flags)
 {
 	LIST_HEAD(stream_list);
-	list_add(&lte->write_streams_list, &stream_list);
-	lte->will_be_in_output_wim = 1;
+	list_add(&blob->write_streams_list, &stream_list);
+	blob->will_be_in_output_wim = 1;
 	return write_stream_list(&stream_list,
 				 out_fd,
 				 write_resource_flags & ~WRITE_RESOURCE_FLAG_SOLID,
@@ -1821,40 +1821,40 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 			       int write_resource_flags)
 {
 	int ret;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 
 	/* Set up a temporary lookup table entry to provide to
 	 * write_wim_resource().  */
 
-	lte = new_lookup_table_entry();
-	if (lte == NULL)
+	blob = new_lookup_table_entry();
+	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	lte->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
-	lte->attached_buffer    = (void*)buf;
-	lte->size               = buf_size;
-	lte->flags              = reshdr_flags;
+	blob->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
+	blob->attached_buffer    = (void*)buf;
+	blob->size               = buf_size;
+	blob->flags              = reshdr_flags;
 
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_PIPABLE) {
-		sha1_buffer(buf, buf_size, lte->hash);
-		lte->unhashed = 0;
+		sha1_buffer(buf, buf_size, blob->hash);
+		blob->unhashed = 0;
 	} else {
-		lte->unhashed = 1;
+		blob->unhashed = 1;
 	}
 
-	ret = write_wim_resource(lte, out_fd, out_ctype, out_chunk_size,
+	ret = write_wim_resource(blob, out_fd, out_ctype, out_chunk_size,
 				 write_resource_flags);
 	if (ret)
 		goto out_free_lte;
 
-	copy_reshdr(out_reshdr, &lte->out_reshdr);
+	copy_reshdr(out_reshdr, &blob->out_reshdr);
 
 	if (hash)
-		copy_hash(hash, lte->hash);
+		copy_hash(hash, blob->hash);
 	ret = 0;
 out_free_lte:
-	lte->resource_location = RESOURCE_NONEXISTENT;
-	free_lookup_table_entry(lte);
+	blob->resource_location = RESOURCE_NONEXISTENT;
+	free_lookup_table_entry(blob);
 	return ret;
 }
 
@@ -1882,24 +1882,24 @@ destroy_stream_size_table(struct stream_size_table *tab)
 }
 
 static int
-stream_size_table_insert(struct wim_lookup_table_entry *lte, void *_tab)
+stream_size_table_insert(struct blob *blob, void *_tab)
 {
 	struct stream_size_table *tab = _tab;
 	size_t pos;
-	struct wim_lookup_table_entry *same_size_lte;
+	struct blob *same_size_lte;
 	struct hlist_node *tmp;
 
-	pos = hash_u64(lte->size) % tab->capacity;
-	lte->unique_size = 1;
+	pos = hash_u64(blob->size) % tab->capacity;
+	blob->unique_size = 1;
 	hlist_for_each_entry(same_size_lte, tmp, &tab->array[pos], hash_list_2) {
-		if (same_size_lte->size == lte->size) {
-			lte->unique_size = 0;
+		if (same_size_lte->size == blob->size) {
+			blob->unique_size = 0;
 			same_size_lte->unique_size = 0;
 			break;
 		}
 	}
 
-	hlist_add_head(&lte->hash_list_2, &tab->array[pos]);
+	hlist_add_head(&blob->hash_list_2, &tab->array[pos]);
 	tab->num_entries++;
 	return 0;
 }
@@ -1912,24 +1912,24 @@ struct find_streams_ctx {
 };
 
 static void
-reference_stream_for_write(struct wim_lookup_table_entry *lte,
+reference_stream_for_write(struct blob *blob,
 			   struct list_head *stream_list, u32 nref)
 {
-	if (!lte->will_be_in_output_wim) {
-		lte->out_refcnt = 0;
-		list_add_tail(&lte->write_streams_list, stream_list);
-		lte->will_be_in_output_wim = 1;
+	if (!blob->will_be_in_output_wim) {
+		blob->out_refcnt = 0;
+		list_add_tail(&blob->write_streams_list, stream_list);
+		blob->will_be_in_output_wim = 1;
 	}
-	lte->out_refcnt += nref;
+	blob->out_refcnt += nref;
 }
 
 static int
-fully_reference_stream_for_write(struct wim_lookup_table_entry *lte,
+fully_reference_stream_for_write(struct blob *blob,
 				 void *_stream_list)
 {
 	struct list_head *stream_list = _stream_list;
-	lte->will_be_in_output_wim = 0;
-	reference_stream_for_write(lte, stream_list, lte->refcnt);
+	blob->will_be_in_output_wim = 0;
+	reference_stream_for_write(blob, stream_list, blob->refcnt);
 	return 0;
 }
 
@@ -1938,15 +1938,15 @@ inode_find_streams_to_reference(const struct wim_inode *inode,
 				const struct wim_lookup_table *table,
 				struct list_head *stream_list)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	unsigned i;
 
 	wimlib_assert(inode->i_nlink > 0);
 
 	for (i = 0; i <= inode->i_num_ads; i++) {
-		lte = inode_stream_lte(inode, i, table);
-		if (lte)
-			reference_stream_for_write(lte, stream_list,
+		blob = inode_stream_lte(inode, i, table);
+		if (blob)
+			reference_stream_for_write(blob, stream_list,
 						   inode->i_nlink);
 		else if (!is_zero_hash(inode_stream_hash(inode, i)))
 			return WIMLIB_ERR_RESOURCE_NOT_FOUND;
@@ -1955,9 +1955,9 @@ inode_find_streams_to_reference(const struct wim_inode *inode,
 }
 
 static int
-do_stream_set_not_in_output_wim(struct wim_lookup_table_entry *lte, void *_ignore)
+do_stream_set_not_in_output_wim(struct blob *blob, void *_ignore)
 {
-	lte->will_be_in_output_wim = 0;
+	blob->will_be_in_output_wim = 0;
 	return 0;
 }
 
@@ -1966,14 +1966,14 @@ image_find_streams_to_reference(WIMStruct *wim)
 {
 	struct wim_image_metadata *imd;
 	struct wim_inode *inode;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	struct list_head *stream_list;
 	int ret;
 
 	imd = wim_get_current_image_metadata(wim);
 
-	image_for_each_unhashed_stream(lte, imd)
-		lte->will_be_in_output_wim = 0;
+	image_for_each_unhashed_stream(blob, imd)
+		blob->will_be_in_output_wim = 0;
 
 	stream_list = wim->private;
 	image_for_each_inode(inode, imd) {
@@ -2001,7 +2001,7 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 	{
 		/* Fast case:  Assume that all streams are being written and
 		 * that the reference counts are correct.  */
-		struct wim_lookup_table_entry *lte;
+		struct blob *blob;
 		struct wim_image_metadata *imd;
 		unsigned i;
 
@@ -2011,8 +2011,8 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 
 		for (i = 0; i < wim->hdr.image_count; i++) {
 			imd = wim->image_metadata[i];
-			image_for_each_unhashed_stream(lte, imd)
-				fully_reference_stream_for_write(lte, stream_list_ret);
+			image_for_each_unhashed_stream(blob, imd)
+				fully_reference_stream_for_write(blob, stream_list_ret);
 		}
 	} else {
 		/* Slow case:  Walk through the images being written and
@@ -2034,13 +2034,13 @@ struct insert_other_if_hard_filtered_ctx {
 };
 
 static int
-insert_other_if_hard_filtered(struct wim_lookup_table_entry *lte, void *_ctx)
+insert_other_if_hard_filtered(struct blob *blob, void *_ctx)
 {
 	struct insert_other_if_hard_filtered_ctx *ctx = _ctx;
 
-	if (!lte->will_be_in_output_wim &&
-	    stream_hard_filtered(lte, ctx->filter_ctx))
-		stream_size_table_insert(lte, ctx->tab);
+	if (!blob->will_be_in_output_wim &&
+	    stream_hard_filtered(blob, ctx->filter_ctx))
+		stream_size_table_insert(blob, ctx->tab);
 	return 0;
 }
 
@@ -2051,7 +2051,7 @@ determine_stream_size_uniquity(struct list_head *stream_list,
 {
 	int ret;
 	struct stream_size_table tab;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 
 	ret = init_stream_size_table(&tab, 9001);
 	if (ret)
@@ -2065,8 +2065,8 @@ determine_stream_size_uniquity(struct list_head *stream_list,
 		for_lookup_table_entry(lt, insert_other_if_hard_filtered, &ctx);
 	}
 
-	list_for_each_entry(lte, stream_list, write_streams_list)
-		stream_size_table_insert(lte, &tab);
+	list_for_each_entry(blob, stream_list, write_streams_list)
+		stream_size_table_insert(blob, &tab);
 
 	destroy_stream_size_table(&tab);
 	return 0;
@@ -2076,12 +2076,12 @@ static void
 filter_stream_list_for_write(struct list_head *stream_list,
 			     struct filter_context *filter_ctx)
 {
-	struct wim_lookup_table_entry *lte, *tmp;
+	struct blob *blob, *tmp;
 
-	list_for_each_entry_safe(lte, tmp,
+	list_for_each_entry_safe(blob, tmp,
 				 stream_list, write_streams_list)
 	{
-		int status = stream_filtered(lte, filter_ctx);
+		int status = stream_filtered(blob, filter_ctx);
 
 		if (status == 0) {
 			/* Not filtered.  */
@@ -2091,10 +2091,10 @@ filter_stream_list_for_write(struct list_head *stream_list,
 				/* Soft filtered.  */
 			} else {
 				/* Hard filtered.  */
-				lte->will_be_in_output_wim = 0;
-				list_del(&lte->lookup_table_list);
+				blob->will_be_in_output_wim = 0;
+				list_del(&blob->lookup_table_list);
 			}
-			list_del(&lte->write_streams_list);
+			list_del(&blob->write_streams_list);
 		}
 	}
 }
@@ -2174,7 +2174,7 @@ prepare_stream_list_for_write(WIMStruct *wim, int image,
 			      struct filter_context *filter_ctx_ret)
 {
 	int ret;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 
 	filter_ctx_ret->write_flags = write_flags;
 	filter_ctx_ret->wim = wim;
@@ -2188,8 +2188,8 @@ prepare_stream_list_for_write(WIMStruct *wim, int image,
 		return ret;
 
 	INIT_LIST_HEAD(lookup_table_list_ret);
-	list_for_each_entry(lte, stream_list_ret, write_streams_list)
-		list_add_tail(&lte->lookup_table_list, lookup_table_list_ret);
+	list_for_each_entry(blob, stream_list_ret, write_streams_list)
+		list_add_tail(&blob->lookup_table_list, lookup_table_list_ret);
 
 	ret = determine_stream_size_uniquity(stream_list_ret, wim->lookup_table,
 					     filter_ctx_ret);
@@ -2211,7 +2211,7 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 	int ret;
 	struct list_head _stream_list;
 	struct list_head *stream_list;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	struct filter_context _filter_ctx;
 	struct filter_context *filter_ctx;
 
@@ -2233,11 +2233,11 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 		stream_list = stream_list_override;
 		filter_ctx = NULL;
 		INIT_LIST_HEAD(lookup_table_list_ret);
-		list_for_each_entry(lte, stream_list, write_streams_list) {
-			lte->out_refcnt = lte->refcnt;
-			lte->will_be_in_output_wim = 1;
-			lte->unique_size = 0;
-			list_add_tail(&lte->lookup_table_list, lookup_table_list_ret);
+		list_for_each_entry(blob, stream_list, write_streams_list) {
+			blob->out_refcnt = blob->refcnt;
+			blob->will_be_in_output_wim = 1;
+			blob->unique_size = 0;
+			list_add_tail(&blob->lookup_table_list, lookup_table_list_ret);
 		}
 	}
 
@@ -2297,12 +2297,12 @@ write_wim_metadata_resources(WIMStruct *wim, int image, int write_flags)
 		} else if (write_flags & WIMLIB_WRITE_FLAG_OVERWRITE) {
 			DEBUG("Image %u was not modified; re-using existing "
 			      "metadata resource.", i);
-			stream_set_out_reshdr_for_reuse(imd->metadata_lte);
+			stream_set_out_reshdr_for_reuse(imd->metadata_blob);
 			ret = 0;
 		} else {
 			DEBUG("Image %u was not modified; copying existing "
 			      "metadata resource.", i);
-			ret = write_wim_resource(imd->metadata_lte,
+			ret = write_wim_resource(imd->metadata_blob,
 						 &wim->out_fd,
 						 wim->out_compression_type,
 						 wim->out_chunk_size,
@@ -2350,10 +2350,10 @@ close_wim_writable(WIMStruct *wim, int write_flags)
 static int
 cmp_streams_by_out_rspec(const void *p1, const void *p2)
 {
-	const struct wim_lookup_table_entry *lte1, *lte2;
+	const struct blob *lte1, *lte2;
 
-	lte1 = *(const struct wim_lookup_table_entry**)p1;
-	lte2 = *(const struct wim_lookup_table_entry**)p2;
+	lte1 = *(const struct blob**)p1;
+	lte2 = *(const struct blob**)p2;
 
 	if (lte1->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
 		if (lte2->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
@@ -2380,19 +2380,19 @@ write_wim_lookup_table(WIMStruct *wim, int image, int write_flags,
 
 	/* Set output resource metadata for streams already present in WIM.  */
 	if (write_flags & WIMLIB_WRITE_FLAG_OVERWRITE) {
-		struct wim_lookup_table_entry *lte;
-		list_for_each_entry(lte, lookup_table_list, lookup_table_list)
+		struct blob *blob;
+		list_for_each_entry(blob, lookup_table_list, lookup_table_list)
 		{
-			if (lte->resource_location == RESOURCE_IN_WIM &&
-			    lte->rspec->wim == wim)
+			if (blob->resource_location == RESOURCE_IN_WIM &&
+			    blob->rspec->wim == wim)
 			{
-				stream_set_out_reshdr_for_reuse(lte);
+				stream_set_out_reshdr_for_reuse(blob);
 			}
 		}
 	}
 
 	ret = sort_stream_list(lookup_table_list,
-			       offsetof(struct wim_lookup_table_entry, lookup_table_list),
+			       offsetof(struct blob, lookup_table_list),
 			       cmp_streams_by_out_rspec);
 	if (ret)
 		return ret;
@@ -2414,12 +2414,12 @@ write_wim_lookup_table(WIMStruct *wim, int image, int write_flags,
 		 * the list in reverse order, so that they're written in order.
 		 */
 		for (int i = end_image; i >= start_image; i--) {
-			struct wim_lookup_table_entry *metadata_lte;
+			struct blob *metadata_blob;
 
-			metadata_lte = wim->image_metadata[i - 1]->metadata_lte;
-			wimlib_assert(metadata_lte->out_reshdr.flags & WIM_RESHDR_FLAG_METADATA);
-			metadata_lte->out_refcnt = 1;
-			list_add(&metadata_lte->lookup_table_list, lookup_table_list);
+			metadata_blob = wim->image_metadata[i - 1]->metadata_blob;
+			wimlib_assert(metadata_blob->out_reshdr.flags & WIM_RESHDR_FLAG_METADATA);
+			metadata_blob->out_refcnt = 1;
+			list_add(&metadata_blob->lookup_table_list, lookup_table_list);
 		}
 	}
 
@@ -2501,7 +2501,7 @@ finish_write(WIMStruct *wim, int image, int write_flags,
 	} else {
 		copy_reshdr(&wim->hdr.boot_metadata_reshdr,
 			    &wim->image_metadata[
-				wim->hdr.boot_idx - 1]->metadata_lte->out_reshdr);
+				wim->hdr.boot_idx - 1]->metadata_blob->out_reshdr);
 	}
 
 	/* If overwriting the WIM file containing an integrity table in-place,
@@ -2672,7 +2672,7 @@ unlock_wim_for_append(WIMStruct *wim)
  * - The format of resources, or streams, has been modified to allow them to be
  *   used before the "lookup table" has been read.  Each stream is prefixed with
  *   a `struct pwm_stream_hdr' that is basically an abbreviated form of `struct
- *   wim_lookup_table_entry_disk' that only contains the SHA1 message digest,
+ *   blob_disk' that only contains the SHA1 message digest,
  *   uncompressed stream size, and flags that indicate whether the stream is
  *   compressed.  The data of uncompressed streams then follows literally, while
  *   the data of compressed streams follows in a modified format.  Compressed
@@ -3097,13 +3097,13 @@ any_images_modified(WIMStruct *wim)
 }
 
 static int
-check_resource_offset(struct wim_lookup_table_entry *lte, void *_wim)
+check_resource_offset(struct blob *blob, void *_wim)
 {
 	const WIMStruct *wim = _wim;
 	off_t end_offset = *(const off_t*)wim->private;
 
-	if (lte->resource_location == RESOURCE_IN_WIM && lte->rspec->wim == wim &&
-	    lte->rspec->offset_in_wim + lte->rspec->size_in_wim > end_offset)
+	if (blob->resource_location == RESOURCE_IN_WIM && blob->rspec->wim == wim &&
+	    blob->rspec->offset_in_wim + blob->rspec->size_in_wim > end_offset)
 		return WIMLIB_ERR_RESOURCE_ORDER;
 	return 0;
 }
@@ -3123,7 +3123,7 @@ check_resource_offsets(WIMStruct *wim, off_t end_offset)
 		return ret;
 
 	for (i = 0; i < wim->hdr.image_count; i++) {
-		ret = check_resource_offset(wim->image_metadata[i]->metadata_lte, wim);
+		ret = check_resource_offset(wim->image_metadata[i]->metadata_blob, wim);
 		if (ret)
 			return ret;
 	}

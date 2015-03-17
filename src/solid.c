@@ -64,10 +64,10 @@ get_extension(const utf16lechar *name, size_t nbytes)
 static int
 cmp_streams_by_solid_sort_name(const void *p1, const void *p2)
 {
-	const struct wim_lookup_table_entry *lte1, *lte2;
+	const struct blob *lte1, *lte2;
 
-	lte1 = *(const struct wim_lookup_table_entry **)p1;
-	lte2 = *(const struct wim_lookup_table_entry **)p2;
+	lte1 = *(const struct blob **)p1;
+	lte2 = *(const struct blob **)p2;
 
 	if (lte1->solid_sort_name) {
 		if (!lte2->solid_sort_name)
@@ -105,14 +105,14 @@ cmp_streams_by_solid_sort_name(const void *p1, const void *p2)
 }
 
 static void
-lte_set_solid_sort_name_from_inode(struct wim_lookup_table_entry *lte,
+lte_set_solid_sort_name_from_inode(struct blob *blob,
 				   const struct wim_inode *inode)
 {
 	const struct wim_dentry *dentry;
 	const utf16lechar *best_name = NULL;
 	size_t best_name_nbytes = SIZE_MAX;
 
-	if (lte->solid_sort_name) /* Sort name already set?  */
+	if (blob->solid_sort_name) /* Sort name already set?  */
 		return;
 
 	/* If this file has multiple names, choose the shortest one.  */
@@ -122,8 +122,8 @@ lte_set_solid_sort_name_from_inode(struct wim_lookup_table_entry *lte,
 			best_name_nbytes = dentry->file_name_nbytes;
 		}
 	}
-	lte->solid_sort_name = utf16le_dupz(best_name, best_name_nbytes);
-	lte->solid_sort_name_nbytes = best_name_nbytes;
+	blob->solid_sort_name = utf16le_dupz(best_name, best_name_nbytes);
+	blob->solid_sort_name_nbytes = best_name_nbytes;
 }
 
 struct temp_lookup_table {
@@ -139,14 +139,14 @@ dentry_fill_in_solid_sort_names(struct wim_dentry *dentry, void *_lookup_table)
 	const u8 *hash;
 	struct hlist_head *head;
 	struct hlist_node *cur;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 
 	hash = inode_unnamed_stream_hash(inode);
 	head = &lookup_table->table[load_size_t_unaligned(hash) %
 				    lookup_table->capacity];
-	hlist_for_each_entry(lte, cur, head, hash_list_2) {
-		if (hashes_equal(hash, lte->hash)) {
-			lte_set_solid_sort_name_from_inode(lte, inode);
+	hlist_for_each_entry(blob, cur, head, hash_list_2) {
+		if (hashes_equal(hash, blob->hash)) {
+			lte_set_solid_sort_name_from_inode(blob, inode);
 			break;
 		}
 	}
@@ -168,11 +168,11 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 	struct temp_lookup_table lookup_table;
 	WIMStruct *wims[128];
 	int num_wims = 0;
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	int ret;
 
 	/* Count the number of streams to be written.  */
-	list_for_each_entry(lte, stream_list, write_streams_list)
+	list_for_each_entry(blob, stream_list, write_streams_list)
 		num_streams++;
 
 	/* Allocate a temporary hash table for mapping stream hash => stream  */
@@ -188,29 +188,29 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 	 * - If it's in non-solid WIM resource, then save the WIMStruct.
 	 * - If it's in a file on disk, then set its sort name from that.
 	 */
-	list_for_each_entry(lte, stream_list, write_streams_list) {
-		lte->solid_sort_name = NULL;
-		lte->solid_sort_name_nbytes = 0;
-		switch (lte->resource_location) {
+	list_for_each_entry(blob, stream_list, write_streams_list) {
+		blob->solid_sort_name = NULL;
+		blob->solid_sort_name_nbytes = 0;
+		switch (blob->resource_location) {
 		case RESOURCE_IN_WIM:
-			if (lte->size != lte->rspec->uncompressed_size)
+			if (blob->size != blob->rspec->uncompressed_size)
 				continue;
 			for (int i = 0; i < num_wims; i++)
-				if (lte->rspec->wim == wims[i])
+				if (blob->rspec->wim == wims[i])
 					goto found_wim;
 			if (num_wims >= ARRAY_LEN(wims))
 				continue;
-			wims[num_wims++] = lte->rspec->wim;
+			wims[num_wims++] = blob->rspec->wim;
 		found_wim:
-			hlist_add_head(&lte->hash_list_2,
-				       &lookup_table.table[load_size_t_unaligned(lte->hash) %
+			hlist_add_head(&blob->hash_list_2,
+				       &lookup_table.table[load_size_t_unaligned(blob->hash) %
 							   lookup_table.capacity]);
 			break;
 		case RESOURCE_IN_FILE_ON_DISK:
 	#ifdef __WIN32__
 		case RESOURCE_IN_WINNT_FILE_ON_DISK:
 	#endif
-			lte_set_solid_sort_name_from_inode(lte, lte->file_inode);
+			lte_set_solid_sort_name_from_inode(blob, blob->file_inode);
 			break;
 		default:
 			break;
@@ -232,13 +232,13 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 	}
 
 	ret = sort_stream_list(stream_list,
-			       offsetof(struct wim_lookup_table_entry,
+			       offsetof(struct blob,
 					write_streams_list),
 			       cmp_streams_by_solid_sort_name);
 
 out:
-	list_for_each_entry(lte, stream_list, write_streams_list)
-		FREE(lte->solid_sort_name);
+	list_for_each_entry(blob, stream_list, write_streams_list)
+		FREE(blob->solid_sort_name);
 	FREE(lookup_table.table);
 	return ret;
 }

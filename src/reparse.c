@@ -165,9 +165,9 @@ int
 wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 			   u8 * restrict rpbuf,
 			   u16 * restrict rpbuflen_ret,
-			   struct wim_lookup_table_entry *lte_override)
+			   struct blob *lte_override)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	int ret;
 	struct reparse_buffer_disk *rpbuf_disk;
 	u16 rpdatalen;
@@ -175,23 +175,23 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 
 	if (!lte_override) {
-		lte = inode_unnamed_lte_resolved(inode);
-		if (!lte) {
+		blob = inode_unnamed_lte_resolved(inode);
+		if (!blob) {
 			ERROR("Reparse point has no reparse data!");
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
 		}
 	} else {
-		lte = lte_override;
+		blob = lte_override;
 	}
 
-	if (lte->size > REPARSE_POINT_MAX_SIZE - 8) {
+	if (blob->size > REPARSE_POINT_MAX_SIZE - 8) {
 		ERROR("Reparse data is too long!");
 		return WIMLIB_ERR_INVALID_REPARSE_DATA;
 	}
-	rpdatalen = lte->size;
+	rpdatalen = blob->size;
 
 	/* Read the data from the WIM file */
-	ret = read_full_stream_into_buf(lte, rpbuf + 8);
+	ret = read_full_stream_into_buf(blob, rpbuf + 8);
 	if (ret)
 		return ret;
 
@@ -332,7 +332,7 @@ parse_substitute_name(const utf16lechar *substitute_name,
 ssize_t
 wim_inode_readlink(const struct wim_inode * restrict inode,
 		   char * restrict buf, size_t bufsize,
-		   struct wim_lookup_table_entry *lte_override)
+		   struct blob *lte_override)
 {
 	int ret;
 	struct reparse_buffer_disk rpbuf_disk _aligned_attribute(8);

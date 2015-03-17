@@ -75,7 +75,7 @@ struct stream_owner {
  * message digest of a stream and the location of the stream data in the WIM
  * file (size, location, flags).  The in-memory lookup table is a map from SHA1
  * message digests to stream locations.  */
-struct wim_lookup_table_entry {
+struct blob {
 
 	/* List node for a hash bucket of the lookup table.  */
 	struct hlist_node hash_list;
@@ -124,7 +124,7 @@ struct wim_lookup_table_entry {
 
 		/* Unhashed entries only (unhashed == 1): these variables make
 		 * it possible to find the pointer to this 'struct
-		 * wim_lookup_table_entry' contained in either 'struct
+		 * blob' contained in either 'struct
 		 * wim_ads_entry' or 'struct wim_inode'.  There can be at most 1
 		 * such pointer, as we can only join duplicate streams after
 		 * they have been hashed.  */
@@ -284,48 +284,48 @@ write_wim_lookup_table_from_stream_list(struct list_head *stream_list,
 
 /* Functions to create, clone, print, and free lookup table entries  */
 
-extern struct wim_lookup_table_entry *
+extern struct blob *
 new_lookup_table_entry(void) _malloc_attribute;
 
-extern struct wim_lookup_table_entry *
-clone_lookup_table_entry(const struct wim_lookup_table_entry *lte)
+extern struct blob *
+clone_lookup_table_entry(const struct blob *blob)
 			_malloc_attribute;
 
 extern void
-lte_decrement_refcnt(struct wim_lookup_table_entry *lte,
+lte_decrement_refcnt(struct blob *blob,
 		     struct wim_lookup_table *table);
 #ifdef WITH_FUSE
 extern void
-lte_decrement_num_opened_fds(struct wim_lookup_table_entry *lte);
+lte_decrement_num_opened_fds(struct blob *blob);
 #endif
 
 extern void
-free_lookup_table_entry(struct wim_lookup_table_entry *lte);
+free_lookup_table_entry(struct blob *blob);
 
 /* Functions to insert and delete entries from a lookup table  */
 
 extern void
 lookup_table_insert(struct wim_lookup_table *table,
-		struct wim_lookup_table_entry *lte);
+		struct blob *blob);
 
 extern void
 lookup_table_unlink(struct wim_lookup_table *table,
-		    struct wim_lookup_table_entry *lte);
+		    struct blob *blob);
 
 /* Function to lookup a stream by SHA1 message digest  */
-extern struct wim_lookup_table_entry *
+extern struct blob *
 lookup_stream(const struct wim_lookup_table *table, const u8 hash[]);
 
 /* Functions to iterate through the entries of a lookup table  */
 
 extern int
 for_lookup_table_entry(struct wim_lookup_table *table,
-		       int (*visitor)(struct wim_lookup_table_entry *, void *),
+		       int (*visitor)(struct blob *, void *),
 		       void *arg);
 
 extern int
 for_lookup_table_entry_pos_sorted(struct wim_lookup_table *table,
-				  int (*visitor)(struct wim_lookup_table_entry *,
+				  int (*visitor)(struct blob *,
 						 void *),
 				  void *arg);
 
@@ -336,7 +336,7 @@ for_lookup_table_entry_pos_sorted(struct wim_lookup_table *table,
 struct wimlib_resource_entry;
 
 extern void
-lte_to_wimlib_resource_entry(const struct wim_lookup_table_entry *lte,
+lte_to_wimlib_resource_entry(const struct blob *blob,
 			     struct wimlib_resource_entry *wentry);
 
 /* Functions to sort a list of lookup table entries  */
@@ -355,17 +355,17 @@ cmp_streams_by_sequential_order(const void *p1, const void *p2);
 /* Utility functions  */
 
 extern int
-lte_zero_out_refcnt(struct wim_lookup_table_entry *lte, void *ignore);
+lte_zero_out_refcnt(struct blob *blob, void *ignore);
 
 static inline bool
-lte_is_partial(const struct wim_lookup_table_entry * lte)
+lte_is_partial(const struct blob * blob)
 {
-	return lte->resource_location == RESOURCE_IN_WIM &&
-	       lte->size != lte->rspec->uncompressed_size;
+	return blob->resource_location == RESOURCE_IN_WIM &&
+	       blob->size != blob->rspec->uncompressed_size;
 }
 
 static inline const struct stream_owner *
-stream_owners(struct wim_lookup_table_entry *stream)
+stream_owners(struct blob *stream)
 {
 	if (stream->out_refcnt <= ARRAY_LEN(stream->inline_stream_owners))
 		return stream->inline_stream_owners;
@@ -374,46 +374,46 @@ stream_owners(struct wim_lookup_table_entry *stream)
 }
 
 static inline void
-lte_bind_wim_resource_spec(struct wim_lookup_table_entry *lte,
+lte_bind_wim_resource_spec(struct blob *blob,
 			   struct wim_resource_spec *rspec)
 {
-	lte->resource_location = RESOURCE_IN_WIM;
-	lte->rspec = rspec;
-	list_add_tail(&lte->rspec_node, &rspec->stream_list);
+	blob->resource_location = RESOURCE_IN_WIM;
+	blob->rspec = rspec;
+	list_add_tail(&blob->rspec_node, &rspec->stream_list);
 }
 
 static inline void
-lte_unbind_wim_resource_spec(struct wim_lookup_table_entry *lte)
+lte_unbind_wim_resource_spec(struct blob *blob)
 {
-	list_del(&lte->rspec_node);
-	lte->resource_location = RESOURCE_NONEXISTENT;
+	list_del(&blob->rspec_node);
+	blob->resource_location = RESOURCE_NONEXISTENT;
 }
 
 extern void
-lte_put_resource(struct wim_lookup_table_entry *lte);
+lte_put_resource(struct blob *blob);
 
-extern struct wim_lookup_table_entry *
+extern struct blob *
 new_stream_from_data_buffer(const void *buffer, size_t size,
 			    struct wim_lookup_table *lookup_table);
 
 static inline void
-add_unhashed_stream(struct wim_lookup_table_entry *lte,
+add_unhashed_stream(struct blob *blob,
 		    struct wim_inode *back_inode,
 		    u32 back_stream_id,
 		    struct list_head *unhashed_streams)
 {
-	lte->unhashed = 1;
-	lte->back_inode = back_inode;
-	lte->back_stream_id = back_stream_id;
-	list_add_tail(&lte->unhashed_list, unhashed_streams);
+	blob->unhashed = 1;
+	blob->back_inode = back_inode;
+	blob->back_stream_id = back_stream_id;
+	list_add_tail(&blob->unhashed_list, unhashed_streams);
 }
 
 extern int
-hash_unhashed_stream(struct wim_lookup_table_entry *lte,
+hash_unhashed_stream(struct blob *blob,
 		     struct wim_lookup_table *lookup_table,
-		     struct wim_lookup_table_entry **lte_ret);
+		     struct blob **lte_ret);
 
-extern struct wim_lookup_table_entry **
-retrieve_lte_pointer(struct wim_lookup_table_entry *lte);
+extern struct blob **
+retrieve_lte_pointer(struct blob *blob);
 
 #endif /* _WIMLIB_LOOKUP_TABLE_H */

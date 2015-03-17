@@ -103,7 +103,7 @@ static int
 unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		       struct list_head *unhashed_streams)
 {
-	struct wim_lookup_table_entry *lte;
+	struct blob *blob;
 	char *file_on_disk;
 
 	inode->i_attributes = FILE_ATTRIBUTE_NORMAL;
@@ -115,17 +115,17 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 	file_on_disk = STRDUP(path);
 	if (!file_on_disk)
 		return WIMLIB_ERR_NOMEM;
-	lte = new_lookup_table_entry();
-	if (!lte) {
+	blob = new_lookup_table_entry();
+	if (!blob) {
 		FREE(file_on_disk);
 		return WIMLIB_ERR_NOMEM;
 	}
-	lte->file_on_disk = file_on_disk;
-	lte->file_inode = inode;
-	lte->resource_location = RESOURCE_IN_FILE_ON_DISK;
-	lte->size = size;
-	add_unhashed_stream(lte, inode, 0, unhashed_streams);
-	inode->i_lte = lte;
+	blob->file_on_disk = file_on_disk;
+	blob->file_inode = inode;
+	blob->resource_location = RESOURCE_IN_FILE_ON_DISK;
+	blob->size = size;
+	add_unhashed_stream(blob, inode, 0, unhashed_streams);
+	inode->i_lte = blob;
 	return 0;
 }
 

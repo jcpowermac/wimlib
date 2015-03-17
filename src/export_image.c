@@ -31,22 +31,22 @@
 #include "wimlib/xml.h"
 
 static int
-lte_set_not_exported(struct wim_lookup_table_entry *lte, void *_ignore)
+lte_set_not_exported(struct blob *blob, void *_ignore)
 {
-	lte->out_refcnt = 0;
-	lte->was_exported = 0;
+	blob->out_refcnt = 0;
+	blob->was_exported = 0;
 	return 0;
 }
 
 static int
-lte_rollback_export(struct wim_lookup_table_entry *lte, void *_lookup_table)
+lte_rollback_export(struct blob *blob, void *_lookup_table)
 {
 	struct wim_lookup_table *lookup_table = _lookup_table;
 
-	lte->refcnt -= lte->out_refcnt;
-	if (lte->was_exported) {
-		lookup_table_unlink(lookup_table, lte);
-		free_lookup_table_entry(lte);
+	blob->refcnt -= blob->out_refcnt;
+	if (blob->was_exported) {
+		lookup_table_unlink(lookup_table, blob);
+		free_lookup_table_entry(blob);
 	}
 	return 0;
 }
@@ -59,7 +59,7 @@ inode_export_streams(struct wim_inode *inode,
 {
 	unsigned i;
 	const u8 *hash;
-	struct wim_lookup_table_entry *src_lte, *dest_lte;
+	struct blob *src_lte, *dest_lte;
 
 	inode_unresolve_attributes(inode);
 	for (i = 0; i < inode->i_num_attrs; i++) {
