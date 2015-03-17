@@ -68,7 +68,7 @@ struct apply_ctx {
 	u64 next_progress;
 	unsigned long invalid_sequence;
 	unsigned long num_streams_remaining;
-	struct list_head stream_list;
+	struct list_head blob_list;
 	const struct read_blob_list_callbacks *saved_cbs;
 	struct blob *cur_stream;
 	u64 cur_stream_offset;

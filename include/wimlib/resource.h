@@ -6,15 +6,15 @@
 #include "wimlib/sha1.h"
 #include "wimlib/types.h"
 
-struct filedes;
 struct blob;
+struct filedes;
 struct wim_image_metadata;
 
 /*
  * Specification of a resource in a WIM file.
  *
- * If a `struct blob' blob has (blob->resource_location ==
- * RESOURCE_IN_WIM), then blob->rspec points to an instance of this structure.
+ * If a `struct blob' blob has (blob->resource_location == RESOURCE_IN_WIM),
+ * then blob->rspec points to an instance of this structure.
  *
  * Normally, there is a one-to-one correspondence between "blobs" (each of which
  * may be the contents of a file, for example) and resources.  However, a
@@ -270,31 +270,25 @@ struct read_blob_list_callbacks {
 #define BLOB_LIST_ALREADY_SORTED	0x4
 
 extern int
-read_blob_list(struct list_head *stream_list,
-		 size_t list_head_offset,
-		 const struct read_blob_list_callbacks *cbs,
-		 int flags);
+read_blob_list(struct list_head *blob_list, size_t list_head_offset,
+	       const struct read_blob_list_callbacks *cbs, int flags);
 
-/* Functions to extract streams.  */
+/* Functions to extract blobs.  */
 
 extern int
-extract_blob(struct blob *blob,
-	       u64 size,
-	       consume_data_callback_t extract_chunk,
-	       void *extract_chunk_arg);
+extract_blob(struct blob *blob, u64 size,
+	     consume_data_callback_t extract_chunk, void *extract_chunk_arg);
 
 extern int
-extract_blob_to_fd(struct blob *blob,
-		     struct filedes *fd, u64 size);
+extract_blob_to_fd(struct blob *blob, struct filedes *fd, u64 size);
 
 extern int
-extract_full_stream_to_fd(struct blob *blob,
-			  struct filedes *fd);
+extract_full_blob_to_fd(struct blob *blob, struct filedes *fd);
 
-/* Miscellaneous stream functions.  */
+/* Miscellaneous blob functions.  */
 
 extern int
-sha1_stream(struct blob *blob);
+sha1_blob(struct blob *blob);
 
 /* Functions to read/write metadata resources.  */
 
@@ -306,12 +300,12 @@ write_metadata_resource(WIMStruct *wim, int image, int write_resource_flags);
 
 /* Definitions specific to pipable WIM resources.  */
 
-/* Arbitrary number to begin each stream in the pipable WIM, used for sanity
+/* Arbitrary number to begin each blob in the pipable WIM, used for sanity
  * checking.  */
-#define PWM_STREAM_MAGIC 0x2b9b9ba2443db9d8ULL
+#define PWM_BLOB_MAGIC 0x2b9b9ba2443db9d8ULL
 
 /* Header that precedes each resource in a pipable WIM.  */
-struct pwm_stream_hdr {
+struct pwm_blob_hdr {
 	le64 magic;			/* +0   */
 	le64 uncompressed_size;		/* +8   */
 	u8 hash[SHA1_HASH_SIZE];	/* +16  */

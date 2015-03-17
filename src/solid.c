@@ -162,7 +162,7 @@ image_fill_in_solid_sort_names(WIMStruct *wim)
 }
 
 int
-sort_blob_list_for_solid_compression(struct list_head *stream_list)
+sort_blob_list_for_solid_compression(struct list_head *blob_list)
 {
 	size_t num_streams = 0;
 	struct temp_blob_table blob_table;
@@ -172,7 +172,7 @@ sort_blob_list_for_solid_compression(struct list_head *stream_list)
 	int ret;
 
 	/* Count the number of streams to be written.  */
-	list_for_each_entry(blob, stream_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_streams_list)
 		num_streams++;
 
 	/* Allocate a temporary hash table for mapping stream hash => stream  */
@@ -188,7 +188,7 @@ sort_blob_list_for_solid_compression(struct list_head *stream_list)
 	 * - If it's in non-solid WIM resource, then save the WIMStruct.
 	 * - If it's in a file on disk, then set its sort name from that.
 	 */
-	list_for_each_entry(blob, stream_list, write_streams_list) {
+	list_for_each_entry(blob, blob_list, write_streams_list) {
 		blob->solid_sort_name = NULL;
 		blob->solid_sort_name_nbytes = 0;
 		switch (blob->resource_location) {
@@ -231,13 +231,13 @@ sort_blob_list_for_solid_compression(struct list_head *stream_list)
 		deselect_current_wim_image(wims[i]);
 	}
 
-	ret = sort_blob_list(stream_list,
+	ret = sort_blob_list(blob_list,
 			       offsetof(struct blob,
 					write_streams_list),
 			       cmp_streams_by_solid_sort_name);
 
 out:
-	list_for_each_entry(blob, stream_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_streams_list)
 		FREE(blob->solid_sort_name);
 	FREE(blob_table.table);
 	return ret;

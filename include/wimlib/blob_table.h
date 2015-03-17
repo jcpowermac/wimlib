@@ -353,15 +353,15 @@ blob_owners(struct blob *blob)
 }
 
 static inline void
-lte_bind_wim_resource_spec(struct blob *blob, struct wim_resource_spec *rspec)
+blob_bind_wim_resource_spec(struct blob *blob, struct wim_resource_spec *rspec)
 {
 	blob->resource_location = RESOURCE_IN_WIM;
 	blob->rspec = rspec;
-	list_add_tail(&blob->rspec_node, &rspec->stream_list);
+	list_add_tail(&blob->rspec_node, &rspec->blob_list);
 }
 
 static inline void
-lte_unbind_wim_resource_spec(struct blob *blob)
+blob_unbind_wim_resource_spec(struct blob *blob)
 {
 	list_del(&blob->rspec_node);
 	blob->resource_location = RESOURCE_NONEXISTENT;

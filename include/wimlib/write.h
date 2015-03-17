@@ -60,7 +60,7 @@ write_wim_part(WIMStruct *wim,
 	       unsigned num_threads,
 	       unsigned part_number,
 	       unsigned total_parts,
-	       struct list_head *stream_list_override,
+	       struct list_head *blob_list_override,
 	       const u8 *guid);
 
 int

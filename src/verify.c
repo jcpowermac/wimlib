@@ -39,7 +39,7 @@ append_lte_to_list(struct blob *blob, void *_list)
 	return 0;
 }
 
-struct verify_stream_list_ctx {
+struct verify_blob_list_ctx {
 	wimlib_progress_func_t progfunc;
 	void *progctx;
 	union wimlib_progress_info *progress;
@@ -49,7 +49,7 @@ struct verify_stream_list_ctx {
 static int
 end_verify_stream(struct blob *blob, int status, void *_ctx)
 {
-	struct verify_stream_list_ctx *ctx = _ctx;
+	struct verify_blob_list_ctx *ctx = _ctx;
 	union wimlib_progress_info *progress = ctx->progress;
 
 	if (status)
@@ -112,9 +112,9 @@ WIMLIBAPI int
 wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 {
 	int ret;
-	LIST_HEAD(stream_list);
+	LIST_HEAD(blob_list);
 	union wimlib_progress_info progress;
-	struct verify_stream_list_ctx ctx;
+	struct verify_blob_list_ctx ctx;
 	struct blob *blob;
 	struct read_blob_list_callbacks cbs = {
 		.end_blob = end_verify_stream,
@@ -167,12 +167,12 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 
 	/* Verify the streams  */
 
-	for_blob(wim->blob_table, append_lte_to_list, &stream_list);
+	for_blob(wim->blob_table, append_lte_to_list, &blob_list);
 
 	memset(&progress, 0, sizeof(progress));
 
 	progress.verify_streams.wimfile = wim->filename;
-	list_for_each_entry(blob, &stream_list, extraction_list) {
+	list_for_each_entry(blob, &blob_list, extraction_list) {
 		progress.verify_streams.total_streams++;
 		progress.verify_streams.total_bytes += blob->size;
 	}
@@ -187,7 +187,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	if (ret)
 		return ret;
 
-	return read_blob_list(&stream_list,
+	return read_blob_list(&blob_list,
 				offsetof(struct blob,
 					 extraction_list),
 				&cbs, VERIFY_BLOB_HASHES);
