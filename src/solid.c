@@ -162,7 +162,7 @@ image_fill_in_solid_sort_names(WIMStruct *wim)
 }
 
 int
-sort_stream_list_for_solid_compression(struct list_head *stream_list)
+sort_blob_list_for_solid_compression(struct list_head *stream_list)
 {
 	size_t num_streams = 0;
 	struct temp_blob_table blob_table;
@@ -231,7 +231,7 @@ sort_stream_list_for_solid_compression(struct list_head *stream_list)
 		deselect_current_wim_image(wims[i]);
 	}
 
-	ret = sort_stream_list(stream_list,
+	ret = sort_blob_list(stream_list,
 			       offsetof(struct blob,
 					write_streams_list),
 			       cmp_streams_by_solid_sort_name);

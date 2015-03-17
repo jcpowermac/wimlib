@@ -476,7 +476,7 @@ cmp_streams_by_sequential_order(const void *p1, const void *p2)
 }
 
 int
-sort_stream_list(struct list_head *stream_list,
+sort_blob_list(struct list_head *stream_list,
 		 size_t list_head_offset,
 		 int (*compar)(const void *, const void*))
 {
@@ -518,10 +518,10 @@ sort_stream_list(struct list_head *stream_list,
 
 /* Sort the specified list of streams in an order optimized for reading.  */
 int
-sort_stream_list_by_sequential_order(struct list_head *stream_list,
+sort_blob_list_by_sequential_order(struct list_head *stream_list,
 				     size_t list_head_offset)
 {
-	return sort_stream_list(stream_list, list_head_offset,
+	return sort_blob_list(stream_list, list_head_offset,
 				cmp_streams_by_sequential_order);
 }
 
@@ -805,7 +805,7 @@ validate_resource(struct wim_resource_spec *rspec)
 	 * allowing for overlap), sort them.  Then make sure that none overlap.
 	 */
 	if (out_of_order) {
-		ret = sort_stream_list(&rspec->stream_list,
+		ret = sort_blob_list(&rspec->stream_list,
 				       offsetof(struct blob,
 						rspec_node),
 				       cmp_streams_by_offset_in_res);
@@ -1329,7 +1329,7 @@ hash_unhashed_stream(struct blob *blob,
 	/* back_ptr must be saved because @back_inode and @back_stream_id are in
 	 * union with the SHA1 message digest and will no longer be valid once
 	 * the SHA1 has been calculated. */
-	back_ptr = retrieve_lte_pointer(blob);
+	back_ptr = retrieve_blob_pointer(blob);
 
 	ret = sha1_stream(blob);
 	if (ret)
@@ -1361,8 +1361,8 @@ hash_unhashed_stream(struct blob *blob,
 }
 
 void
-lte_to_wimlib_resource_entry(const struct blob *blob,
-			     struct wimlib_resource_entry *wentry)
+blob_to_wimlib_resource_entry(const struct blob *blob,
+			      struct wimlib_resource_entry *wentry)
 {
 	memset(wentry, 0, sizeof(*wentry));
 

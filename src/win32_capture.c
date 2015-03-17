@@ -853,7 +853,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	}
 
 	blob->file_inode = inode;
-	add_unhashed_stream(blob, inode, 0, unhashed_streams);
+	add_unhashed_blob(blob, inode, 0, unhashed_streams);
 	inode->i_lte = blob;
 	return 0;
 }
@@ -981,7 +981,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		inode->i_lte = blob;
 	}
 	blob->file_inode = inode;
-	add_unhashed_stream(blob, inode, stream_id, unhashed_streams);
+	add_unhashed_blob(blob, inode, stream_id, unhashed_streams);
 	return 0;
 }
 

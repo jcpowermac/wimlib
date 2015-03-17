@@ -386,7 +386,7 @@ extract_chunk_wrapper(const void *chunk, size_t size, void *_ctx)
 		if (ctx->cur_stream_offset == ctx->cur_stream->size)
 			progress->extract.completed_streams += ctx->cur_stream->out_refcnt;
 	} else {
-		const struct stream_owner *owners = stream_owners(ctx->cur_stream);
+		const struct blob_owner *owners = blob_owners(ctx->cur_stream);
 		for (u32 i = 0; i < ctx->cur_stream->out_refcnt; i++) {
 			const struct wim_inode *inode = owners[i].inode;
 			const struct wim_dentry *dentry;
@@ -457,9 +457,9 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 	int ret;
 	const u32 orig_refcnt = orig_lte->out_refcnt;
 
-	BUILD_BUG_ON(MAX_OPEN_STREAMS < ARRAY_LEN(orig_lte->inline_stream_owners));
+	BUILD_BUG_ON(MAX_OPEN_STREAMS < ARRAY_LEN(orig_lte->inline_blob_owners));
 
-	struct stream_owner *owners = orig_lte->stream_owners;
+	struct blob_owner *owners = orig_lte->blob_owners;
 
 	/* Copy the stream's data from the temporary file to each of its
 	 * destinations.
@@ -484,7 +484,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 		 * create the external backing reference.  */
 
 		orig_lte->out_refcnt = 1;
-		orig_lte->inline_stream_owners[0] = owners[i];
+		orig_lte->inline_blob_owners[0] = owners[i];
 
 		ret = (*cbs->begin_stream)(orig_lte, cbs->begin_stream_ctx);
 		if (ret)
@@ -757,8 +757,8 @@ destroy_stream_list(struct list_head *stream_list)
 	struct blob *blob;
 
 	list_for_each_entry(blob, stream_list, extraction_list)
-		if (blob->out_refcnt > ARRAY_LEN(blob->inline_stream_owners))
-			FREE(blob->stream_owners);
+		if (blob->out_refcnt > ARRAY_LEN(blob->inline_blob_owners))
+			FREE(blob->blob_owners);
 }
 
 #ifdef __WIN32__
@@ -1018,7 +1018,7 @@ ref_stream(struct blob *blob, unsigned stream_idx,
 	   struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct stream_owner *stream_owners;
+	struct blob_owner *blob_owners;
 
 	if (!blob)
 		return 0;
@@ -1041,43 +1041,43 @@ ref_stream(struct blob *blob, unsigned stream_idx,
 		ctx->num_streams_remaining++;
 	}
 
-	/* If inode not yet been visited, append it to the stream_owners array.  */
-	if (blob->out_refcnt < ARRAY_LEN(blob->inline_stream_owners)) {
-		stream_owners = blob->inline_stream_owners;
+	/* If inode not yet been visited, append it to the blob_owners array.  */
+	if (blob->out_refcnt < ARRAY_LEN(blob->inline_blob_owners)) {
+		blob_owners = blob->inline_blob_owners;
 	} else {
-		struct stream_owner *prev_stream_owners;
-		size_t alloc_stream_owners;
+		struct blob_owner *prev_blob_owners;
+		size_t alloc_blob_owners;
 
-		if (blob->out_refcnt == ARRAY_LEN(blob->inline_stream_owners)) {
-			prev_stream_owners = NULL;
-			alloc_stream_owners = ARRAY_LEN(blob->inline_stream_owners);
+		if (blob->out_refcnt == ARRAY_LEN(blob->inline_blob_owners)) {
+			prev_blob_owners = NULL;
+			alloc_blob_owners = ARRAY_LEN(blob->inline_blob_owners);
 		} else {
-			prev_stream_owners = blob->stream_owners;
-			alloc_stream_owners = blob->alloc_stream_owners;
+			prev_blob_owners = blob->blob_owners;
+			alloc_blob_owners = blob->alloc_blob_owners;
 		}
 
-		if (blob->out_refcnt == alloc_stream_owners) {
-			alloc_stream_owners *= 2;
-			stream_owners = REALLOC(prev_stream_owners,
-					       alloc_stream_owners *
-						sizeof(stream_owners[0]));
-			if (!stream_owners)
+		if (blob->out_refcnt == alloc_blob_owners) {
+			alloc_blob_owners *= 2;
+			blob_owners = REALLOC(prev_blob_owners,
+					       alloc_blob_owners *
+						sizeof(blob_owners[0]));
+			if (!blob_owners)
 				return WIMLIB_ERR_NOMEM;
-			if (!prev_stream_owners) {
-				memcpy(stream_owners,
-				       blob->inline_stream_owners,
-				       sizeof(blob->inline_stream_owners));
+			if (!prev_blob_owners) {
+				memcpy(blob_owners,
+				       blob->inline_blob_owners,
+				       sizeof(blob->inline_blob_owners));
 			}
-			blob->stream_owners = stream_owners;
-			blob->alloc_stream_owners = alloc_stream_owners;
+			blob->blob_owners = blob_owners;
+			blob->alloc_blob_owners = alloc_blob_owners;
 		}
-		stream_owners = blob->stream_owners;
+		blob_owners = blob->blob_owners;
 	}
-	stream_owners[blob->out_refcnt].inode = inode;
+	blob_owners[blob->out_refcnt].inode = inode;
 	if (stream_idx == 0) {
-		stream_owners[blob->out_refcnt].stream_name = NULL;
+		blob_owners[blob->out_refcnt].stream_name = NULL;
 	} else {
-		stream_owners[blob->out_refcnt].stream_name =
+		blob_owners[blob->out_refcnt].stream_name =
 			inode->i_ads_entries[stream_idx - 1].stream_name;
 	}
 	blob->out_refcnt++;

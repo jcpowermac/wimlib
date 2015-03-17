@@ -801,7 +801,7 @@ static int
 ntfs_3g_begin_extract_stream(struct blob *stream, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
-	const struct stream_owner *owners = stream_owners(stream);
+	const struct blob_owner *owners = blob_owners(stream);
 	int ret;
 
 	for (u32 i = 0; i < stream->out_refcnt; i++) {

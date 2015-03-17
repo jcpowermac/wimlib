@@ -1574,7 +1574,7 @@ write_stream_list(struct list_head *stream_list,
 	 * based on some measure of similarity of their actual contents.
 	 */
 
-	ret = sort_stream_list_by_sequential_order(stream_list,
+	ret = sort_blob_list_by_sequential_order(stream_list,
 						   offsetof(struct blob,
 							    write_streams_list));
 	if (ret)
@@ -1583,7 +1583,7 @@ write_stream_list(struct list_head *stream_list,
 	compute_stream_list_stats(stream_list, &ctx);
 
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_SOLID_SORT) {
-		ret = sort_stream_list_for_solid_compression(stream_list);
+		ret = sort_blob_list_for_solid_compression(stream_list);
 		if (unlikely(ret))
 			WARNING("Failed to sort streams for solid compression. Continuing anyways.");
 	}
@@ -1736,7 +1736,7 @@ out_destroy_context:
 static int
 is_stream_in_solid_resource(struct blob *blob, void *_ignore)
 {
-	return lte_is_partial(blob);
+	return blob_is_in_solid_wim_resource(blob);
 }
 
 static bool
@@ -2391,7 +2391,7 @@ write_blob_table(WIMStruct *wim, int image, int write_flags,
 		}
 	}
 
-	ret = sort_stream_list(blob_table_list,
+	ret = sort_blob_list(blob_table_list,
 			       offsetof(struct blob, blob_table_list),
 			       cmp_streams_by_out_rspec);
 	if (ret)

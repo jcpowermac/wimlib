@@ -502,7 +502,7 @@ inode_unref_attributes(struct wim_inode *inode,
  * is known!)
  */
 struct blob **
-retrieve_lte_pointer(struct blob *blob)
+retrieve_blob_pointer(struct blob *blob)
 {
 	wimlib_assert(blob->unhashed);
 

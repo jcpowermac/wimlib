@@ -590,7 +590,7 @@ static int
 unix_begin_extract_stream(struct blob *stream, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
-	const struct stream_owner *owners = stream_owners(stream);
+	const struct blob_owner *owners = blob_owners(stream);
 	int ret;
 
 	for (u32 i = 0; i < stream->out_refcnt; i++) {
@@ -634,7 +634,7 @@ unix_end_extract_stream(struct blob *stream, int status,
 	struct unix_apply_ctx *ctx = _ctx;
 	int ret;
 	unsigned j;
-	const struct stream_owner *owners = stream_owners(stream);
+	const struct blob_owner *owners = blob_owners(stream);
 
 	ctx->reparse_ptr = NULL;
 

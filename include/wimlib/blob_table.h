@@ -19,7 +19,7 @@ enum resource_location {
 
 	/* The blob is located in a resource in a WIM file identified by the
 	 * `struct wim_resource_spec' pointed to by @rspec.  @offset_in_res
-	 * identifies the offset at which this particular stream begins in the
+	 * identifies the offset at which this particular blob begins in the
 	 * uncompressed data of the resource; this is normally 0, but a WIM
 	 * resource can be "solid" and contain multiple blobs.  */
 	RESOURCE_IN_WIM,
@@ -221,7 +221,7 @@ struct blob {
 		union {
 			struct blob_owner inline_blob_owners[3];
 			struct {
-				struct stream_owner *blob_owners;
+				struct blob_owner *blob_owners;
 				u32 alloc_blob_owners;
 			};
 		};
@@ -229,7 +229,7 @@ struct blob {
 
 	/* Temporary list fields.  */
 	union {
-		/* Links blobs for writing lookup table.  */
+		/* Links blobs for writing blob table.  */
 		struct list_head blob_table_list;
 
 		/* Links blobs being extracted.  */
@@ -255,19 +255,19 @@ new_blob_table(size_t capacity) _malloc_attribute;
 extern void
 free_blob_table(struct blob_table *table);
 
-/* Functions to read or write the lookup table from/to a WIM file  */
+/* Functions to read or write the blob table from/to a WIM file  */
 
 extern int
 read_blob_table(WIMStruct *wim);
 
 extern int
-write_blob_table_from_stream_list(struct list_head *stream_list,
+write_blob_table_from_blob_list(struct list_head *blob_list,
 					struct filedes *out_fd,
 					u16 part_number,
 					struct wim_reshdr *out_reshdr,
 					int write_resource_flags);
 
-/* Functions to create, clone, print, and free lookup table entries  */
+/* Functions to create, clone, print, and free blob table entries  */
 
 extern struct blob *
 new_blob_table_entry(void) _malloc_attribute;
@@ -287,80 +287,73 @@ blob_decrement_num_opened_fds(struct blob *blob);
 extern void
 free_blob(struct blob *blob);
 
-/* Functions to insert and delete entries from a lookup table  */
+/* Functions to insert and delete entries from a blob table  */
 
 extern void
-blob_table_insert(struct blob_table *table,
-		struct blob *blob);
+blob_table_insert(struct blob_table *table, struct blob *blob);
 
 extern void
-blob_table_unlink(struct blob_table *table,
-		    struct blob *blob);
+blob_table_unlink(struct blob_table *table, struct blob *blob);
 
-/* Function to lookup a stream by SHA1 message digest  */
+/* Function to lookup a blob by SHA-1 message digest  */
 extern struct blob *
 lookup_blob(const struct blob_table *table, const u8 hash[]);
 
-/* Functions to iterate through the entries of a lookup table  */
+/* Functions to iterate through the entries of a blob table  */
 
 extern int
 for_blob(struct blob_table *table,
-		       int (*visitor)(struct blob *, void *),
-		       void *arg);
+	 int (*visitor)(struct blob *, void *), void *arg);
 
 extern int
 for_blob_pos_sorted(struct blob_table *table,
-				  int (*visitor)(struct blob *,
-						 void *),
-				  void *arg);
+		    int (*visitor)(struct blob *, void *), void *arg);
 
-
-
-/* Function to get a resource entry in stable format  */
+/* Function to get a "resource entry" (should be called "blob entry") in stable
+ * format  */
 
 struct wimlib_resource_entry;
 
 extern void
-lte_to_wimlib_resource_entry(const struct blob *blob,
-			     struct wimlib_resource_entry *wentry);
+blob_to_wimlib_resource_entry(const struct blob *blob,
+			      struct wimlib_resource_entry *wentry);
 
-/* Functions to sort a list of lookup table entries  */
+/* Functions to sort a list of blobs  */
 extern int
-sort_stream_list(struct list_head *stream_list,
-		 size_t list_head_offset,
-		 int (*compar)(const void *, const void*));
-
-extern int
-sort_stream_list_by_sequential_order(struct list_head *stream_list,
-				     size_t list_head_offset);
+sort_blob_list(struct list_head *blob_list,
+	       size_t list_head_offset,
+	       int (*compar)(const void *, const void*));
 
 extern int
-cmp_streams_by_sequential_order(const void *p1, const void *p2);
+sort_blob_list_by_sequential_order(struct list_head *blob_list,
+				   size_t list_head_offset);
+
+extern int
+cmp_blobs_by_sequential_order(const void *p1, const void *p2);
 
 /* Utility functions  */
 
 extern int
-lte_zero_out_refcnt(struct blob *blob, void *ignore);
+blob_zero_out_refcnt(struct blob *blob, void *ignore);
 
 static inline bool
-lte_is_partial(const struct blob * blob)
+blob_is_in_solid_wim_resource(const struct blob * blob)
 {
 	return blob->resource_location == RESOURCE_IN_WIM &&
 	       blob->size != blob->rspec->uncompressed_size;
 }
 
-static inline const struct stream_owner *
-stream_owners(struct blob *stream)
+static inline const struct blob_owner *
+blob_owners(struct blob *blob)
 {
-	if (stream->out_refcnt <= ARRAY_LEN(stream->inline_stream_owners))
-		return stream->inline_stream_owners;
+	if (blob->out_refcnt <= ARRAY_LEN(blob->inline_blob_owners))
+		return blob->inline_blob_owners;
 	else
-		return stream->stream_owners;
+		return blob->blob_owners;
 }
 
 static inline void
-lte_bind_wim_resource_spec(struct blob *blob,
-			   struct wim_resource_spec *rspec)
+lte_bind_wim_resource_spec(struct blob *blob, struct wim_resource_spec *rspec)
 {
 	blob->resource_location = RESOURCE_IN_WIM;
 	blob->rspec = rspec;
@@ -378,27 +371,27 @@ extern void
 blob_put_resource(struct blob *blob);
 
 extern struct blob *
-new_stream_from_data_buffer(const void *buffer, size_t size,
-			    struct blob_table *blob_table);
+new_blob_from_data_buffer(const void *buffer, size_t size,
+			  struct blob_table *blob_table);
 
 static inline void
-add_unhashed_stream(struct blob *blob,
-		    struct wim_inode *back_inode,
-		    u32 back_stream_id,
-		    struct list_head *unhashed_streams)
+add_unhashed_blob(struct blob *blob,
+		  struct wim_inode *back_inode,
+		  u32 back_attr_id,
+		  struct list_head *unhashed_streams)
 {
 	blob->unhashed = 1;
 	blob->back_inode = back_inode;
-	blob->back_stream_id = back_stream_id;
+	blob->back_attr_id = back_attr_id;
 	list_add_tail(&blob->unhashed_list, unhashed_streams);
 }
 
 extern int
-hash_unhashed_stream(struct blob *blob,
-		     struct blob_table *blob_table,
-		     struct blob **lte_ret);
+hash_unhashed_blob(struct blob *blob,
+		   struct blob_table *blob_table,
+		   struct blob **lte_ret);
 
 extern struct blob **
-retrieve_lte_pointer(struct blob *blob);
+retrieve_blob_pointer(struct blob *blob);
 
 #endif /* _WIMLIB_BLOB_TABLE_H */

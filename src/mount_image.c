@@ -795,7 +795,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 	new_lte->staging_dir_fd	   = ctx->staging_dir_fd;
 	new_lte->size		   = size;
 
-	add_unhashed_stream(new_lte, inode, stream_id,
+	add_unhashed_blob(new_lte, inode, stream_id,
 			    &wim_get_current_image_metadata(ctx->wim)->unhashed_streams);
 	if (stream_idx == 0)
 		inode->i_lte = new_lte;
@@ -994,7 +994,7 @@ delete_empty_streams(struct wimfs_context *ctx)
 
         image_for_each_unhashed_stream_safe(blob, tmp, imd) {
                 if (!blob->size) {
-                        *retrieve_lte_pointer(blob) = NULL;
+                        *retrieve_blob_pointer(blob) = NULL;
                         list_del(&blob->unhashed_list);
                         free_blob(blob);
                 }

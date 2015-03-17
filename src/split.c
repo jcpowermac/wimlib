@@ -150,7 +150,7 @@ add_stream_to_swm(struct blob *blob, void *_swm_info)
 	struct swm_info *swm_info = _swm_info;
 	u64 stream_size;
 
-	if (lte_is_partial(blob)) {
+	if (blob_is_in_solid_wim_resource(blob)) {
 		ERROR("Splitting of WIM containing solid resources is not supported.\n"
 		      "        Export it in non-solid format first.");
 		return WIMLIB_ERR_UNSUPPORTED;

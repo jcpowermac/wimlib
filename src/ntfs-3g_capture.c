@@ -275,7 +275,7 @@ capture_ntfs_streams(struct wim_inode *inode,
 			new_ads_entry->blob = blob;
 		}
 		if (blob) {
-			add_unhashed_stream(blob, inode,
+			add_unhashed_blob(blob, inode,
 					    stream_id, unhashed_streams);
 		}
 	}

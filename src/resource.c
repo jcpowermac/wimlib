@@ -1314,7 +1314,7 @@ read_stream_list(struct list_head *stream_list,
 	struct read_stream_list_callbacks *sink_cbs;
 
 	if (!(flags & STREAM_LIST_ALREADY_SORTED)) {
-		ret = sort_stream_list_by_sequential_order(stream_list, list_head_offset);
+		ret = sort_blob_list_by_sequential_order(stream_list, list_head_offset);
 		if (ret)
 			return ret;
 	}
@@ -1355,7 +1355,7 @@ read_stream_list(struct list_head *stream_list,
 			/* The next stream is a proper sub-sequence of a WIM
 			 * resource.  See if there are other streams in the same
 			 * resource that need to be read.  Since
-			 * sort_stream_list_by_sequential_order() sorted the
+			 * sort_blob_list_by_sequential_order() sorted the
 			 * streams by offset in the WIM, this can be determined
 			 * by simply scanning forward in the list.  */
 

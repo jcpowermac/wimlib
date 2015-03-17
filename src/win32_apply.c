@@ -2023,7 +2023,7 @@ static int
 begin_extract_stream(struct blob *stream, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
-	const struct stream_owner *owners = stream_owners(stream);
+	const struct blob_owner *owners = blob_owners(stream);
 	int ret;
 
 	ctx->num_open_handles = 0;
