@@ -1,7 +1,7 @@
 /*
  * solid.c
  *
- * Heuristic sorting of streams to optimize solid compression.
+ * Heuristic sorting of blobs to optimize solid compression.
  */
 
 /*
@@ -52,30 +52,30 @@ get_extension(const utf16lechar *name, size_t nbytes)
 /*
  * Sort order for solid compression:
  *
- * 1. Streams without sort names
+ * 1. Blobs without sort names
  *	- sorted by sequential order
- * 2. Streams with sort names:
- *    a. Streams whose sort name does not have an extension
+ * 2. Blobs with sort names:
+ *    a. Blobs whose sort name does not have an extension
  *	  - sorted by sort name
- *    b. Streams whose sort name has an extension
+ *    b. Blobs whose sort name has an extension
  *        - sorted primarily by extension (case insensitive),
  *	    secondarily by sort name (case insensitive)
  */
 static int
-cmp_streams_by_solid_sort_name(const void *p1, const void *p2)
+cmp_blobs_by_solid_sort_name(const void *p1, const void *p2)
 {
-	const struct blob *lte1, *lte2;
+	const struct blob *blob1, *blob2;
 
-	lte1 = *(const struct blob **)p1;
-	lte2 = *(const struct blob **)p2;
+	blob1 = *(const struct blob **)p1;
+	blob2 = *(const struct blob **)p2;
 
-	if (lte1->solid_sort_name) {
-		if (!lte2->solid_sort_name)
+	if (blob1->solid_sort_name) {
+		if (!blob2->solid_sort_name)
 			return 1;
-		const utf16lechar *extension1 = get_extension(lte1->solid_sort_name,
-							      lte1->solid_sort_name_nbytes);
-		const utf16lechar *extension2 = get_extension(lte2->solid_sort_name,
-							      lte2->solid_sort_name_nbytes);
+		const utf16lechar *extension1 = get_extension(blob1->solid_sort_name,
+							      blob1->solid_sort_name_nbytes);
+		const utf16lechar *extension2 = get_extension(blob2->solid_sort_name,
+							      blob2->solid_sort_name_nbytes);
 		if (extension1) {
 			if (!extension2)
 				return 1;
@@ -90,22 +90,22 @@ cmp_streams_by_solid_sort_name(const void *p1, const void *p2)
 			if (extension2)
 				return -1;
 		}
-		int res = cmp_utf16le_strings(lte1->solid_sort_name,
-					      lte1->solid_sort_name_nbytes / sizeof(utf16lechar),
-					      lte2->solid_sort_name,
-					      lte2->solid_sort_name_nbytes / sizeof(utf16lechar),
+		int res = cmp_utf16le_strings(blob1->solid_sort_name,
+					      blob1->solid_sort_name_nbytes / sizeof(utf16lechar),
+					      blob2->solid_sort_name,
+					      blob2->solid_sort_name_nbytes / sizeof(utf16lechar),
 					      true); /* case insensitive */
 		if (res)
 			return res;
 	} else {
-		if (lte2->solid_sort_name)
+		if (blob2->solid_sort_name)
 			return -1;
 	}
-	return cmp_streams_by_sequential_order(p1, p2);
+	return cmp_blobs_by_sequential_order(p1, p2);
 }
 
 static void
-lte_set_solid_sort_name_from_inode(struct blob *blob,
+blob_set_solid_sort_name_from_inode(struct blob *blob,
 				   const struct wim_inode *inode)
 {
 	const struct wim_dentry *dentry;
@@ -146,7 +146,7 @@ dentry_fill_in_solid_sort_names(struct wim_dentry *dentry, void *_blob_table)
 				    blob_table->capacity];
 	hlist_for_each_entry(blob, cur, head, hash_list_2) {
 		if (hashes_equal(hash, blob->hash)) {
-			lte_set_solid_sort_name_from_inode(blob, inode);
+			blob_set_solid_sort_name_from_inode(blob, inode);
 			break;
 		}
 	}
@@ -164,31 +164,31 @@ image_fill_in_solid_sort_names(WIMStruct *wim)
 int
 sort_blob_list_for_solid_compression(struct list_head *blob_list)
 {
-	size_t num_streams = 0;
+	size_t num_blobs = 0;
 	struct temp_blob_table blob_table;
 	WIMStruct *wims[128];
 	int num_wims = 0;
 	struct blob *blob;
 	int ret;
 
-	/* Count the number of streams to be written.  */
-	list_for_each_entry(blob, blob_list, write_streams_list)
-		num_streams++;
+	/* Count the number of blobs to be written.  */
+	list_for_each_entry(blob, blob_list, write_blobs_list)
+		num_blobs++;
 
-	/* Allocate a temporary hash table for mapping stream hash => stream  */
-	blob_table.capacity = num_streams;
+	/* Allocate a temporary hash table for mapping blob hash => blob  */
+	blob_table.capacity = num_blobs;
 	blob_table.table = CALLOC(blob_table.capacity,
-				    sizeof(blob_table.table[0]));
+				  sizeof(blob_table.table[0]));
 	if (!blob_table.table)
 		return WIMLIB_ERR_NOMEM;
 
 	/*
-	 * For each stream to be written:
+	 * For each blob to be written:
 	 * - Reset the sort name
 	 * - If it's in non-solid WIM resource, then save the WIMStruct.
 	 * - If it's in a file on disk, then set its sort name from that.
 	 */
-	list_for_each_entry(blob, blob_list, write_streams_list) {
+	list_for_each_entry(blob, blob_list, write_blobs_list) {
 		blob->solid_sort_name = NULL;
 		blob->solid_sort_name_nbytes = 0;
 		switch (blob->resource_location) {
@@ -210,7 +210,7 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 	#ifdef __WIN32__
 		case RESOURCE_IN_WINNT_FILE_ON_DISK:
 	#endif
-			lte_set_solid_sort_name_from_inode(blob, blob->file_inode);
+			blob_set_solid_sort_name_from_inode(blob, blob->file_inode);
 			break;
 		default:
 			break;
@@ -218,7 +218,7 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 	}
 
 	/* For each WIMStruct that was found, search for dentry references to
-	 * each stream and fill in the sort name this way.  This is useful e.g.
+	 * each blob and fill in the sort name this way.  This is useful e.g.
 	 * when exporting a solid WIM file from a non-solid WIM file.  */
 	for (int i = 0; i < num_wims; i++) {
 		if (!wim_has_metadata(wims[i]))
@@ -233,11 +233,11 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 
 	ret = sort_blob_list(blob_list,
 			       offsetof(struct blob,
-					write_streams_list),
-			       cmp_streams_by_solid_sort_name);
+					write_blobs_list),
+			       cmp_blobs_by_solid_sort_name);
 
 out:
-	list_for_each_entry(blob, blob_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_blobs_list)
 		FREE(blob->solid_sort_name);
 	FREE(blob_table.table);
 	return ret;
