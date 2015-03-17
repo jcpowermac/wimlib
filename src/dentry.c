@@ -72,12 +72,13 @@
  * resource for a WIM image.  */
 struct wim_dentry_on_disk {
 
-	/* Length of this directory entry in bytes, not including any alternate
-	 * data stream entries.  Should be a multiple of 8 so that the following
+	/* Length of this directory entry in bytes, not including any extra
+	 * attribute entries.  Should be a multiple of 8 so that the following
 	 * dentry or alternate data stream entry is aligned on an 8-byte
 	 * boundary.  (If not, wimlib will round it up.)  It must be at least as
 	 * long as the fixed-length fields of the dentry (WIM_DENTRY_DISK_SIZE),
-	 * plus the lengths of the file name and/or short name if present.
+	 * plus the lengths of the file name and/or short name if present, plus
+	 * the size of any "extra" data.
 	 *
 	 * It is also possible for this field to be 0.  This situation, which is
 	 * undocumented, indicates the end of a list of sibling nodes in a
@@ -139,7 +140,7 @@ struct wim_dentry_on_disk {
 	 * Windows PE contain a bug where they only look in the alternate data
 	 * stream entries for the unnamed data stream, not here.
 	 */
-	u8 unnamed_stream_hash[SHA1_HASH_SIZE];
+	u8 hash[SHA1_HASH_SIZE];
 
 	/* The format of the following data is not yet completely known and they
 	 * do not correspond to Microsoft's documentation.
@@ -180,9 +181,9 @@ struct wim_dentry_on_disk {
 		} _packed_attribute nonreparse;
 	};
 
-	/* Number of alternate data stream entries that directly follow this
-	 * dentry on-disk. */
-	le16 num_alternate_data_streams;
+	/* Number of extra attribute entries that directly follow this dentry
+	 * on-disk. */
+	le16 num_extra_attributes;
 
 	/* If nonzero, this is the length, in bytes, of this dentry's UTF-16LE
 	 * encoded short name (8.3 DOS-compatible name), excluding the null
@@ -216,10 +217,37 @@ struct wim_dentry_on_disk {
 	/* u8 tagged_items[] _aligned_attribute(8); */
 
 } _packed_attribute;
-	/* If num_alternate_data_streams != 0, then there are that many
-	 * alternate data stream entries following the dentry, on an 8-byte
-	 * aligned boundary.  They are not counted in the 'length' field of the
-	 * dentry.  */
+	/* If num_extra_attributes != 0, then there are that many attribute
+	 * entries following the dentry, on an 8-byte aligned boundary.  They
+	 * are not counted in the 'length' field of the dentry.  */
+
+/* TODO  */
+struct wim_attribute_on_disk {
+	/* Length of the entry, in bytes.  This includes all fixed-length
+	 * fields, plus the name and null terminator if present, and the padding
+	 * up to an 8 byte boundary.  wimlib is a little less strict when
+	 * reading the entries, and only requires that the number of bytes from
+	 * this field is at least as large as the size of the fixed length
+	 * fields and name without null terminator.  */
+	le64 length;
+
+	le64 reserved;
+
+	/* SHA1 message digest of the uncompressed stream; or, alternatively,
+	 * can be all zeroes if the stream has zero length.  */
+	u8 hash[SHA1_HASH_SIZE];
+
+	/* Length of the attribute name, in bytes.  0 if the attribute is unnamed.  */
+	le16 name_nbytes;
+
+	/* Attribute name in UTF-16LE.  It is @name_nbytes bytes long, excluding
+	 * the null terminator.  There is a null terminator character if
+	 * @name_nbytes != 0; i.e., if this attribute is named.  */
+	utf16lechar name[];
+} _packed_attribute;
+
+#define WIM_ADS_ENTRY_DISK_SIZE 38
+
 
 /* Calculate the minimum unaligned length, in bytes, of an on-disk WIM dentry
  * that has names of the specified lengths.  (Zero length means the
@@ -327,7 +355,7 @@ dentry_set_name(struct wim_dentry *dentry, const tchar *name)
 static u64
 ads_entry_out_total_length(const struct wim_ads_entry *entry)
 {
-	u64 len = sizeof(struct wim_ads_entry_on_disk);
+	u64 len = sizeof(struct wim_attribute_on_disk);
 	if (entry->stream_name_nbytes)
 		len += (u32)entry->stream_name_nbytes + 2;
 	return (len + 7) & ~7;
@@ -1255,7 +1283,7 @@ read_ads_entries(const u8 * restrict p, struct wim_inode * restrict inode,
 	struct wim_ads_entry *ads_entries;
 	int ret;
 
-	BUILD_BUG_ON(sizeof(struct wim_ads_entry_on_disk) != WIM_ADS_ENTRY_DISK_SIZE);
+	BUILD_BUG_ON(sizeof(struct wim_attribute_on_disk) != WIM_ADS_ENTRY_DISK_SIZE);
 
 	/* Allocate an array for our in-memory representation of the alternate
 	 * data stream entries. */
@@ -1268,15 +1296,15 @@ read_ads_entries(const u8 * restrict p, struct wim_inode * restrict inode,
 	for (unsigned i = 0; i < num_ads; i++) {
 		u64 length;
 		struct wim_ads_entry *cur_entry;
-		const struct wim_ads_entry_on_disk *disk_entry =
-			(const struct wim_ads_entry_on_disk*)p;
+		const struct wim_attribute_on_disk *disk_entry =
+			(const struct wim_attribute_on_disk*)p;
 
 		cur_entry = &ads_entries[i];
 		ads_entries[i].stream_id = i + 1;
 
 		/* Do we have at least the size of the fixed-length data we know
 		 * need? */
-		if (nbytes_remaining < sizeof(struct wim_ads_entry_on_disk))
+		if (nbytes_remaining < sizeof(struct wim_attribute_on_disk))
 			goto out_invalid;
 
 		/* Read the length field */
@@ -1285,7 +1313,7 @@ read_ads_entries(const u8 * restrict p, struct wim_inode * restrict inode,
 		/* Make sure the length field is neither so small it doesn't
 		 * include all the fixed-length data nor so large it overflows
 		 * the metadata resource buffer. */
-		if (length < sizeof(struct wim_ads_entry_on_disk) ||
+		if (length < sizeof(struct wim_attribute_on_disk) ||
 		    length > nbytes_remaining)
 			goto out_invalid;
 
@@ -1311,7 +1339,7 @@ read_ads_entries(const u8 * restrict p, struct wim_inode * restrict inode,
 			/* Add the length of the stream name to get the length
 			 * we actually need to read.  Make sure this isn't more
 			 * than the specified length of the entry. */
-			if (sizeof(struct wim_ads_entry_on_disk) +
+			if (sizeof(struct wim_attribute_on_disk) +
 			    cur_entry->stream_name_nbytes > length)
 				goto out_invalid;
 
@@ -1741,14 +1769,14 @@ static u8 *
 write_ads_entry(const struct wim_ads_entry *ads_entry,
 		const u8 *hash, u8 * restrict p)
 {
-	struct wim_ads_entry_on_disk *disk_ads_entry =
-			(struct wim_ads_entry_on_disk*)p;
+	struct wim_attribute_on_disk *disk_ads_entry =
+			(struct wim_attribute_on_disk*)p;
 	u8 *orig_p = p;
 
 	disk_ads_entry->reserved = cpu_to_le64(ads_entry->reserved);
 	copy_hash(disk_ads_entry->hash, hash);
 	disk_ads_entry->stream_name_nbytes = cpu_to_le16(ads_entry->stream_name_nbytes);
-	p += sizeof(struct wim_ads_entry_on_disk);
+	p += sizeof(struct wim_attribute_on_disk);
 	if (ads_entry->stream_name_nbytes) {
 		p = mempcpy(p, ads_entry->stream_name,
 			    (u32)ads_entry->stream_name_nbytes + 2);

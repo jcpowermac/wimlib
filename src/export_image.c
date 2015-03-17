@@ -61,11 +61,11 @@ inode_export_streams(struct wim_inode *inode,
 	const u8 *hash;
 	struct wim_lookup_table_entry *src_lte, *dest_lte;
 
-	inode_unresolve_streams(inode);
-	for (i = 0; i <= inode->i_num_ads; i++) {
+	inode_unresolve_attributes(inode);
+	for (i = 0; i < inode->i_num_attrs; i++) {
 
 		/* Retrieve SHA1 message digest of stream to export.  */
-		hash = inode_stream_hash(inode, i);
+		hash = inode_attribute_hash(inode, i);
 		if (is_zero_hash(hash))  /* Empty stream?  */
 			continue;
 

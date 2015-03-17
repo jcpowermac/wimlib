@@ -71,12 +71,11 @@ do_capture_progress(struct capture_params *params, int status,
 
 		/* Successful scan, and visiting inode for the first time  */
 
-		/* Tally size of all data streams.  */
-		const struct wim_lookup_table_entry *lte;
-		for (unsigned i = 0; i <= inode->i_num_ads; i++) {
-			lte = inode_stream_lte_resolved(inode, i);
-			if (lte)
-				params->progress.scan.num_bytes_scanned += lte->size;
+		/* Tally size of all attributes.  */
+		for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+			if (inode->i_attrs[i].attr_lte)
+				params->progress.scan.num_bytes_scanned +=
+					inode->i_attrs[i].attr_lte->size;
 		}
 
 		/* Tally the file itself.  */

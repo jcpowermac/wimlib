@@ -225,33 +225,6 @@ struct wim_inode {
 	u32 i_next_attr_id;
 };
 
-/* WIM alternate data stream entry (on-disk format) */
-struct wim_ads_entry_on_disk {
-	/* Length of the entry, in bytes.  This includes all fixed-length
-	 * fields, plus the stream name and null terminator if present, and the
-	 * padding up to an 8 byte boundary.  wimlib is a little less strict
-	 * when reading the entries, and only requires that the number of bytes
-	 * from this field is at least as large as the size of the fixed length
-	 * fields and stream name without null terminator.  */
-	le64 length;
-
-	le64 reserved;
-
-	/* SHA1 message digest of the uncompressed stream; or, alternatively,
-	 * can be all zeroes if the stream has zero length.  */
-	u8 hash[SHA1_HASH_SIZE];
-
-	/* Length of the stream name, in bytes.  0 if the stream is unnamed.  */
-	le16 stream_name_nbytes;
-
-	/* Stream name in UTF-16LE.  It is @stream_name_nbytes bytes long,
-	 * excluding the null terminator.  There is a null terminator character
-	 * if @stream_name_nbytes != 0; i.e., if this stream is named.  */
-	utf16lechar stream_name[];
-} _packed_attribute;
-
-#define WIM_ADS_ENTRY_DISK_SIZE 38
-
 /*
  * Reparse tags documented at
  * http://msdn.microsoft.com/en-us/library/dd541667(v=prot.10).aspx

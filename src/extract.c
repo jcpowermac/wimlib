@@ -964,8 +964,8 @@ dentry_list_calculate_extraction_names(struct list_head *dentry_list,
 }
 
 static int
-dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
-		       struct wim_lookup_table *lookup_table)
+dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
+			  struct wim_lookup_table *lookup_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct wim_lookup_table_entry *lte;
@@ -979,11 +979,11 @@ dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
 	 * "resolve" the inode's streams anyway by allocating new entries.  */
 	if (extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE)
 		force = true;
-	ret = inode_resolve_streams(inode, lookup_table, force);
+	ret = inode_resolve_attributes(inode, lookup_table, force);
 	if (ret)
 		return ret;
-	for (u32 i = 0; i <= inode->i_num_ads; i++) {
-		lte = inode_stream_lte_resolved(inode, i);
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		lte = inode->i_attrs[i].attr_lte;
 		if (lte)
 			lte->out_refcnt = 0;
 	}
@@ -997,16 +997,16 @@ dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
  * Possible error codes: WIMLIB_ERR_RESOURCE_NOT_FOUND, WIMLIB_ERR_NOMEM.
  */
 static int
-dentry_list_resolve_streams(struct list_head *dentry_list,
-			    struct apply_ctx *ctx)
+dentry_list_resolve_attributes(struct list_head *dentry_list,
+			       struct apply_ctx *ctx)
 {
 	struct wim_dentry *dentry;
 	int ret;
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
-		ret = dentry_resolve_streams(dentry,
-					     ctx->extract_flags,
-					     ctx->wim->lookup_table);
+		ret = dentry_resolve_attributes(dentry,
+						ctx->extract_flags,
+						ctx->wim->lookup_table);
 		if (ret)
 			return ret;
 	}
