@@ -6,16 +6,18 @@
 #include "wimlib/sha1.h"
 #include "wimlib/types.h"
 
-/* An enumerated type that identifies where the blob's data is actually located.
+/*
+ * An enumerated type that identifies where the blob's data is actually located.
  *
  * If we open a WIM and read its blob table, the location is set to
  * BLOB_IN_WIM since all the blobs will initially be located in the WIM.
  * However, to handle situations such as image capture and image mount, we allow
  * the actual location of the blob to be somewhere else, such as an external
- * file.  */
+ * file.
+ */
 enum blob_location {
 	/* The blob's data does not exist.  This is a temporary state only.  */
-	RESOURCE_NONEXISTENT = 0,
+	BLOB_NONEXISTENT = 0,
 
 	/* The blob is located in a resource in a WIM file identified by the
 	 * `struct wim_resource_spec' pointed to by @rspec.  @offset_in_res
@@ -378,7 +380,7 @@ static inline void
 blob_unbind_wim_resource_spec(struct blob_descriptor *blob)
 {
 	list_del(&blob->rspec_node);
-	blob->blob_location = RESOURCE_NONEXISTENT;
+	blob->blob_location = BLOB_NONEXISTENT;
 }
 
 extern void

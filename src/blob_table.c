@@ -107,8 +107,8 @@ new_blob_descriptor(void)
 
 	blob->refcnt = 1;
 
-	/* blob->blob_location = RESOURCE_NONEXISTENT  */
-	BUILD_BUG_ON(RESOURCE_NONEXISTENT != 0);
+	/* blob->blob_location = BLOB_NONEXISTENT  */
+	BUILD_BUG_ON(BLOB_NONEXISTENT != 0);
 
 	return blob;
 }

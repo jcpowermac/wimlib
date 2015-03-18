@@ -192,7 +192,7 @@ read_pwm_blob_header(WIMStruct *pwm, struct blob_descriptor *blob,
 
 		if (ret)
 			goto read_error;
-		blob->blob_location = RESOURCE_NONEXISTENT;
+		blob->blob_location = BLOB_NONEXISTENT;
 		memcpy(hdr_ret, &buf.pwm_hdr, sizeof(buf.pwm_hdr));
 		return 0;
 	}
@@ -230,7 +230,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 	int ret;
 
 	ret = WIMLIB_ERR_NOMEM;
-	found_blob = new_blob();
+	found_blob = new_blob_descriptor();
 	if (!found_blob)
 		goto out;
 
@@ -250,14 +250,14 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 		struct wim_header_disk pwm_hdr;
 		struct blob_descriptor *needed_blob;
 
-		if (found_blob->blob_location != RESOURCE_NONEXISTENT)
+		if (found_blob->blob_location != BLOB_NONEXISTENT)
 			blob_unbind_wim_resource_spec(found_blob);
 		ret = read_pwm_blob_header(ctx->wim, found_blob, rspec,
 					   PWM_ALLOW_WIM_HDR, &pwm_hdr);
 		if (ret)
 			goto out;
 
-		if ((found_blob->blob_location != RESOURCE_NONEXISTENT)
+		if ((found_blob->blob_location != BLOB_NONEXISTENT)
 		    && !(found_blob->flags & WIM_RESHDR_FLAG_METADATA)
 		    && (needed_blob = lookup_blob(blob_table, found_blob->hash))
 		    && (needed_blob->out_refcnt))
@@ -286,7 +286,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 			if (ret)
 				goto out;
 			ctx->num_blobs_remaining--;
-		} else if (found_blob->blob_location != RESOURCE_NONEXISTENT) {
+		} else if (found_blob->blob_location != BLOB_NONEXISTENT) {
 			ret = skip_wim_blob(found_blob);
 			if (ret)
 				goto out;
@@ -1987,7 +1987,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 		struct wim_image_metadata *imd;
 		struct wim_resource_spec *metadata_rspec;
 
-		metadata_blob = new_blob();
+		metadata_blob = new_blob_descriptor();
 		if (metadata_blob == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_wimlib_free;

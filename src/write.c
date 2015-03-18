@@ -1830,7 +1830,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 		copy_hash(hash, blob->hash);
 	ret = 0;
 out_free_lte:
-	blob->blob_location = RESOURCE_NONEXISTENT;
+	blob->blob_location = BLOB_NONEXISTENT;
 	free_blob_descriptor(blob);
 	return ret;
 }
