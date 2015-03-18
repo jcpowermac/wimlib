@@ -386,8 +386,7 @@ blob_not_found_error(const struct wim_inode *inode, const u8 *hash)
 }
 
 struct blob *
-attribute_blob(const struct wim_attribute *attr,
-	       const struct blob_table *table)
+attribute_blob(const struct wim_attribute *attr, const struct blob_table *table)
 {
 	if (attr->attr_resolved)
 		return attr->attr_blob;

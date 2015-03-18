@@ -39,24 +39,42 @@
 #include "wimlib/wim.h"
 
 static int
-attr_to_wimlib_stream_entry(const struct wim_attribute *attr,
-			    const struct wimlib_stream_entry *stream,
-			    const struct blob_table *blob_table)
+attr_to_wimlib_stream_entry(const struct wim_inode *inode,
+			    const struct wim_attribute *attr,
+			    struct wimlib_stream_entry *stream,
+			    const struct blob_table *blob_table,
+			    int flags)
 {
 	const struct blob *blob;
+	const u8 *hash;
 
 	if (!attr)
 		return 0;
 
-	blob = inode_attribute_blob(inode, wim->blob_table);
-	if (blob) {
-		lte_to_wimlib_resource_entry(blob, &wdentry->streams[0].resource);
-	} else if (!is_zero_hash(hash = inode_unnamed_stream_hash(inode))) {
-		if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
-			return stream_not_found_error(inode, hash);
-		copy_hash(wdentry->streams[0].resource.sha1_hash, hash);
-		wdentry->streams[0].resource.is_missing = 1;
+
+	if (*attr->attr_name) {
+		size_t dummy;
+		int ret;
+
+		ret = utf16le_get_tstr(attr->attr_name,
+				       utf16le_strlen(attr->attr_name),
+				       &stream->stream_name,
+				       &dummy);
+		if (ret)
+			return ret;
 	}
+
+	blob = attribute_blob(attr, blob_table);
+	if (blob) {
+		blob_to_wimlib_resource_entry(blob, &stream->resource);
+	} else if (!is_zero_hash((hash = attribute_hash(attr)))) {
+		if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
+			return blob_not_found_error(inode, hash);
+		copy_hash(stream->resource.sha1_hash, hash);
+		stream->resource.is_missing = 1;
+	}
+	return 0;
+}
 
 static int
 init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
@@ -66,7 +84,6 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	size_t dummy;
 	const struct wim_inode *inode = dentry->d_inode;
 	const struct wim_attribute *attr;
-	const u8 *hash;
 	struct wimlib_unix_data unix_data;
 
 	ret = utf16le_get_tstr(dentry->file_name, dentry->file_name_nbytes,
@@ -114,38 +131,24 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 					   	ATTR_REPARSE_POINT : ATTR_DATA,
 					   NO_NAME);
 
-	ret = attr_to_wimlib_stream_entry(attr, &wdentry->streams[0]);
+	ret = attr_to_wimlib_stream_entry(inode, attr, &wdentry->streams[0],
+					  wim->blob_table, flags);
 	if (ret)
 		return ret;
-
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 
 		attr = &inode->i_attrs[i];
 
-		if (!inode->i_ads_entries[i].stream_name_nbytes)
+		if (attr->attr_type != ATTR_DATA || !*attr->attr_name)
 			continue;
-		blob = inode_stream_lte(inode, i + 1, wim->blob_table);
+
 		wdentry->num_named_streams++;
-		if (blob) {
-			lte_to_wimlib_resource_entry(blob, &wdentry->streams[
-								wdentry->num_named_streams].resource);
-		} else if (!is_zero_hash(hash = inode_stream_hash(inode, i + 1))) {
-			if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
-				return stream_not_found_error(inode, hash);
-			copy_hash(wdentry->streams[
-				  wdentry->num_named_streams].resource.sha1_hash, hash);
-			wdentry->streams[
-				wdentry->num_named_streams].resource.is_missing = 1;
-		}
 
-		size_t dummy;
-
-		ret = utf16le_get_tstr(inode->i_ads_entries[i].stream_name,
-				       inode->i_ads_entries[i].stream_name_nbytes,
-				       &wdentry->streams[
-					       wdentry->num_named_streams].stream_name,
-				       &dummy);
+		ret = attr_to_wimlib_stream_entry(inode, attr,
+						  &wdentry->streams[
+						  	wdentry->num_named_streams],
+						  wim->blob_table, flags);
 		if (ret)
 			return ret;
 	}
