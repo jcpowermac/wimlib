@@ -145,10 +145,10 @@ write_split_wim(WIMStruct *orig_wim, const tchar *swm_name,
 }
 
 static int
-add_stream_to_swm(struct blob_descriptor *blob, void *_swm_info)
+add_blob_to_swm(struct blob_descriptor *blob, void *_swm_info)
 {
 	struct swm_info *swm_info = _swm_info;
-	u64 stream_size;
+	u64 blob_size;
 
 	if (blob_is_in_solid_wim_resource(blob)) {
 		ERROR("Splitting of WIM containing solid resources is not supported.\n"
@@ -156,18 +156,18 @@ add_stream_to_swm(struct blob_descriptor *blob, void *_swm_info)
 		return WIMLIB_ERR_UNSUPPORTED;
 	}
 	if (blob->blob_location == BLOB_IN_WIM)
-		stream_size = blob->rspec->size_in_wim;
+		blob_size = blob->rspec->size_in_wim;
 	else
-		stream_size = blob->size;
+		blob_size = blob->size;
 
 	/* - Start first part if no parts have been started so far;
-	 * - Start next part if adding this stream exceeds maximum part size,
-	 *   UNLESS the stream is metadata or if no streams at all have been
-	 *   added to the current part.
+	 * - Start next part if adding this blob exceeds maximum part size,
+	 *   UNLESS the blob is metadata or if no blobs at all have been added
+	 *   to the current part.
 	 */
 	if (swm_info->num_parts == 0 ||
 	    ((swm_info->parts[swm_info->num_parts - 1].size +
-			stream_size >= swm_info->max_part_size)
+			blob_size >= swm_info->max_part_size)
 	     && !((blob->flags & WIM_RESHDR_FLAG_METADATA) ||
 		   swm_info->parts[swm_info->num_parts - 1].size == 0)))
 	{
@@ -191,12 +191,12 @@ add_stream_to_swm(struct blob_descriptor *blob, void *_swm_info)
 		INIT_LIST_HEAD(&swm_info->parts[swm_info->num_parts - 1].blob_list);
 		swm_info->parts[swm_info->num_parts - 1].size = 0;
 	}
-	swm_info->parts[swm_info->num_parts - 1].size += stream_size;
+	swm_info->parts[swm_info->num_parts - 1].size += blob_size;
 	if (!(blob->flags & WIM_RESHDR_FLAG_METADATA)) {
 		list_add_tail(&blob->write_blobs_list,
 			      &swm_info->parts[swm_info->num_parts - 1].blob_list);
 	}
-	swm_info->total_bytes += stream_size;
+	swm_info->total_bytes += blob_size;
 	return 0;
 }
 
@@ -222,15 +222,13 @@ wimlib_split(WIMStruct *wim, const tchar *swm_name,
 	swm_info.max_part_size = part_size;
 
 	for (i = 0; i < wim->hdr.image_count; i++) {
-		ret = add_stream_to_swm(wim->image_metadata[i]->metadata_blob,
-					&swm_info);
+		ret = add_blob_to_swm(wim->image_metadata[i]->metadata_blob,
+				      &swm_info);
 		if (ret)
 			goto out_free_swm_info;
 	}
 
-	ret = for_blob_pos_sorted(wim->blob_table,
-						add_stream_to_swm,
-						&swm_info);
+	ret = for_blob_pos_sorted(wim->blob_table, add_blob_to_swm, &swm_info);
 	if (ret)
 		goto out_free_swm_info;
 

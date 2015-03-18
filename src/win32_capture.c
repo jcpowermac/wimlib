@@ -827,7 +827,7 @@ static int
 winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path,
 				 struct list_head *unhashed_blobs)
 {
-	struct blob_descriptor *blob = new_blob();
+	struct blob_descriptor *blob = new_blob_descriptor();
 	int ret;
 
 	if (unlikely(!blob))
@@ -952,7 +952,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		ads_entry = NULL;
 	}
 
-	/* If the stream is empty, no lookup table entry is needed. */
+	/* If the stream is empty, no blob descriptor is needed. */
 	if (stream_size == 0)
 		return 0;
 
@@ -964,8 +964,8 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 	if (!stream_path)
 		return WIMLIB_ERR_NOMEM;
 
-	/* Set up the lookup table entry for the stream.  */
-	blob = new_blob();
+	/* Set up the blob descriptor for the stream.  */
+	blob = new_blob_descriptor();
 	if (!blob) {
 		FREE(stream_path);
 		return WIMLIB_ERR_NOMEM;

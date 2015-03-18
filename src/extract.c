@@ -476,8 +476,8 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 		/* Note: it usually doesn't matter whether we pass the original
 		 * blob descriptor to callbacks provided by the extraction
 		 * backend as opposed to the tmpfile blob entry, since they
-		 * shouldn't actually read data from the stream other than
-		 * through the read_blob_prefix() call below.  But for
+		 * shouldn't actually read data from the blob other than through
+		 * the read_blob_prefix() call below.  But for
 		 * WIMLIB_EXTRACT_FLAG_WIMBOOT mode on Windows it does matter
 		 * because it needs the original blob location in order to
 		 * create the external backing reference.  */

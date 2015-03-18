@@ -491,7 +491,7 @@ set_external_backing(HANDLE h, struct wim_inode *inode, struct win32_apply_ctx *
 	}
 }
 
-/* Calculates the SHA-1 message digest of the WIM's lookup table.  */
+/* Calculates the SHA-1 message digest of the WIM's blob table.  */
 static int
 hash_blob_table(WIMStruct *wim, u8 hash[SHA1_HASH_SIZE])
 {
@@ -2023,7 +2023,7 @@ static int
 begin_extract_blob(struct blob_descriptor *stream, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
-	const struct blob_owner *owners = blob_owners(stream);
+	const struct blob_target *targets = blob_targets(stream);
 	int ret;
 
 	ctx->num_open_handles = 0;
@@ -2032,8 +2032,8 @@ begin_extract_blob(struct blob_descriptor *stream, void *_ctx)
 	INIT_LIST_HEAD(&ctx->encrypted_dentries);
 
 	for (u32 i = 0; i < stream->out_refcnt; i++) {
-		const struct wim_inode *inode = owners[i].inode;
-		const wchar_t *stream_name = owners[i].stream_name;
+		const struct wim_inode *inode = targets[i].inode;
+		const wchar_t *stream_name = targets[i].stream_name;
 		struct wim_dentry *dentry;
 
 		/* A copy of the stream needs to be extracted to @inode.  */
@@ -2041,7 +2041,7 @@ begin_extract_blob(struct blob_descriptor *stream, void *_ctx)
 		if (ctx->common.supported_features.hard_links) {
 			dentry = inode_first_extraction_dentry(inode);
 			ret = begin_extract_blob_instance(stream, dentry,
-							    stream_name, ctx);
+							  stream_name, ctx);
 			ret = check_apply_error(dentry, ctx, ret);
 			if (ret)
 				goto fail;
@@ -2055,9 +2055,9 @@ begin_extract_blob(struct blob_descriptor *stream, void *_ctx)
 				dentry = list_entry(next, struct wim_dentry,
 						    d_extraction_alias_node);
 				ret = begin_extract_blob_instance(stream,
-								    dentry,
-								    stream_name,
-								    ctx);
+								  dentry,
+								  stream_name,
+								  ctx);
 				ret = check_apply_error(dentry, ctx, ret);
 				if (ret)
 					goto fail;

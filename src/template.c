@@ -126,9 +126,9 @@ inode_copy_checksums(struct wim_inode *inode,
 		/* If the WIM of the template image is the same as the WIM of
 		 * the new image, then @template_blob can be used directly.
 		 *
-		 * Otherwise, look for a stream with the same hash in the WIM of
-		 * the new image.  If found, use it; otherwise re-use the entry
-		 * being discarded, filling in the hash.  */
+		 * Otherwise, look for a blob with the same hash in the WIM of
+		 * the new image.  If found, use it; otherwise re-use the
+		 * blob descriptor being discarded, filling in the hash.  */
 
 		if (wim == template_wim)
 			replace_blob = template_blob;

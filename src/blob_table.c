@@ -567,8 +567,8 @@ struct blob_descriptor_disk {
 	 * above blob_decrement_refcnt().)  */
 	le32 refcnt;
 
-	/* SHA-1 message digest of the uncompressed data of this blob, or
-	 * optionally all zeroes if this blob is of zero length. */
+	/* SHA-1 message digest of the uncompressed data of this blob, or all
+	 * zeroes if this blob is of zero length.  */
 	u8 hash[SHA1_HASH_SIZE];
 } _packed_attribute;
 

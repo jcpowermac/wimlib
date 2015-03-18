@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2012, 2013, 2014 Eric Biggers
+ * Copyright (C) 2012, 2013, 2014, 2015 Eric Biggers
  *
  * This file is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -948,7 +948,7 @@ release_extra_refcnts(struct wimfs_context *ctx)
 /* Delete the 'struct blob_descriptor' for any stream that was modified
  * or created in the read-write mounted image and had a final size of 0.  */
 static void
-delete_empty_streams(struct wimfs_context *ctx)
+delete_empty_blobs(struct wimfs_context *ctx)
 {
 	struct blob_descriptor *blob, *tmp;
 	struct wim_image_metadata *imd;
@@ -1083,7 +1083,7 @@ commit_image(struct wimfs_context *ctx, int unmount_flags, mqd_t mq)
 		release_extra_refcnts(ctx);
 	}
 	INIT_LIST_HEAD(&ctx->orig_blob_list);
-	delete_empty_streams(ctx);
+	delete_empty_blobs(ctx);
 	xml_update_image_info(ctx->wim, ctx->wim->current_image);
 
 	write_flags = 0;

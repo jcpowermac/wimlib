@@ -119,7 +119,7 @@ struct wim_dentry_on_disk {
 	/* Vaguely, the SHA-1 message digest ("hash") of the file's contents.
 	 * More specifically, this is for the "unnamed data stream" rather than
 	 * any "alternate data streams".  This hash value is used to look up the
-	 * corresponding entry in the WIM's stream lookup table to actually find
+	 * corresponding entry in the WIM's stream blob table to actually find
 	 * the file contents within the WIM.
 	 *
 	 * If the file has no unnamed data stream (e.g. is a directory), then
@@ -1080,9 +1080,9 @@ do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *blob_table)
  *	effect.
  *
  * @blob_table:
- *	A pointer to the lookup table for the WIM, or NULL if not specified.  If
+ *	A pointer to the blob table for the WIM, or NULL if not specified.  If
  *	specified, this function will decrement the reference counts of the
- *	single-instance streams referenced by the dentries.
+ *	blobs referenced by the dentries.
  *
  * This function also releases references to the corresponding inodes.
  *
