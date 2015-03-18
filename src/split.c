@@ -155,7 +155,7 @@ add_stream_to_swm(struct blob_descriptor *blob, void *_swm_info)
 		      "        Export it in non-solid format first.");
 		return WIMLIB_ERR_UNSUPPORTED;
 	}
-	if (blob->resource_location == RESOURCE_IN_WIM)
+	if (blob->blob_location == BLOB_IN_WIM)
 		stream_size = blob->rspec->size_in_wim;
 	else
 		stream_size = blob->size;

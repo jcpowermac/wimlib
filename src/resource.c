@@ -719,7 +719,7 @@ read_partial_wim_blob_into_buf(const struct blob_descriptor *blob,
 {
 	u8 *buf = _buf;
 
-	wimlib_assert(blob->resource_location == RESOURCE_IN_WIM);
+	wimlib_assert(blob->blob_location == BLOB_IN_WIM);
 
 	return read_partial_wim_resource(blob->rspec,
 					 blob->offset_in_res + offset,
@@ -741,7 +741,7 @@ skip_chunk_cb(const void *chunk, size_t size, void *_ctx)
 int
 skip_wim_blob(struct blob_descriptor *blob)
 {
-	wimlib_assert(blob->resource_location == RESOURCE_IN_WIM);
+	wimlib_assert(blob->blob_location == BLOB_IN_WIM);
 	wimlib_assert(!(blob->flags & WIM_RESHDR_FLAG_SOLID));
 	DEBUG("Skipping blob (size=%"PRIu64")", blob->size);
 	return read_partial_wim_resource(blob->rspec,
@@ -853,23 +853,23 @@ read_blob_prefix(const struct blob_descriptor *blob, u64 size,
 		   consume_data_callback_t cb, void *cb_ctx)
 {
 	static const read_blob_prefix_handler_t handlers[] = {
-		[RESOURCE_IN_WIM]             = read_wim_blob_prefix,
-		[RESOURCE_IN_FILE_ON_DISK]    = read_file_on_disk_prefix,
-		[RESOURCE_IN_ATTACHED_BUFFER] = read_buffer_prefix,
+		[BLOB_IN_WIM]             = read_wim_blob_prefix,
+		[BLOB_IN_FILE_ON_DISK]    = read_file_on_disk_prefix,
+		[BLOB_IN_ATTACHED_BUFFER] = read_buffer_prefix,
 	#ifdef WITH_FUSE
-		[RESOURCE_IN_STAGING_FILE]    = read_staging_file_prefix,
+		[BLOB_IN_STAGING_FILE]    = read_staging_file_prefix,
 	#endif
 	#ifdef WITH_NTFS_3G
-		[RESOURCE_IN_NTFS_VOLUME]     = read_ntfs_file_prefix,
+		[BLOB_IN_NTFS_VOLUME]     = read_ntfs_file_prefix,
 	#endif
 	#ifdef __WIN32__
-		[RESOURCE_IN_WINNT_FILE_ON_DISK] = read_winnt_file_prefix,
-		[RESOURCE_WIN32_ENCRYPTED]    = read_win32_encrypted_file_prefix,
+		[BLOB_IN_WINNT_FILE_ON_DISK] = read_winnt_file_prefix,
+		[BLOB_WIN32_ENCRYPTED]    = read_win32_encrypted_file_prefix,
 	#endif
 	};
-	wimlib_assert(blob->resource_location < ARRAY_LEN(handlers)
-		      && handlers[blob->resource_location] != NULL);
-	return handlers[blob->resource_location](blob, size, cb, cb_ctx);
+	wimlib_assert(blob->blob_location < ARRAY_LEN(handlers)
+		      && handlers[blob->blob_location] != NULL);
+	return handlers[blob->blob_location](blob, size, cb, cb_ctx);
 }
 
 /* Read the full uncompressed data of the specified blob into the specified
@@ -1362,7 +1362,7 @@ read_blob_list(struct list_head *blob_list,
 			     next2 != blob_list
 			     && (blob_next = (struct blob_descriptor*)
 						((u8*)next2 - list_head_offset),
-				 blob_next->resource_location == RESOURCE_IN_WIM
+				 blob_next->blob_location == BLOB_IN_WIM
 				 && blob_next->rspec == blob->rspec);
 			     next2 = next2->next)
 			{

@@ -192,7 +192,7 @@ read_pwm_blob_header(WIMStruct *pwm, struct blob_descriptor *blob,
 
 		if (ret)
 			goto read_error;
-		blob->resource_location = RESOURCE_NONEXISTENT;
+		blob->blob_location = RESOURCE_NONEXISTENT;
 		memcpy(hdr_ret, &buf.pwm_hdr, sizeof(buf.pwm_hdr));
 		return 0;
 	}
@@ -250,14 +250,14 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 		struct wim_header_disk pwm_hdr;
 		struct blob_descriptor *needed_blob;
 
-		if (found_blob->resource_location != RESOURCE_NONEXISTENT)
+		if (found_blob->blob_location != RESOURCE_NONEXISTENT)
 			blob_unbind_wim_resource_spec(found_blob);
 		ret = read_pwm_blob_header(ctx->wim, found_blob, rspec,
 					   PWM_ALLOW_WIM_HDR, &pwm_hdr);
 		if (ret)
 			goto out;
 
-		if ((found_blob->resource_location != RESOURCE_NONEXISTENT)
+		if ((found_blob->blob_location != RESOURCE_NONEXISTENT)
 		    && !(found_blob->flags & WIM_RESHDR_FLAG_METADATA)
 		    && (needed_blob = lookup_blob(blob_table, found_blob->hash))
 		    && (needed_blob->out_refcnt))
@@ -286,7 +286,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 			if (ret)
 				goto out;
 			ctx->num_blobs_remaining--;
-		} else if (found_blob->resource_location != RESOURCE_NONEXISTENT) {
+		} else if (found_blob->blob_location != RESOURCE_NONEXISTENT) {
 			ret = skip_wim_blob(found_blob);
 			if (ret)
 				goto out;
@@ -312,7 +312,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 	}
 	ret = 0;
 out:
-	if (found_blob && found_blob->resource_location != RESOURCE_IN_WIM)
+	if (found_blob && found_blob->blob_location != BLOB_IN_WIM)
 		FREE(rspec);
 	free_blob_descriptor(found_blob);
 	return ret;
@@ -468,7 +468,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 	 * extracted to more than MAX_OPEN_FILES locations!  */
 
 	memcpy(&tmpfile_blob, orig_blob, sizeof(struct blob_descriptor));
-	tmpfile_blob.resource_location = RESOURCE_IN_FILE_ON_DISK;
+	tmpfile_blob.blob_location = BLOB_IN_FILE_ON_DISK;
 	tmpfile_blob.file_on_disk = ctx->tmpfile_name;
 	ret = 0;
 	for (u32 i = 0; i < orig_refcnt; i++) {

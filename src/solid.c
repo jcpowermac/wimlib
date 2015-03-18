@@ -191,8 +191,8 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 	list_for_each_entry(blob, blob_list, write_blobs_list) {
 		blob->solid_sort_name = NULL;
 		blob->solid_sort_name_nbytes = 0;
-		switch (blob->resource_location) {
-		case RESOURCE_IN_WIM:
+		switch (blob->blob_location) {
+		case BLOB_IN_WIM:
 			if (blob->size != blob->rspec->uncompressed_size)
 				continue;
 			for (int i = 0; i < num_wims; i++)
@@ -206,9 +206,9 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 				       &blob_table.table[load_size_t_unaligned(blob->hash) %
 							   blob_table.capacity]);
 			break;
-		case RESOURCE_IN_FILE_ON_DISK:
+		case BLOB_IN_FILE_ON_DISK:
 	#ifdef __WIN32__
-		case RESOURCE_IN_WINNT_FILE_ON_DISK:
+		case BLOB_IN_WINNT_FILE_ON_DISK:
 	#endif
 			blob_set_solid_sort_name_from_inode(blob, blob->file_inode);
 			break;

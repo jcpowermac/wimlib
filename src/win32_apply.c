@@ -395,7 +395,7 @@ will_externally_back_inode(struct wim_inode *inode, struct win32_apply_ctx *ctx,
 	/* Note: Microsoft's WoF driver errors out if it tries to satisfy a
 	 * read, with ending offset >= 4 GiB, from an externally backed file. */
 	if (!stream ||
-	    stream->resource_location != RESOURCE_IN_WIM ||
+	    stream->blob_location != BLOB_IN_WIM ||
 	    stream->rspec->wim != ctx->common.wim ||
 	    stream->size != stream->rspec->uncompressed_size ||
 	    stream->size > 4200000000)

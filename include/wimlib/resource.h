@@ -13,7 +13,7 @@ struct wim_image_metadata;
 /*
  * Specification of a resource in a WIM file.
  *
- * If a `struct blob_descriptor' blob has (blob->resource_location == RESOURCE_IN_WIM),
+ * If a `struct blob_descriptor' blob has (blob->blob_location == BLOB_IN_WIM),
  * then blob->rspec points to an instance of this structure.
  *
  * Normally, there is a one-to-one correspondence between "blobs" (each of which

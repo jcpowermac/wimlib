@@ -293,7 +293,8 @@ inode_has_named_data_stream(const struct wim_inode *inode)
  * Resolve an inode's attributes.
  *
  * For each attribute, this replaces the SHA-1 message digest of the blob data
- * with a pointer to the 'struct blob_descriptor' itself.  Blobs are looked up in @table.
+ * with a pointer to the 'struct blob_descriptor' for the blob.  Blob
+ * descriptors are looked up in @table.
  *
  * If @force is %false:
  *	If any of the needed blobs do not exist in @table, return

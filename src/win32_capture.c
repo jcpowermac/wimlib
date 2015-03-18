@@ -838,7 +838,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
-	blob->resource_location = RESOURCE_WIN32_ENCRYPTED;
+	blob->blob_location = BLOB_WIN32_ENCRYPTED;
 
 	/* OpenEncryptedFileRaw() expects a Win32 name.  */
 	wimlib_assert(!wmemcmp(blob->file_on_disk, L"\\??\\", 4));
@@ -971,7 +971,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		return WIMLIB_ERR_NOMEM;
 	}
 	blob->file_on_disk = stream_path;
-	blob->resource_location = RESOURCE_IN_WINNT_FILE_ON_DISK;
+	blob->blob_location = BLOB_IN_WINNT_FILE_ON_DISK;
 	blob->size = stream_size;
 	if (ads_entry) {
 		stream_id = ads_entry->stream_id;

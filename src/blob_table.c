@@ -107,7 +107,7 @@ new_blob_descriptor(void)
 
 	blob->refcnt = 1;
 
-	/* blob->resource_location = RESOURCE_NONEXISTENT  */
+	/* blob->blob_location = RESOURCE_NONEXISTENT  */
 	BUILD_BUG_ON(RESOURCE_NONEXISTENT != 0);
 
 	return blob;
@@ -122,18 +122,18 @@ clone_blob_descriptor(const struct blob_descriptor *old)
 	if (new == NULL)
 		return NULL;
 
-	switch (new->resource_location) {
-	case RESOURCE_IN_WIM:
+	switch (new->blob_location) {
+	case BLOB_IN_WIM:
 		list_add(&new->rspec_node, &new->rspec->blob_list);
 		break;
 
-	case RESOURCE_IN_FILE_ON_DISK:
+	case BLOB_IN_FILE_ON_DISK:
 #ifdef __WIN32__
-	case RESOURCE_IN_WINNT_FILE_ON_DISK:
-	case RESOURCE_WIN32_ENCRYPTED:
+	case BLOB_IN_WINNT_FILE_ON_DISK:
+	case BLOB_WIN32_ENCRYPTED:
 #endif
 #ifdef WITH_FUSE
-	case RESOURCE_IN_STAGING_FILE:
+	case BLOB_IN_STAGING_FILE:
 		BUILD_BUG_ON((void*)&old->file_on_disk !=
 			     (void*)&old->staging_file_name);
 #endif
@@ -141,13 +141,13 @@ clone_blob_descriptor(const struct blob_descriptor *old)
 		if (new->file_on_disk == NULL)
 			goto out_free;
 		break;
-	case RESOURCE_IN_ATTACHED_BUFFER:
+	case BLOB_IN_ATTACHED_BUFFER:
 		new->attached_buffer = memdup(old->attached_buffer, old->size);
 		if (new->attached_buffer == NULL)
 			goto out_free;
 		break;
 #ifdef WITH_NTFS_3G
-	case RESOURCE_IN_NTFS_VOLUME:
+	case BLOB_IN_NTFS_VOLUME:
 		if (old->ntfs_loc) {
 			struct ntfs_location *loc;
 			loc = memdup(old->ntfs_loc, sizeof(struct ntfs_location));
@@ -181,29 +181,29 @@ out_free:
 void
 blob_put_resource(struct blob_descriptor *blob)
 {
-	switch (blob->resource_location) {
-	case RESOURCE_IN_WIM:
+	switch (blob->blob_location) {
+	case BLOB_IN_WIM:
 		list_del(&blob->rspec_node);
 		if (list_empty(&blob->rspec->blob_list))
 			FREE(blob->rspec);
 		break;
-	case RESOURCE_IN_FILE_ON_DISK:
+	case BLOB_IN_FILE_ON_DISK:
 #ifdef __WIN32__
-	case RESOURCE_IN_WINNT_FILE_ON_DISK:
-	case RESOURCE_WIN32_ENCRYPTED:
+	case BLOB_IN_WINNT_FILE_ON_DISK:
+	case BLOB_WIN32_ENCRYPTED:
 #endif
 #ifdef WITH_FUSE
-	case RESOURCE_IN_STAGING_FILE:
+	case BLOB_IN_STAGING_FILE:
 		BUILD_BUG_ON((void*)&blob->file_on_disk !=
 			     (void*)&blob->staging_file_name);
 #endif
-	case RESOURCE_IN_ATTACHED_BUFFER:
+	case BLOB_IN_ATTACHED_BUFFER:
 		BUILD_BUG_ON((void*)&blob->file_on_disk !=
 			     (void*)&blob->attached_buffer);
 		FREE(blob->file_on_disk);
 		break;
 #ifdef WITH_NTFS_3G
-	case RESOURCE_IN_NTFS_VOLUME:
+	case BLOB_IN_NTFS_VOLUME:
 		if (blob->ntfs_loc) {
 			FREE(blob->ntfs_loc->path);
 			FREE(blob->ntfs_loc->stream_name);
@@ -229,7 +229,7 @@ free_blob_descriptor(struct blob_descriptor *blob)
 static bool
 should_retain_blob(const struct blob_descriptor *blob)
 {
-	return blob->resource_location == RESOURCE_IN_WIM;
+	return blob->blob_location == BLOB_IN_WIM;
 }
 
 static void
@@ -245,7 +245,7 @@ finalize_blob(struct blob_descriptor *blob)
  *
  * If the blob's reference count reaches 0, we may unlink it from @table and
  * free it.  However, we retain blobs with 0 reference count that originated
- * from WIM files (RESOURCE_IN_WIM).  We do this for two reasons:
+ * from WIM files (BLOB_IN_WIM).  We do this for two reasons:
  *
  * 1. This prevents information about valid blobs in a WIM file --- blobs which
  *    will continue to be present after appending to the WIM file --- from being
@@ -276,7 +276,7 @@ blob_decrement_refcnt(struct blob_descriptor *blob, struct blob_table *table)
 			 * for a FUSE mount, unlink the staging file.  (Note
 			 * that there still may be open file descriptors to it.)
 			 * */
-			if (blob->resource_location == RESOURCE_IN_STAGING_FILE)
+			if (blob->blob_location == BLOB_IN_STAGING_FILE)
 				unlinkat(blob->staging_dir_fd,
 					 blob->staging_file_name, 0);
 		#endif
@@ -415,14 +415,14 @@ cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 	blob1 = *(const struct blob_descriptor**)p1;
 	blob2 = *(const struct blob_descriptor**)p2;
 
-	v = (int)blob1->resource_location - (int)blob2->resource_location;
+	v = (int)blob1->blob_location - (int)blob2->blob_location;
 
 	/* Different resource locations?  */
 	if (v)
 		return v;
 
-	switch (blob1->resource_location) {
-	case RESOURCE_IN_WIM:
+	switch (blob1->blob_location) {
+	case BLOB_IN_WIM:
 		wim1 = blob1->rspec->wim;
 		wim2 = blob2->rspec->wim;
 
@@ -444,24 +444,24 @@ cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 
 		return cmp_u64(blob1->offset_in_res, blob2->offset_in_res);
 
-	case RESOURCE_IN_FILE_ON_DISK:
+	case BLOB_IN_FILE_ON_DISK:
 #ifdef WITH_FUSE
-	case RESOURCE_IN_STAGING_FILE:
+	case BLOB_IN_STAGING_FILE:
 #endif
 #ifdef __WIN32__
-	case RESOURCE_IN_WINNT_FILE_ON_DISK:
-	case RESOURCE_WIN32_ENCRYPTED:
+	case BLOB_IN_WINNT_FILE_ON_DISK:
+	case BLOB_WIN32_ENCRYPTED:
 #endif
 		/* Compare files by path: just a heuristic that will place files
 		 * in the same directory next to each other.  */
 		return tstrcmp(blob1->file_on_disk, blob2->file_on_disk);
 #ifdef WITH_NTFS_3G
-	case RESOURCE_IN_NTFS_VOLUME:
+	case BLOB_IN_NTFS_VOLUME:
 		return tstrcmp(blob1->ntfs_loc->path, blob2->ntfs_loc->path);
 #endif
 	default:
 		/* No additional sorting order defined for this resource
-		 * location (e.g. RESOURCE_IN_ATTACHED_BUFFER); simply compare
+		 * location (e.g. BLOB_IN_ATTACHED_BUFFER); simply compare
 		 * everything equal to each other.  */
 		return 0;
 	}
@@ -1090,7 +1090,7 @@ read_blob_table(WIMStruct *wim)
 
 	free_cur_entry_and_continue:
 		if (cur_solid_rspecs &&
-		    cur_entry->resource_location == RESOURCE_IN_WIM)
+		    cur_entry->blob_location == BLOB_IN_WIM)
 			blob_unbind_wim_resource_spec(cur_entry);
 		free_blob_descriptor(cur_entry);
 	}
@@ -1269,7 +1269,7 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
 			free_blob_descriptor(blob);
 			return NULL;
 		}
-		blob->resource_location = RESOURCE_IN_ATTACHED_BUFFER;
+		blob->blob_location = BLOB_IN_ATTACHED_BUFFER;
 		blob->attached_buffer = buffer_copy;
 		blob->size = size;
 		copy_hash(blob->hash, hash);
@@ -1344,7 +1344,7 @@ blob_to_wimlib_resource_entry(const struct blob_descriptor *blob,
 	memset(wentry, 0, sizeof(*wentry));
 
 	wentry->uncompressed_size = blob->size;
-	if (blob->resource_location == RESOURCE_IN_WIM) {
+	if (blob->blob_location == BLOB_IN_WIM) {
 		wentry->part_number = blob->rspec->wim->hdr.part_number;
 		if (blob->flags & WIM_RESHDR_FLAG_SOLID) {
 			wentry->compressed_size = 0;

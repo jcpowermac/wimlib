@@ -769,7 +769,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 	}
 
 	new_blob->refcnt            = inode->i_nlink;
-	new_blob->resource_location = RESOURCE_IN_STAGING_FILE;
+	new_blob->blob_location = BLOB_IN_STAGING_FILE;
 	new_blob->staging_file_name = staging_file_name;
 	new_blob->staging_dir_fd    = ctx->staging_dir_fd;
 	new_blob->size              = size;
@@ -1562,7 +1562,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 	 * staging directory if we are opening it writable.  */
 
 	if (flags_writable(fi->flags) &&
-            (!blob || blob->resource_location != RESOURCE_IN_STAGING_FILE)) {
+            (!blob || blob->blob_location != BLOB_IN_STAGING_FILE)) {
 		ret = extract_resource_to_staging_dir(inode,
 						      attr_idx,
 						      &blob,
@@ -1577,7 +1577,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 	if (ret)
 		return ret;
 
-	if (blob && blob->resource_location == RESOURCE_IN_STAGING_FILE) {
+	if (blob && blob->blob_location == BLOB_IN_STAGING_FILE) {
 		int raw_fd;
 
 		raw_fd = openat(blob->staging_dir_fd, blob->staging_file_name,
@@ -1633,19 +1633,19 @@ wimfs_read(const char *path, char *buf, size_t size,
 	if (!size)
 		return 0;
 
-	switch (blob->resource_location) {
-	case RESOURCE_IN_WIM:
+	switch (blob->blob_location) {
+	case BLOB_IN_WIM:
 		if (read_partial_wim_stream_into_buf(blob, size, offset, buf))
 			ret = errno ? -errno : -EIO;
 		else
 			ret = size;
 		break;
-	case RESOURCE_IN_STAGING_FILE:
+	case BLOB_IN_STAGING_FILE:
 		ret = raw_pread(&fd->f_staging_fd, buf, size, offset);
 		if (ret < 0)
 			ret = -errno;
 		break;
-	case RESOURCE_IN_ATTACHED_BUFFER:
+	case BLOB_IN_ATTACHED_BUFFER:
 		memcpy(buf, blob->attached_buffer + offset, size);
 		ret = size;
 		break;
@@ -1883,7 +1883,7 @@ wimfs_truncate(const char *path, off_t size)
 	if (!blob && !size)
 		return 0;
 
-	if (!blob || blob->resource_location != RESOURCE_IN_STAGING_FILE) {
+	if (!blob || blob->blob_location != BLOB_IN_STAGING_FILE) {
 		return extract_resource_to_staging_dir(dentry->d_inode,
 						       attr_idx, &blob,
 						       size, ctx);

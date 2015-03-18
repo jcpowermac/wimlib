@@ -9,11 +9,11 @@
 /* An enumerated type that identifies where the blob's data is actually located.
  *
  * If we open a WIM and read its blob table, the location is set to
- * RESOURCE_IN_WIM since all the blobs will initially be located in the WIM.
+ * BLOB_IN_WIM since all the blobs will initially be located in the WIM.
  * However, to handle situations such as image capture and image mount, we allow
  * the actual location of the blob to be somewhere else, such as an external
  * file.  */
-enum resource_location {
+enum blob_location {
 	/* The blob's data does not exist.  This is a temporary state only.  */
 	RESOURCE_NONEXISTENT = 0,
 
@@ -22,20 +22,20 @@ enum resource_location {
 	 * identifies the offset at which this particular blob begins in the
 	 * uncompressed data of the resource; this is normally 0, but a WIM
 	 * resource can be "solid" and contain multiple blobs.  */
-	RESOURCE_IN_WIM,
+	BLOB_IN_WIM,
 
 	/* The blob is located in the external file named by @file_on_disk.
 	 */
-	RESOURCE_IN_FILE_ON_DISK,
+	BLOB_IN_FILE_ON_DISK,
 
 	/* The blob is directly attached in the in-memory buffer pointed to by
 	 * @attached_buffer.  */
-	RESOURCE_IN_ATTACHED_BUFFER,
+	BLOB_IN_ATTACHED_BUFFER,
 
 #ifdef WITH_FUSE
 	/* The blob is located in the external file named by @staging_file_name,
 	 * located in the staging directory for a read-write mount.  */
-	RESOURCE_IN_STAGING_FILE,
+	BLOB_IN_STAGING_FILE,
 #endif
 
 #ifdef WITH_NTFS_3G
@@ -43,19 +43,19 @@ enum resource_location {
 	 * filename, data stream name, and by whether it is a reparse point or
 	 * not.  @ntfs_loc points to a structure containing this information.
 	 */
-	RESOURCE_IN_NTFS_VOLUME,
+	BLOB_IN_NTFS_VOLUME,
 #endif
 
 #ifdef __WIN32__
 	/* Windows only: the blob is located in the external file named by
 	 * @file_on_disk, which is in the Windows NT namespace and may specify a
 	 * named data stream.  */
-	RESOURCE_IN_WINNT_FILE_ON_DISK,
+	BLOB_IN_WINNT_FILE_ON_DISK,
 
 	/* Windows only: the blob is located in the external file named by
 	 * @file_on_disk, but the file is encrypted and must be read using the
 	 * appropriate Windows API.  */
-	RESOURCE_WIN32_ENCRYPTED, 
+	BLOB_WIN32_ENCRYPTED, 
 #endif
 };
 
@@ -82,8 +82,8 @@ struct blob_descriptor {
 	/* Blob flags (WIM_RESHDR_FLAG_*).  */
 	u32 flags : 8;
 
-	/* One of the `enum resource_location' values documented above.  */
-	u32 resource_location : 4;
+	/* One of the `enum blob_location' values documented above.  */
+	u32 blob_location : 4;
 
 	/* 1 if this blob has not had a SHA-1 message digest calculated for it
 	 * yet.  */
@@ -154,7 +154,7 @@ struct blob_descriptor {
 #endif
 
 	/* Specification of where this blob is actually located.  Which member
-	 * is valid is determined by the @resource_location field.  */
+	 * is valid is determined by the @blob_location field.  */
 	union {
 		struct {
 			struct wim_resource_spec *rspec;
@@ -342,17 +342,17 @@ blob_zero_out_refcnt(struct blob_descriptor *blob, void *ignore);
 static inline bool
 blob_is_in_solid_wim_resource(const struct blob_descriptor * blob)
 {
-	return blob->resource_location == RESOURCE_IN_WIM &&
+	return blob->blob_location == BLOB_IN_WIM &&
 	       blob->size != blob->rspec->uncompressed_size;
 }
 
 static inline bool
 blob_is_in_file(const struct blob_descriptor *blob)
 {
-	return blob->resource_location == RESOURCE_IN_FILE_ON_DISK
+	return blob->blob_location == BLOB_IN_FILE_ON_DISK
 #ifdef __WIN32__
-	    || blob->resource_location == RESOURCE_IN_WINNT_FILE_ON_DISK
-	    || blob->resource_location == RESOURCE_WIN32_ENCRYPTED
+	    || blob->blob_location == BLOB_IN_WINNT_FILE_ON_DISK
+	    || blob->blob_location == BLOB_WIN32_ENCRYPTED
 #endif
 	   ;
 }
@@ -369,7 +369,7 @@ blob_targets(struct blob_descriptor *blob)
 static inline void
 blob_bind_wim_resource_spec(struct blob_descriptor *blob, struct wim_resource_spec *rspec)
 {
-	blob->resource_location = RESOURCE_IN_WIM;
+	blob->blob_location = BLOB_IN_WIM;
 	blob->rspec = rspec;
 	list_add_tail(&blob->rspec_node, &rspec->blob_list);
 }
@@ -378,7 +378,7 @@ static inline void
 blob_unbind_wim_resource_spec(struct blob_descriptor *blob)
 {
 	list_del(&blob->rspec_node);
-	blob->resource_location = RESOURCE_NONEXISTENT;
+	blob->blob_location = RESOURCE_NONEXISTENT;
 }
 
 extern void

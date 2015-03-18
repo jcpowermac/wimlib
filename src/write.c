@@ -115,12 +115,12 @@ blob_filtered(const struct blob_descriptor *blob, const struct filter_context *c
 	wim = ctx->wim;
 
 	if (write_flags & WIMLIB_WRITE_FLAG_OVERWRITE &&
-	    blob->resource_location == RESOURCE_IN_WIM &&
+	    blob->blob_location == BLOB_IN_WIM &&
 	    blob->rspec->wim == wim)
 		return 1;
 
 	if (write_flags & WIMLIB_WRITE_FLAG_SKIP_EXTERNAL_WIMS &&
-	    blob->resource_location == RESOURCE_IN_WIM &&
+	    blob->blob_location == BLOB_IN_WIM &&
 	    blob->rspec->wim != wim)
 		return -1;
 
@@ -169,7 +169,7 @@ can_raw_copy(const struct blob_descriptor *blob,
 	if (out_ctype == WIMLIB_COMPRESSION_TYPE_NONE)
 		return false;
 
-	if (blob->resource_location != RESOURCE_IN_WIM)
+	if (blob->blob_location != BLOB_IN_WIM)
 		return false;
 
 	rspec = blob->rspec;
@@ -224,7 +224,7 @@ blob_set_out_reshdr_for_reuse(struct blob_descriptor *blob)
 {
 	const struct wim_resource_spec *rspec;
 
-	wimlib_assert(blob->resource_location == RESOURCE_IN_WIM);
+	wimlib_assert(blob->blob_location == BLOB_IN_WIM);
 	rspec = blob->rspec;
 
 	if (rspec->flags & WIM_RESHDR_FLAG_SOLID) {
@@ -1180,7 +1180,7 @@ compute_blob_list_stats(struct list_head *blob_list,
 	list_for_each_entry(blob, blob_list, write_blobs_list) {
 		num_streams++;
 		total_bytes += blob->size;
-		if (blob->resource_location == RESOURCE_IN_WIM) {
+		if (blob->blob_location == BLOB_IN_WIM) {
 			if (prev_wim_part != blob->rspec->wim) {
 				prev_wim_part = blob->rspec->wim;
 				total_parts++;
@@ -1215,11 +1215,11 @@ find_raw_copy_blobs(struct list_head *blob_list,
 
 	/* Initialize temporary raw_copy_ok flag.  */
 	list_for_each_entry(blob, blob_list, write_blobs_list)
-		if (blob->resource_location == RESOURCE_IN_WIM)
+		if (blob->blob_location == BLOB_IN_WIM)
 			blob->rspec->raw_copy_ok = 0;
 
 	list_for_each_entry_safe(blob, tmp, blob_list, write_blobs_list) {
-		if (blob->resource_location == RESOURCE_IN_WIM &&
+		if (blob->blob_location == BLOB_IN_WIM &&
 		    blob->rspec->raw_copy_ok)
 		{
 			list_move_tail(&blob->write_blobs_list,
@@ -1807,7 +1807,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	blob->resource_location  = RESOURCE_IN_ATTACHED_BUFFER;
+	blob->blob_location  = BLOB_IN_ATTACHED_BUFFER;
 	blob->attached_buffer    = (void*)buf;
 	blob->size               = buf_size;
 	blob->flags              = reshdr_flags;
@@ -1830,7 +1830,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 		copy_hash(hash, blob->hash);
 	ret = 0;
 out_free_lte:
-	blob->resource_location = RESOURCE_NONEXISTENT;
+	blob->blob_location = RESOURCE_NONEXISTENT;
 	free_blob_descriptor(blob);
 	return ret;
 }
@@ -2356,7 +2356,7 @@ write_blob_table(WIMStruct *wim, int image, int write_flags,
 		struct blob_descriptor *blob;
 		list_for_each_entry(blob, blob_table_list, blob_table_list)
 		{
-			if (blob->resource_location == RESOURCE_IN_WIM &&
+			if (blob->blob_location == BLOB_IN_WIM &&
 			    blob->rspec->wim == wim)
 			{
 				blob_set_out_reshdr_for_reuse(blob);
@@ -3075,7 +3075,7 @@ check_resource_offset(struct blob_descriptor *blob, void *_wim)
 	const WIMStruct *wim = _wim;
 	off_t end_offset = *(const off_t*)wim->private;
 
-	if (blob->resource_location == RESOURCE_IN_WIM &&
+	if (blob->blob_location == BLOB_IN_WIM &&
 	    blob->rspec->wim == wim &&
 	    blob->rspec->offset_in_wim + blob->rspec->size_in_wim > end_offset)
 		return WIMLIB_ERR_RESOURCE_ORDER;

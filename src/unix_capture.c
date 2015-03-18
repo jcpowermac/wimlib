@@ -119,7 +119,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		}
 		blob->file_on_disk = file_on_disk;
 		blob->file_inode = inode;
-		blob->resource_location = RESOURCE_IN_FILE_ON_DISK;
+		blob->blob_location = BLOB_IN_FILE_ON_DISK;
 		blob->size = size;
 	} else {
 		blob = NULL;

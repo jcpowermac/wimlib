@@ -228,7 +228,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
 			}
-			blob->resource_location = RESOURCE_IN_NTFS_VOLUME;
+			blob->blob_location = BLOB_IN_NTFS_VOLUME;
 			blob->ntfs_loc = ntfs_loc;
 			ntfs_loc = NULL;
 			if (type == AT_REPARSE_POINT) {

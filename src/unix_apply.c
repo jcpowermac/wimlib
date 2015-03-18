@@ -502,7 +502,7 @@ unix_create_symlink(const struct wim_inode *inode, const char *path,
 	int ret;
 	struct blob_descriptor blob_override;
 
-	blob_override.resource_location = RESOURCE_IN_ATTACHED_BUFFER;
+	blob_override.blob_location = BLOB_IN_ATTACHED_BUFFER;
 	blob_override.attached_buffer = (void *)rpdata;
 	blob_override.size = rpdatalen;
 
