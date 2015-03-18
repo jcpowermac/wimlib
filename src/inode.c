@@ -155,7 +155,17 @@ inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
 }
 
 struct wim_attribute *
-inode_get_attribute(struct wim_inode *inode, int attr_type,
+inode_get_unnamed_data_attribute(const struct wim_inode *inode)
+{
+	for (unsigned i = 0; i < inode->i_num_attrs; i++)
+		if (inode->i_attrs[i].attr_type == ATTR_DATA &&
+		    !*inode->i_attrs[i].attr_name)
+			return &inode->i_attrs[i];
+	return NULL;
+}
+
+struct wim_attribute *
+inode_get_attribute(const struct wim_inode *inode, int attr_type,
 		    const tchar *attr_name)
 {
 	const utf16lechar *ustr;
@@ -170,7 +180,6 @@ inode_get_attribute(struct wim_inode *inode, int attr_type,
 
 	return attr;
 }
-
 
 struct wim_attribute *
 inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
@@ -395,48 +404,6 @@ attribute_blob(const struct wim_attribute *attr, const struct blob_table *table)
 		return lookup_blob(table, attr->attr_hash);
 }
 
-/*
- * Return the blob descriptor for the unnamed data stream of a *resolved* inode,
- * or NULL if the inode's unnamed data stream is empty.  Also return the 0-based
- * index of the unnamed data stream in *stream_idx_ret.
- */
-struct blob_descriptor *
-inode_unnamed_stream_resolved(const struct wim_inode *inode,
-			      unsigned *attr_idx_ret)
-{
-	struct wim_attribute *attr;
-
-	wimlib_assert(inode->i_resolved);
-
-	attr = inode_get_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
-	if (!attr)
-		return NULL;
-
-	if (attr_idx_ret)
-		*attr_idx_ret = attr - inode->i_attrs;
-	return attr->attr_blob;
-}
-
-/*
- * Return the blob descriptor for the unnamed data stream of an inode, or NULL
- * if the inode's unnamed data stream is empty or not available.
- */
-struct blob_descriptor *
-inode_unnamed_stream(const struct wim_inode *inode,
-		     const struct blob_table *table)
-{
-	struct wim_attribute *attr;
-
-	attr = inode_get_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
-	if (!attr)
-		return NULL;
-
-	if (inode->i_resolved)
-		return attr->attr_blob;
-	else
-		return lookup_blob(table, attr->attr_hash);
-}
-
 /* Return the SHA-1 message digest of the data of the specified attribute, or a
  * void SHA-1 of all zeroes if the specified attribute is empty.   */
 const u8 *
@@ -448,14 +415,34 @@ attribute_hash(const struct wim_attribute *attr)
 		return attr->attr_hash;
 }
 
+/*
+ * Return the blob descriptor for the unnamed data stream of an inode, or NULL
+ * if the blob for the inode's unnamed data stream is empty or not available.
+ */
+struct blob_descriptor *
+inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
+				       const struct blob_table *table)
+{
+	struct wim_attribute *attr;
+
+	attr = inode_get_unnamed_data_attribute(inode);
+	if (!attr)
+		return NULL;
+
+	if (inode->i_resolved)
+		return attr->attr_blob;
+	else
+		return lookup_blob(table, attr->attr_hash);
+}
+
 /* Return the SHA-1 message digest of the unnamed data stream of the inode, or a
  * void SHA-1 of all zeroes if the inode's unnamed data stream is empty.   */
 const u8 *
-inode_unnamed_stream_hash(const struct wim_inode *inode)
+inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 {
 	const struct wim_attribute *attr;
 	
-	attr = inode_get_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
+	attr = inode_get_unnamed_data_attribute(inode);
 	if (!attr)
 		return zero_hash;
 

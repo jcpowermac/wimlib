@@ -76,14 +76,13 @@ struct blob_descriptor {
 	/* Uncompressed size of this blob  */
 	u64 size;
 
-	/* Blob flags (WIM_RESHDR_FLAG_*)  */
-	u32 flags : 8;
-
 	/* One of the `enum blob_location' values documented above.  */
 	u32 blob_location : 4;
 
-	/* 1 if this blob has not had a SHA-1 message digest calculated for it
-	 * yet.  */
+	/* Blob flags (WIM_RESHDR_FLAG_*)  */
+	u32 flags : 8;
+
+	/* 1 iff the SHA-1 message digest of this blob is unknown.  */
 	u32 unhashed : 1;
 
 	/* Temoorary fields used when writing blobs; set as documented for
@@ -91,11 +90,11 @@ struct blob_descriptor {
 	u32 unique_size : 1;
 	u32 will_be_in_output_wim : 1;
 
-	/* Set to 1 when a metadata entry has its checksum changed; in such
-	 * cases the hash cannot be used to verify the data if the metadata
-	 * resource is read again.  (This could be avoided if we used separate
-	 * fields for input/output checksum, but most blobs wouldn't need this.)
-	 * */
+	/* Set to 1 when a metadata resource has been changed.  In such cases
+	 * the hash, cannot be used to verify the data if the metadata resource
+	 * is read again.  (This could be avoided if we used separate fields for
+	 * input/output checksum, but most blobs wouldn't need this.)
+	 */
 	u32 dont_check_metadata_hash : 1;
 
 	u32 may_send_done_with_file : 1;
@@ -104,20 +103,19 @@ struct blob_descriptor {
 	u32 was_exported : 1;
 
 	union {
-		/* SHA-1 message digest of the blob's data.  */
+		/*
+		 * For unhashed == 0: 'hash' is the SHA-1 message digest of the
+		 * blob's data.  'hash_short' allows accessing just a prefix of
+		 * the SHA-1 message digest, which is useful for getting a "hash
+		 * code" for hash table lookup/insertion.
+		 */
 		u8 hash[SHA1_HASH_SIZE];
-
-		/* First 4 or 8 bytes of the SHA-1 message digest, used for
-		 * inserting the entry into the hash table.  Since the SHA-1
-		 * message digest can be considered random, we don't really need
-		 * the full 20 byte hash just to insert the entry in a hash
-		 * table.  */
 		size_t hash_short;
 
-		/* Unhashed entries only (unhashed == 1): these variables make
-		 * it possible to find the attribute that references this blob.
-		 * There can be at most 1 such pointer, as we can only join
-		 * duplicate blobs after they have been hashed.  */
+		/* For unhashed == 1: these variables make it possible to find
+		 * the attribute that references this blob.  There can be at
+		 * most one such reference, since we can only join duplicate
+		 * blobs after they have been hashed.  */
 		struct {
 			struct wim_inode *back_inode;
 			u32 back_attr_id;
@@ -318,7 +316,7 @@ extern void
 blob_to_wimlib_resource_entry(const struct blob_descriptor *blob,
 			      struct wimlib_resource_entry *wentry);
 
-/* Functions to sort a list of blobs  */
+/* Functions to sort a list of blob descriptors  */
 extern int
 sort_blob_list(struct list_head *blob_list,
 	       size_t list_head_offset,

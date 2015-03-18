@@ -223,7 +223,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 				ntfs_loc->stream_name_nchars = name_length;
 			}
 
-			blob = new_blob();
+			blob = new_blob_descriptor();
 			if (!blob) {
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
@@ -236,14 +236,14 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 					ERROR("Invalid reparse data on \"%s\" "
 					      "(only %u bytes)!", path, (unsigned)data_size);
 					ret = WIMLIB_ERR_NTFS_3G;
-					goto out_free_lte;
+					goto out_free_blob;
 				}
 				blob->ntfs_loc->is_reparse_point = true;
 				blob->size = data_size - 8;
 				ret = read_reparse_tag(ni, blob->ntfs_loc,
 						       &inode->i_reparse_tag);
 				if (ret)
-					goto out_free_lte;
+					goto out_free_blob;
 			} else {
 				blob->ntfs_loc->is_reparse_point = false;
 				blob->size = data_size;
@@ -255,7 +255,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 						   attr_record_name(actx->attr));
 		if (!attr) {
 			ret = WIMLIB_ERR_NOMEM;
-			goto out_free_lte;
+			goto out_free_blob;
 		}
 		attr->attr_blob = blob;
 		if (blob)
@@ -268,7 +268,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 		ret = WIMLIB_ERR_NTFS_3G;
 	}
 	goto out_put_actx;
-out_free_lte:
+out_free_blob:
 	free_blob_descriptor(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {

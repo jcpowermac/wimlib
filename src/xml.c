@@ -1216,7 +1216,8 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 	{
 		struct blob_descriptor *blob;
 
-		blob = inode_unnamed_lte(inode, info->blob_table);
+		blob = inode_get_blob_for_unnamed_data_stream(inode,
+							      info->blob_table);
 		if (blob) {
 			info->total_bytes += blob->size;
 			if (!dentry_is_first_in_inode(dentry))
@@ -1224,9 +1225,12 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 		}
 
 		if (inode->i_nlink >= 2 && dentry_is_first_in_inode(dentry)) {
-			for (unsigned i = 0; i < inode->i_num_ads; i++) {
-				if (inode->i_ads_entries[i].stream_name_nbytes) {
-					blob = inode_stream_lte(inode, i + 1, info->blob_table);
+			for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+				if (inode->i_attrs[i].attr_type == ATTR_DATA &&
+				    *inode->i_attrs[i].attr_name)
+				{
+					blob = attribute_blob(&inode->i_attrs[i],
+							      info->blob_table);
 					if (blob) {
 						info->hard_link_bytes += inode->i_nlink *
 									 blob->size;

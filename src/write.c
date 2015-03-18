@@ -735,16 +735,16 @@ write_blob_begin_read(struct blob_descriptor *blob, void *_ctx)
 	 * might be costly to decompress.  */
 	if (ctx->blob_table != NULL && blob->unhashed && !blob->unique_size) {
 
-		struct blob_descriptor *lte_new;
+		struct blob_descriptor *new_blob;
 
-		ret = hash_unhashed_stream(blob, ctx->blob_table, &lte_new);
+		ret = hash_unhashed_blob(blob, ctx->blob_table, &new_blob);
 		if (ret)
 			return ret;
-		if (lte_new != blob) {
+		if (new_blob != blob) {
 			/* Duplicate stream detected.  */
 
-			if (lte_new->will_be_in_output_wim ||
-			    blob_filtered(lte_new, ctx->filter_ctx))
+			if (new_blob->will_be_in_output_wim ||
+			    blob_filtered(new_blob, ctx->filter_ctx))
 			{
 				/* The duplicate stream is already being
 				 * included in the output WIM, or it would be
@@ -758,8 +758,8 @@ write_blob_begin_read(struct blob_descriptor *blob, void *_ctx)
 							      blob->size, 1, true);
 				list_del(&blob->write_blobs_list);
 				list_del(&blob->blob_table_list);
-				if (lte_new->will_be_in_output_wim)
-					lte_new->out_refcnt += blob->out_refcnt;
+				if (new_blob->will_be_in_output_wim)
+					new_blob->out_refcnt += blob->out_refcnt;
 				if (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID)
 					ctx->cur_write_res_size -= blob->size;
 				if (!ret)
@@ -778,14 +778,14 @@ write_blob_begin_read(struct blob_descriptor *blob, void *_ctx)
 				DEBUG("Stream duplicate, but not already "
 				      "selected for writing.");
 				list_replace(&blob->write_blobs_list,
-					     &lte_new->write_blobs_list);
+					     &new_blob->write_blobs_list);
 				list_replace(&blob->blob_table_list,
-					     &lte_new->blob_table_list);
+					     &new_blob->blob_table_list);
 				blob->will_be_in_output_wim = 0;
-				lte_new->out_refcnt = blob->out_refcnt;
-				lte_new->will_be_in_output_wim = 1;
-				lte_new->may_send_done_with_file = 0;
-				blob = lte_new;
+				new_blob->out_refcnt = blob->out_refcnt;
+				new_blob->will_be_in_output_wim = 1;
+				new_blob->may_send_done_with_file = 0;
+				blob = new_blob;
 			}
 		}
 	}
@@ -977,18 +977,18 @@ write_chunk(struct write_blobs_ctx *ctx, const void *cchunk,
 	if (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID) {
 		/* Wrote chunk in solid mode.  It may have finished multiple
 		 * streams.  */
-		struct blob_descriptor *next_lte;
+		struct blob_descriptor *next_blob;
 
 		while (blob && ctx->cur_write_blob_offset >= blob->size) {
 
 			ctx->cur_write_blob_offset -= blob->size;
 
 			if (ctx->cur_write_blob_offset)
-				next_lte = list_entry(blob->write_blobs_list.next,
+				next_blob = list_entry(blob->write_blobs_list.next,
 						      struct blob_descriptor,
 						      write_blobs_list);
 			else
-				next_lte = NULL;
+				next_blob = NULL;
 
 			ret = done_with_blob(blob, ctx);
 			if (ret)
@@ -996,7 +996,7 @@ write_chunk(struct write_blobs_ctx *ctx, const void *cchunk,
 			list_move_tail(&blob->write_blobs_list, &ctx->blobs_in_solid_resource);
 			completed_stream_count++;
 
-			blob = next_lte;
+			blob = next_blob;
 		}
 	} else {
 		/* Wrote chunk in non-solid mode.  It may have finished a
@@ -1800,17 +1800,17 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	int ret;
 	struct blob_descriptor *blob;
 
-	/* Set up a temporary blob table entry to provide to
+	/* Set up a temporary blob descriptor to provide to
 	 * write_wim_resource().  */
 
-	blob = new_blob();
+	blob = new_blob_descriptor();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	blob->blob_location  = BLOB_IN_ATTACHED_BUFFER;
-	blob->attached_buffer    = (void*)buf;
-	blob->size               = buf_size;
-	blob->flags              = reshdr_flags;
+	blob->blob_location = BLOB_IN_ATTACHED_BUFFER;
+	blob->attached_buffer = (void*)buf;
+	blob->size = buf_size;
+	blob->flags = reshdr_flags;
 
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_PIPABLE) {
 		sha1_buffer(buf, buf_size, blob->hash);
@@ -1822,14 +1822,14 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	ret = write_wim_resource(blob, out_fd, out_ctype, out_chunk_size,
 				 write_resource_flags);
 	if (ret)
-		goto out_free_lte;
+		goto out_free_blob;
 
 	copy_reshdr(out_reshdr, &blob->out_reshdr);
 
 	if (hash)
 		copy_hash(hash, blob->hash);
 	ret = 0;
-out_free_lte:
+out_free_blob:
 	blob->blob_location = BLOB_NONEXISTENT;
 	free_blob_descriptor(blob);
 	return ret;
@@ -1863,15 +1863,15 @@ blob_size_table_insert(struct blob_descriptor *blob, void *_tab)
 {
 	struct blob_size_table *tab = _tab;
 	size_t pos;
-	struct blob_descriptor *same_size_lte;
+	struct blob_descriptor *same_size_blob;
 	struct hlist_node *tmp;
 
 	pos = hash_u64(blob->size) % tab->capacity;
 	blob->unique_size = 1;
-	hlist_for_each_entry(same_size_lte, tmp, &tab->array[pos], hash_list_2) {
-		if (same_size_lte->size == blob->size) {
+	hlist_for_each_entry(same_size_blob, tmp, &tab->array[pos], hash_list_2) {
+		if (same_size_blob->size == blob->size) {
 			blob->unique_size = 0;
-			same_size_lte->unique_size = 0;
+			same_size_blob->unique_size = 0;
 			break;
 		}
 	}
@@ -1920,10 +1920,10 @@ inode_find_blobs_to_reference(const struct wim_inode *inode,
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		struct blob_descriptor *blob;
 		
-		blob = inode_attribute_blob(inode, i, table);
+		blob = attribute_blob(&inode->i_attrs[i], table);
 		if (blob)
 			reference_blob_for_write(blob, blob_list, inode->i_nlink);
-		else if (!is_zero_hash(inode_attribute_hash(inode, i)))
+		else if (!is_zero_hash(attribute_hash(&inode->i_attrs[i])))
 			return WIMLIB_ERR_RESOURCE_NOT_FOUND;
 	}
 	return 0;
@@ -1953,8 +1953,8 @@ image_find_blobs_to_reference(WIMStruct *wim)
 	blob_list = wim->private;
 	image_for_each_inode(inode, imd) {
 		ret = inode_find_blobs_to_reference(inode,
-						      wim->blob_table,
-						      blob_list);
+						    wim->blob_table,
+						    blob_list);
 		if (ret)
 			return ret;
 	}
@@ -2021,8 +2021,8 @@ insert_other_if_hard_filtered(struct blob_descriptor *blob, void *_ctx)
 
 static int
 determine_blob_size_uniquity(struct list_head *blob_list,
-			       struct blob_table *lt,
-			       struct filter_context *filter_ctx)
+			     struct blob_table *lt,
+			     struct filter_context *filter_ctx)
 {
 	int ret;
 	struct blob_size_table tab;
@@ -2049,7 +2049,7 @@ determine_blob_size_uniquity(struct list_head *blob_list,
 
 static void
 filter_blob_list_for_write(struct list_head *blob_list,
-			     struct filter_context *filter_ctx)
+			   struct filter_context *filter_ctx)
 {
 	struct blob_descriptor *blob, *tmp;
 
@@ -2176,10 +2176,10 @@ prepare_blob_list_for_write(WIMStruct *wim, int image,
 }
 
 static int
-write_nonmetadata_blobs_to_wim(WIMStruct *wim, int image, int write_flags,
-		  unsigned num_threads,
-		  struct list_head *blob_list_override,
-		  struct list_head *blob_table_list_ret)
+write_nonmetadata_blobs(WIMStruct *wim, int image, int write_flags,
+			unsigned num_threads,
+			struct list_head *blob_list_override,
+			struct list_head *blob_table_list_ret)
 {
 	int ret;
 	struct list_head _blob_list;
@@ -2194,9 +2194,9 @@ write_nonmetadata_blobs_to_wim(WIMStruct *wim, int image, int write_flags,
 		blob_list = &_blob_list;
 		filter_ctx = &_filter_ctx;
 		ret = prepare_blob_list_for_write(wim, image, write_flags,
-						    blob_list,
-						    blob_table_list_ret,
-						    filter_ctx);
+						  blob_list,
+						  blob_table_list_ret,
+						  filter_ctx);
 		if (ret)
 			return ret;
 	} else {
@@ -2215,10 +2215,10 @@ write_nonmetadata_blobs_to_wim(WIMStruct *wim, int image, int write_flags,
 	}
 
 	return wim_write_blob_list(wim,
-				     blob_list,
-				     write_flags,
-				     num_threads,
-				     filter_ctx);
+				   blob_list,
+				   write_flags,
+				   num_threads,
+				   filter_ctx);
 }
 
 static int
@@ -2323,25 +2323,25 @@ close_wim_writable(WIMStruct *wim, int write_flags)
 static int
 cmp_blobs_by_out_rspec(const void *p1, const void *p2)
 {
-	const struct blob_descriptor *lte1, *lte2;
+	const struct blob_descriptor *blob1, *blob2;
 
-	lte1 = *(const struct blob_descriptor**)p1;
-	lte2 = *(const struct blob_descriptor**)p2;
+	blob1 = *(const struct blob_descriptor**)p1;
+	blob2 = *(const struct blob_descriptor**)p2;
 
-	if (lte1->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
-		if (lte2->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
-			if (lte1->out_res_offset_in_wim != lte2->out_res_offset_in_wim)
-				return cmp_u64(lte1->out_res_offset_in_wim,
-					       lte2->out_res_offset_in_wim);
+	if (blob1->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
+		if (blob2->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID) {
+			if (blob1->out_res_offset_in_wim != blob2->out_res_offset_in_wim)
+				return cmp_u64(blob1->out_res_offset_in_wim,
+					       blob2->out_res_offset_in_wim);
 		} else {
 			return 1;
 		}
 	} else {
-		if (lte2->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID)
+		if (blob2->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID)
 			return -1;
 	}
-	return cmp_u64(lte1->out_reshdr.offset_in_wim,
-		       lte2->out_reshdr.offset_in_wim);
+	return cmp_u64(blob1->out_reshdr.offset_in_wim,
+		       blob2->out_reshdr.offset_in_wim);
 }
 
 static int
@@ -2733,9 +2733,9 @@ write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 
 	/* Write blobs needed for the image(s) being included in the output WIM,
 	 * or blobs needed for the split WIM part.  */
-	return write_nonmetadata_blobs_to_wim(wim, image, write_flags,
-					      num_threads, blob_list_override,
-					      blob_table_list_ret);
+	return write_nonmetadata_blobs(wim, image, write_flags,
+				       num_threads, blob_list_override,
+				       blob_table_list_ret);
 
 	/* The blob table, XML data, and header at end are handled by
 	 * finish_write().  */
@@ -2991,10 +2991,10 @@ write_wim_part(WIMStruct *wim,
 	/* Write metadata resources and blobs.  */
 	if (!(write_flags & WIMLIB_WRITE_FLAG_PIPABLE)) {
 		/* Default case: create a normal (non-pipable) WIM.  */
-		ret = write_nonmetadata_blobs_to_wim(wim, image, write_flags,
-						     num_threads,
-						     blob_list_override,
-						     &blob_table_list);
+		ret = write_nonmetadata_blobs(wim, image, write_flags,
+					      num_threads,
+					      blob_list_override,
+					      &blob_table_list);
 		if (ret)
 			goto out_restore_hdr;
 

@@ -193,7 +193,7 @@ add_stream_to_swm(struct blob_descriptor *blob, void *_swm_info)
 	}
 	swm_info->parts[swm_info->num_parts - 1].size += stream_size;
 	if (!(blob->flags & WIM_RESHDR_FLAG_METADATA)) {
-		list_add_tail(&blob->write_streams_list,
+		list_add_tail(&blob->write_blobs_list,
 			      &swm_info->parts[swm_info->num_parts - 1].blob_list);
 	}
 	swm_info->total_bytes += stream_size;

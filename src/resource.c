@@ -916,7 +916,7 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	int ret;
 	struct blob_descriptor *blob;
 
-	blob = new_blob();
+	blob = new_blob_descriptor();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
@@ -958,7 +958,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 
 	wim_res_hdr_to_spec(reshdr, wim, &rspec);
 
-	blob = new_blob();
+	blob = new_blob_descriptor();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 

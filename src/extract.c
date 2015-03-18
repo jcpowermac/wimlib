@@ -386,9 +386,9 @@ extract_chunk_wrapper(const void *chunk, size_t size, void *_ctx)
 		if (ctx->cur_blob_offset == ctx->cur_blob->size)
 			progress->extract.completed_streams += ctx->cur_blob->out_refcnt;
 	} else {
-		const struct blob_target *owners = blob_targets(ctx->cur_blob);
+		const struct blob_target *targets = blob_targets(ctx->cur_blob);
 		for (u32 i = 0; i < ctx->cur_blob->out_refcnt; i++) {
-			const struct wim_inode *inode = owners[i].inode;
+			const struct wim_inode *inode = targets[i].inode;
 			const struct wim_dentry *dentry;
 
 			list_for_each_entry(dentry,
@@ -459,7 +459,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 
 	BUILD_BUG_ON(MAX_OPEN_FILES < ARRAY_LEN(orig_blob->inline_blob_targets));
 
-	struct blob_target *owners = orig_blob->blob_targets;
+	struct blob_target *targets = orig_blob->blob_targets;
 
 	/* Copy the blob's data from the temporary file to each of its
 	 * destinations.
@@ -474,16 +474,16 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 	for (u32 i = 0; i < orig_refcnt; i++) {
 
 		/* Note: it usually doesn't matter whether we pass the original
-		 * blob entry to callbacks provided by the extraction backend as
-		 * opposed to the tmpfile blob entry, since they shouldn't
-		 * actually read data from the stream other than through the
-		 * read_blob_prefix() call below.  But for
+		 * blob descriptor to callbacks provided by the extraction
+		 * backend as opposed to the tmpfile blob entry, since they
+		 * shouldn't actually read data from the stream other than
+		 * through the read_blob_prefix() call below.  But for
 		 * WIMLIB_EXTRACT_FLAG_WIMBOOT mode on Windows it does matter
-		 * because it needs the original stream location in order to
+		 * because it needs the original blob location in order to
 		 * create the external backing reference.  */
 
 		orig_blob->out_refcnt = 1;
-		orig_blob->inline_blob_targets[0] = owners[i];
+		orig_blob->inline_blob_targets[0] = targets[i];
 
 		ret = (*cbs->begin_blob)(orig_blob, cbs->begin_blob_ctx);
 		if (ret)
@@ -499,7 +499,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 		if (ret)
 			break;
 	}
-	FREE(owners);
+	FREE(targets);
 	orig_blob->out_refcnt = 0;
 	return ret;
 }
@@ -524,8 +524,8 @@ end_extract_blob_wrapper(struct blob_descriptor *blob, int status, void *_ctx)
 }
 
 /*
- * Read the list of blobs to extract and feed their data into
- * the specified callback functions.
+ * Read the list of blobs to extract and feed their data into the specified
+ * callback functions.
  *
  * This handles checksumming each blob.
  *
@@ -585,9 +585,9 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 		return WIMLIB_ERR_NOT_A_REGULAR_FILE;
 	}
 
-	blob = inode_unnamed_stream(inode, blob_table);
+	blob = inode_get_blob_for_unnamed_data_stream(inode, blob_table);
 	if (!blob) {
-		const u8 *hash = inode_unnamed_stream_hash(inode);
+		const u8 *hash = inode_get_hash_of_unnamed_data_stream(inode);
 		if (!is_zero_hash(hash))
 			return blob_not_found_error(inode, hash);
 		return 0;
@@ -1931,13 +1931,13 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 	 * write_pipable_wim() for more details about the format of pipable
 	 * WIMs.)  */
 	{
-		struct blob_descriptor xml_lte;
+		struct blob_descriptor xml_blob;
 		struct wim_resource_spec xml_rspec;
-		ret = read_pwm_blob_header(pwm, &xml_lte, &xml_rspec, 0, NULL);
+		ret = read_pwm_blob_header(pwm, &xml_blob, &xml_rspec, 0, NULL);
 		if (ret)
 			goto out_wimlib_free;
 
-		if (!(xml_lte.flags & WIM_RESHDR_FLAG_METADATA))
+		if (!(xml_blob.flags & WIM_RESHDR_FLAG_METADATA))
 		{
 			ERROR("Expected XML data, but found non-metadata blob.");
 			ret = WIMLIB_ERR_INVALID_PIPABLE_WIM;

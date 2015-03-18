@@ -394,7 +394,7 @@ unix_extract_if_empty_file(const struct wim_dentry *dentry,
 	/* Is this a directory, a symbolic link, or any type of nonempty file?
 	 */
 	if (inode_is_directory(inode) || inode_is_symlink(inode) ||
-	    inode_unnamed_stream_resolved(inode, NULL))
+	    inode_get_blob_for_unnamed_data_stream(inode, NULL))
 		return 0;
 
 	/* Recognize special files in UNIX_DATA mode  */
@@ -485,7 +485,7 @@ unix_count_dentries(const struct list_head *dentry_list,
 		if (inode_is_directory(inode))
 			dir_count++;
 		else if ((dentry == inode_first_extraction_dentry(inode)) &&
-			 !inode_unnamed_stream_resolved(inode, NULL))
+			 !inode_get_blob_for_unnamed_data_stream(inode, NULL))
 			empty_file_count++;
 	}
 

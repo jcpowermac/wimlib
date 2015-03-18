@@ -1593,7 +1593,7 @@ wimfs_opendir(const char *path, struct fuse_file_info *fi)
 		return -errno;
 	if (!inode_is_directory(inode))
 		return -ENOTDIR;
-	attr = inode_get_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
+	attr = inode_get_unnamed_data_attribute(inode);
 	if (!attr)
 		return -ENOTDIR;
 	ret = alloc_wimfs_fd(inode, attr, &fd);

@@ -332,8 +332,11 @@ inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
 			    const utf16lechar *attr_name);
 
 extern struct wim_attribute *
-inode_get_attribute(struct wim_inode *inode, int attr_type,
+inode_get_attribute(const struct wim_inode *inode, int attr_type,
 		    const tchar *attr_name);
+
+extern struct wim_attribute *
+inode_get_unnamed_data_attribute(const struct wim_inode *inode);
 
 extern struct wim_attribute *
 inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
@@ -371,18 +374,14 @@ attribute_blob(const struct wim_attribute *attr,
 	       const struct blob_table *table);
 
 extern struct blob_descriptor *
-inode_unnamed_stream_resolved(const struct wim_inode *inode,
-			      unsigned *attr_idx_ret);
-
-extern struct blob_descriptor *
-inode_unnamed_stream(const struct wim_inode *inode,
-		     const struct blob_table *table);
+inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
+				       const struct blob_table *table);
 
 extern const u8 *
 attribute_hash(const struct wim_attribute *attr);
 
 extern const u8 *
-inode_unnamed_stream_hash(const struct wim_inode *inode);
+inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode);
 
 extern void
 inode_ref_attributes(struct wim_inode *inode);

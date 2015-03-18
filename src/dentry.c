@@ -1875,7 +1875,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	disk_dentry->length = cpu_to_le64(p - orig_p);
 
 	if (use_dummy_stream) {
-		hash = inode_unnamed_stream_hash(inode);
+		hash = inode_get_hash_of_unnamed_data_stream(inode);
 		p = write_ads_entry(&(struct wim_ads_entry){}, hash, p);
 	}
 

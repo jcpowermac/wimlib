@@ -33,7 +33,7 @@
 #include "wimlib/security.h"
 
 static int
-append_lte_to_list(struct blob_descriptor *blob, void *_list)
+append_blob_to_list(struct blob_descriptor *blob, void *_list)
 {
 	list_add(&blob->extraction_list, (struct list_head *)_list);
 	return 0;
@@ -167,7 +167,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 
 	/* Verify the streams  */
 
-	for_blob_in_table(wim->blob_table, append_lte_to_list, &blob_list);
+	for_blob_in_table(wim->blob_table, append_blob_to_list, &blob_list);
 
 	memset(&progress, 0, sizeof(progress));
 
