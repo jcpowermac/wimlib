@@ -58,6 +58,7 @@
 #  include "config.h"
 #endif
 
+#if 0
 #include <errno.h>
 
 #include "wimlib/assert.h"
@@ -1938,3 +1939,4 @@ write_dentry_tree(struct wim_dentry *root, u8 *p)
 
 	return p;
 }
+#endif

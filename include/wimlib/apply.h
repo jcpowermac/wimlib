@@ -67,11 +67,11 @@ struct apply_ctx {
 	const struct apply_operations *apply_ops;
 	u64 next_progress;
 	unsigned long invalid_sequence;
-	unsigned long num_streams_remaining;
+	unsigned long num_blobs_remaining;
 	struct list_head blob_list;
 	const struct read_blob_list_callbacks *saved_cbs;
-	struct blob *cur_stream;
-	u64 cur_stream_offset;
+	struct blob *cur_blob;
+	u64 cur_blob_offset;
 	struct filedes tmpfile_fd;
 	tchar *tmpfile_name;
 	unsigned int count_until_file_progress;
@@ -80,7 +80,7 @@ struct apply_ctx {
 /* Maximum number of UNIX file descriptors, NTFS attributes, or Windows file
  * handles that can be opened simultaneously to extract a single-instance
  * stream to multiple destinations.  */
-#define MAX_OPEN_STREAMS 512
+#define MAX_OPEN_FILES 512
 
 static inline int
 extract_progress(struct apply_ctx *ctx, enum wimlib_progress_msg msg)

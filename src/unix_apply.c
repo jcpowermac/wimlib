@@ -75,7 +75,7 @@ struct unix_apply_ctx {
 	unsigned which_pathbuf;
 
 	/* Currently open file descriptors for extraction  */
-	struct filedes open_fds[MAX_OPEN_STREAMS];
+	struct filedes open_fds[MAX_OPEN_FILES];
 
 	/* Number of currently open file descriptors in open_fds, starting from
 	 * the beginning of the array.  */
@@ -569,7 +569,7 @@ unix_begin_extract_blob_instance(const struct blob *blob,
 	}
 
 	/* This should be ensured by extract_blob_list()  */
-	wimlib_assert(ctx->num_open_fds < MAX_OPEN_STREAMS);
+	wimlib_assert(ctx->num_open_fds < MAX_OPEN_FILES);
 
 	first_dentry = inode_first_extraction_dentry(inode);
 	first_path = unix_build_extraction_path(first_dentry, ctx);
@@ -590,11 +590,11 @@ static int
 unix_begin_extract_blob(struct blob *blob, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
-	const struct blob_owner *owners = blob_owners(blob);
+	const struct blob_target *targets = blob_targets(blob);
 	int ret;
 
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
-		const struct wim_inode *inode = owners[i].inode;
+		const struct wim_inode *inode = targets[i].inode;
 
 		ret = unix_begin_extract_blob_instance(blob, inode, ctx);
 		if (ret) {
@@ -632,7 +632,7 @@ unix_end_extract_blob(struct blob *blob, int status, void *_ctx)
 	struct unix_apply_ctx *ctx = _ctx;
 	int ret;
 	unsigned j;
-	const struct blob_owner *owners = blob_owners(blob);
+	const struct blob_target *targets = blob_targets(blob);
 
 	ctx->reparse_ptr = NULL;
 
@@ -644,7 +644,7 @@ unix_end_extract_blob(struct blob *blob, int status, void *_ctx)
 	j = 0;
 	ret = 0;
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
-		struct wim_inode *inode = owners[i].inode;
+		struct wim_inode *inode = targets[i].inode;
 
 		if (inode_is_symlink(inode)) {
 			/* We finally have the symlink data, so we can create

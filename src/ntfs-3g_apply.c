@@ -75,9 +75,9 @@ struct ntfs_3g_apply_ctx {
 	/* Pointer to the open NTFS volume  */
 	ntfs_volume *vol;
 
-	ntfs_attr *open_attrs[MAX_OPEN_STREAMS];
+	ntfs_attr *open_attrs[MAX_OPEN_FILES];
 	unsigned num_open_attrs;
-	ntfs_inode *open_inodes[MAX_OPEN_STREAMS];
+	ntfs_inode *open_inodes[MAX_OPEN_FILES];
 	unsigned num_open_inodes;
 
 	struct reparse_buffer_disk rpbuf;
@@ -87,8 +87,8 @@ struct ntfs_3g_apply_ctx {
 	u64 offset;
 
 	unsigned num_reparse_inodes;
-	ntfs_inode *ntfs_reparse_inodes[MAX_OPEN_STREAMS];
-	struct wim_inode *wim_reparse_inodes[MAX_OPEN_STREAMS];
+	ntfs_inode *ntfs_reparse_inodes[MAX_OPEN_FILES];
+	struct wim_inode *wim_reparse_inodes[MAX_OPEN_FILES];
 };
 
 static size_t
@@ -720,7 +720,7 @@ ntfs_3g_begin_extract_blob_to_attr(struct blob *blob,
 	}
 
 	/* This should be ensured by extract_blob_list()  */
-	wimlib_assert(ctx->num_open_attrs < MAX_OPEN_STREAMS);
+	wimlib_assert(ctx->num_open_attrs < MAX_OPEN_FILES);
 
 	dest_attr = ntfs_attr_open(ni, AT_DATA, attr->attr_name,
 				   attr_name_nchars);
@@ -791,19 +791,19 @@ static int
 ntfs_3g_begin_extract_blob(struct blob *blob, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
-	const struct blob_owner *owners = blob_owners(blob);
+	const struct blob_target *targets = blob_targets(blob);
 	int ret;
 	ntfs_inode *ni;
 
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
 		ret = WIMLIB_ERR_NTFS_3G;
-		ni = ntfs_3g_open_inode(owners[i].inode, ctx);
+		ni = ntfs_3g_open_inode(targets[i].inode, ctx);
 		if (!ni)
 			goto out_cleanup;
 
 		ret = ntfs_3g_begin_extract_blob_to_attr(blob, ni,
-							 owners[i].inode,
-							 owners[i].attr, ctx);
+							 targets[i].inode,
+							 targets[i].attr, ctx);
 		if (ret)
 			goto out_cleanup;
 	}
@@ -814,7 +814,7 @@ out_cleanup:
 	ntfs_3g_cleanup_blob_extract(ctx);
 out:
 	for (u32 i = 0; i < blob->out_refcnt; i++)
-		owners[i].inode->i_visited = 0;
+		targets[i].inode->i_visited = 0;
 	return ret;
 }
 

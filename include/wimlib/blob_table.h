@@ -59,14 +59,17 @@ enum resource_location {
 #endif
 };
 
-struct blob_owner {
+/* Stores the inode and attribute to which a blob needs to be extracted.  */
+struct blob_target {
 	struct wim_inode *inode;
 	struct wim_attribute *attr;
 };
 
 /*
- * Specification for a blob, which is a nonempty sequence of binary data with a
- * fixed size.
+ * Specification for a blob, which is a nonempty sequence of binary data.
+ *
+ * Within a WIM file, blobs are single instanced and are identified by SHA-1
+ * message digest.
  */
 struct blob {
 
@@ -132,8 +135,8 @@ struct blob {
 	/* When a WIM file is written, this is set to the number of references
 	 * (by dentries) to this blob in the output WIM file.
 	 *
-	 * During extraction, this is the number of slots in blob_owners (or
-	 * inline_blob_owners) that have been filled.
+	 * During extraction, this is the number of slots in blob_targets (or
+	 * inline_blob_targets) that have been filled.
 	 *
 	 * During image export, this is set to the number of references of this
 	 * blob that originated from the source WIM.
@@ -219,10 +222,10 @@ struct blob {
 		 * references to the attributes being extracted that use this
 		 * blob.  out_refcnt tracks the number of slots filled.  */
 		union {
-			struct blob_owner inline_blob_owners[3];
+			struct blob_target inline_blob_targets[3];
 			struct {
-				struct blob_owner *blob_owners;
-				u32 alloc_blob_owners;
+				struct blob_target *blob_targets;
+				u32 alloc_blob_targets;
 			};
 		};
 	};
@@ -354,13 +357,13 @@ blob_is_in_file(const struct blob *blob)
 	   ;
 }
 
-static inline const struct blob_owner *
-blob_owners(struct blob *blob)
+static inline const struct blob_target *
+blob_targets(struct blob *blob)
 {
-	if (blob->out_refcnt <= ARRAY_LEN(blob->inline_blob_owners))
-		return blob->inline_blob_owners;
+	if (blob->out_refcnt <= ARRAY_LEN(blob->inline_blob_targets))
+		return blob->inline_blob_targets;
 	else
-		return blob->blob_owners;
+		return blob->blob_targets;
 }
 
 static inline void
