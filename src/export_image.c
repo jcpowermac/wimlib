@@ -60,10 +60,11 @@ inode_export_blobs(struct wim_inode *inode, struct blob_table *src_blob_table,
 	struct blob *src_blob, *dest_blob;
 
 	inode_unresolve_attributes(inode);
+
 	for (i = 0; i < inode->i_num_attrs; i++) {
 
 		/* Retrieve SHA-1 message digest of blob to export.  */
-		hash = inode_attribute_hash(inode, i);
+		hash = inode->i_attrs[i].attr_hash;
 		if (is_zero_hash(hash))  /* Empty blob?  */
 			continue;
 

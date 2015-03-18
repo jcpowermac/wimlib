@@ -36,7 +36,8 @@ struct wim_attribute {
 		u8 attr_hash[SHA1_HASH_SIZE];
 		struct blob *attr_blob;
 	};
-	u32 attr_id : 28;
+	u32 attr_resolved : 1;
+	u32 attr_id : 27;
 	u32 attr_type : 4;
 };
 
@@ -366,8 +367,8 @@ extern int
 blob_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
 extern struct blob *
-inode_attribute_blob(const struct wim_inode *inode, unsigned attr_idx,
-		     const struct blob_table *table);
+attribute_blob(const struct wim_attribute *attr,
+	       const struct blob_table *table);
 
 extern struct blob *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
@@ -378,7 +379,7 @@ inode_unnamed_stream(const struct wim_inode *inode,
 		     const struct blob_table *table);
 
 extern const u8 *
-inode_attribute_hash(const struct wim_inode *inode, unsigned attr_idx);
+attribute_hash(const struct wim_attribute *attr);
 
 extern const u8 *
 inode_unnamed_stream_hash(const struct wim_inode *inode);

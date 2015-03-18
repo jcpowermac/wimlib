@@ -6,7 +6,7 @@
  */
 
 /*
- * Copyright (C) 2013 Eric Biggers
+ * Copyright (C) 2013, 2015 Eric Biggers
  *
  * This file is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -39,13 +39,33 @@
 #include "wimlib/wim.h"
 
 static int
+attr_to_wimlib_stream_entry(const struct wim_attribute *attr,
+			    const struct wimlib_stream_entry *stream,
+			    const struct blob_table *blob_table)
+{
+	const struct blob *blob;
+
+	if (!attr)
+		return 0;
+
+	blob = inode_attribute_blob(inode, wim->blob_table);
+	if (blob) {
+		lte_to_wimlib_resource_entry(blob, &wdentry->streams[0].resource);
+	} else if (!is_zero_hash(hash = inode_unnamed_stream_hash(inode))) {
+		if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
+			return stream_not_found_error(inode, hash);
+		copy_hash(wdentry->streams[0].resource.sha1_hash, hash);
+		wdentry->streams[0].resource.is_missing = 1;
+	}
+
+static int
 init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 		   WIMStruct *wim, int flags)
 {
 	int ret;
 	size_t dummy;
 	const struct wim_inode *inode = dentry->d_inode;
-	struct blob *blob;
+	const struct wim_attribute *attr;
 	const u8 *hash;
 	struct wimlib_unix_data unix_data;
 
@@ -88,17 +108,21 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 		wdentry->unix_rdev = unix_data.rdev;
 	}
 
-	blob = inode_unnamed_lte(inode, wim->blob_table);
-	if (blob) {
-		lte_to_wimlib_resource_entry(blob, &wdentry->streams[0].resource);
-	} else if (!is_zero_hash(hash = inode_unnamed_stream_hash(inode))) {
-		if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
-			return stream_not_found_error(inode, hash);
-		copy_hash(wdentry->streams[0].resource.sha1_hash, hash);
-		wdentry->streams[0].resource.is_missing = 1;
-	}
+	attr = inode_get_attribute_utf16le(inode,
+					   (inode->i_attributes &
+					    FILE_ATTRIBUTE_REPARSE_POINT) ?
+					   	ATTR_REPARSE_POINT : ATTR_DATA,
+					   NO_NAME);
+
+	ret = attr_to_wimlib_stream_entry(attr, &wdentry->streams[0]);
+	if (ret)
+		return ret;
+
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+
+		attr = &inode->i_attrs[i];
+
 		if (!inode->i_ads_entries[i].stream_name_nbytes)
 			continue;
 		blob = inode_stream_lte(inode, i + 1, wim->blob_table);
@@ -149,7 +173,7 @@ do_iterate_dir_tree(WIMStruct *wim,
 
 
 	wdentry = CALLOC(1, sizeof(struct wimlib_dir_entry) +
-				  (1 + dentry->d_inode->i_num_ads) *
+				  (1 + dentry->d_inode->i_num_attrs) *
 					sizeof(struct wimlib_stream_entry));
 	if (wdentry == NULL)
 		goto out;

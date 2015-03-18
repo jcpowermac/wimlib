@@ -62,7 +62,6 @@ new_timeless_inode(void)
 		/*inode->i_nlink = 0;*/
 		inode->i_next_attr_id = 1;
 		inode->i_not_rpfixed = 1;
-		inode->i_canonical_streams = 1;
 		INIT_LIST_HEAD(&inode->i_list);
 		INIT_LIST_HEAD(&inode->i_dentry);
 	}
@@ -291,27 +290,25 @@ inode_has_named_data_stream(const struct wim_inode *inode)
 }
 
 /*
- * Resolve an inode's single-instance streams.
+ * Resolve an inode's attributes.
  *
- * This takes each SHA-1 message digest stored in the inode or one of its ADS
- * entries and replaces it with a pointer directly to the appropriate 'struct
- * blob' currently inserted into @table to represent the
- * single-instance stream having that SHA-1 message digest.
+ * For each attribute, this replaces the SHA-1 message digest of the blob data
+ * with a pointer to the 'struct blob' itself.  Blobs are looked up in @table.
  *
  * If @force is %false:
- *	If any of the needed single-instance streams do not exist in @table,
- *	return WIMLIB_ERR_RESOURCE_NOT_FOUND and leave the inode unmodified.
+ *	If any of the needed blobs do not exist in @table, return
+ *	WIMLIB_ERR_RESOURCE_NOT_FOUND and leave the inode unmodified.
  * If @force is %true:
- *	If any of the needed single-instance streams do not exist in @table,
- *	allocate new entries for them and insert them into @table.  This does
- *	not, of course, cause these streams to magically exist, but this is
- *	needed by the code for extraction from a pipe.
+ *	If any of the needed blobs do not exist in @table, allocate new entries
+ *	for them and insert them into @table.  This does not, of course, cause
+ *	the data of these blobs to magically exist, but this is needed by the
+ *	code for extraction from a pipe.
  *
  * If the inode is already resolved, this function does nothing.
  *
  * Returns 0 on success; WIMLIB_ERR_NOMEM if out of memory; or
- * WIMLIB_ERR_RESOURCE_NOT_FOUND if @force is %false and at least one
- * single-instance stream referenced by the inode was missing.
+ * WIMLIB_ERR_RESOURCE_NOT_FOUND if @force is %false and at least one blob
+ * referenced by the inode was missing.
  */
 int
 inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
@@ -342,8 +339,10 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 		blobs[i] = blob;
 	}
 
-	for (unsigned i = 0; i < inode->i_num_attrs; i++)
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		inode->i_attrs[i].attr_blob = blobs[i];
+		inode->i_attrs[i].attr_resolved = 1;
+	}
 	inode->i_resolved = 1;
 	return 0;
 }
@@ -365,6 +364,7 @@ inode_unresolve_attributes(struct wim_inode *inode)
 				  inode->i_attrs[i].attr_blob->hash);
 		else
 			zero_out_hash(inode->i_attrs[i].attr_hash);
+		inode->i_attrs[i].attr_resolved = 0;
 	}
 	inode->i_resolved = 0;
 }
@@ -386,13 +386,13 @@ blob_not_found_error(const struct wim_inode *inode, const u8 *hash)
 }
 
 struct blob *
-inode_attribute_blob(const struct wim_inode *inode, unsigned attr_idx,
-		    const struct blob_table *table)
+attribute_blob(const struct wim_attribute *attr,
+	       const struct blob_table *table)
 {
-	if (inode->i_resolved)
-		return inode->i_attrs[attr_idx].attr_blob;
+	if (attr->attr_resolved)
+		return attr->attr_blob;
 	else
-		return lookup_blob(table, inode->i_attrs[attr_idx].attr_hash);
+		return lookup_blob(table, attr->attr_hash);
 }
 
 /*
@@ -437,14 +437,12 @@ inode_unnamed_stream(const struct wim_inode *inode,
 		return lookup_blob(table, attr->attr_hash);
 }
 
-/* Return the SHA-1 message digest of the specified attribute of the inode, or a
+/* Return the SHA-1 message digest of the data of the specified attribute, or a
  * void SHA-1 of all zeroes if the specified attribute is empty.   */
 const u8 *
-inode_attribute_hash(const struct wim_inode *inode, unsigned attr_idx)
+attribute_hash(const struct wim_attribute *attr)
 {
-	const struct wim_attribute *attr = &inode->i_attrs[attr_idx];
-
-	if (inode->i_resolved)
+	if (attr->attr_resolved)
 		return attr->attr_blob ? attr->attr_blob->hash : zero_hash;
 	else
 		return attr->attr_hash;
@@ -461,11 +459,11 @@ inode_unnamed_stream_hash(const struct wim_inode *inode)
 	if (!attr)
 		return zero_hash;
 
-	return inode_attribute_hash(inode, attr - inode->i_attrs);
+	return attribute_hash(attr);
 }
 
-/* Acquire another reference to each single-instance stream referenced by this
- * inode.  This is necessary when creating a hard link to this inode.
+/* Acquire another reference to each blob referenced by this inode.  This is
+ * necessary when creating a hard link to this inode.
  *
  * The inode must be resolved.  */
 void
@@ -478,29 +476,28 @@ inode_ref_attributes(struct wim_inode *inode)
 			inode->i_attrs[i].attr_blob->refcnt++;
 }
 
-/* Drop a reference to each single-instance stream referenced by this inode.
- * This is necessary when deleting a hard link to this inode.  */
+/* Drop a reference to each blob referenced by this inode.  This is necessary
+ * when deleting a hard link to this inode.  */
 void
-inode_unref_attributes(struct wim_inode *inode,
-		       struct blob_table *blob_table)
+inode_unref_attributes(struct wim_inode *inode, struct blob_table *blob_table)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		struct blob *blob;
 
-		blob = inode_attribute_blob(inode, i, blob_table);
+		blob = attribute_blob(&inode->i_attrs[i], blob_table);
 		if (blob)
 			blob_decrement_refcnt(blob, blob_table);
 	}
 }
 
 /*
- * Translate a single-instance stream entry into the pointer contained in the
- * inode (or ads entry of an inode) that references it.
+ * Given a blob entry, return the pointer contained in the attribute that
+ * references it.
  *
  * This is only possible for "unhashed" streams, which are guaranteed to have
- * only one reference, and that reference is guaranteed to be in a resolved
- * inode.  (It can't be in an unresolved inode, since that would imply the hash
- * is known!)
+ * only one referencing attribute, and that reference is guaranteed to be in a
+ * resolved inode.  (It can't be in an unresolved inode, since that would imply
+ * the hash is known!)
  */
 struct blob **
 retrieve_blob_pointer(struct blob *blob)
