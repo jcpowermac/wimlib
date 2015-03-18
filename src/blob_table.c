@@ -1,8 +1,8 @@
 /*
  * blob_table.c
  *
- * The blob table maps SHA-1 message digests to "blobs", which are known length
- * sequences of binary data.
+ * The blob table maps SHA-1 message digests to "blobs", which are nonempty
+ * sequences of binary data.  Within a WIM file, blobs are single-instanced.
  *
  * This file also contains code to read and write the corresponding on-disk
  * representation of this table in the WIM file format.  A WIM file has one blob

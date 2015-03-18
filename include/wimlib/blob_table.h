@@ -6,16 +6,9 @@
 #include "wimlib/sha1.h"
 #include "wimlib/types.h"
 
-/*
- * An enumerated type that identifies where the blob's data is actually located.
- *
- * If we open a WIM and read its blob table, the location is set to
- * BLOB_IN_WIM since all the blobs will initially be located in the WIM.
- * However, to handle situations such as image capture and image mount, we allow
- * the actual location of the blob to be somewhere else, such as an external
- * file.
- */
+/* An enumerated type that identifies where a blob's data is located.  */
 enum blob_location {
+
 	/* The blob's data does not exist.  This is a temporary state only.  */
 	BLOB_NONEXISTENT = 0,
 
@@ -42,9 +35,8 @@ enum blob_location {
 
 #ifdef WITH_NTFS_3G
 	/* The blob is located in an NTFS volume.  It is identified by volume,
-	 * filename, data stream name, and by whether it is a reparse point or
-	 * not.  @ntfs_loc points to a structure containing this information.
-	 */
+	 * filename, attribute name, and attribute type.  @ntfs_loc points to a
+	 * structure containing this information.  */
 	BLOB_IN_NTFS_VOLUME,
 #endif
 
@@ -61,7 +53,10 @@ enum blob_location {
 #endif
 };
 
-/* Stores the inode and attribute to which a blob needs to be extracted.  */
+/* A "blob target" is an attribute, and the inode to which that attribute
+ * belongs, to which a blob needs to be extracted as part of an extraction
+ * operation.  Since blobs are single-instanced, a blob may have multiple
+ * targets.  */
 struct blob_target {
 	struct wim_inode *inode;
 	struct wim_attribute *attr;
@@ -75,13 +70,13 @@ struct blob_target {
  */
 struct blob_descriptor {
 
-	/* List node for a hash bucket of the blob table.  */
+	/* List node for a hash bucket of the blob table  */
 	struct hlist_node hash_list;
 
-	/* Uncompressed size of this blob.  */
+	/* Uncompressed size of this blob  */
 	u64 size;
 
-	/* Blob flags (WIM_RESHDR_FLAG_*).  */
+	/* Blob flags (WIM_RESHDR_FLAG_*)  */
 	u32 flags : 8;
 
 	/* One of the `enum blob_location' values documented above.  */
