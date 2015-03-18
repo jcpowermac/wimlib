@@ -168,7 +168,7 @@ dentry_is_supported(struct wim_dentry *dentry,
 
 /* Read the header from a blob in a pipable WIM.  */
 static int
-read_pwm_blob_header(WIMStruct *pwm, struct blob *blob,
+read_pwm_blob_header(WIMStruct *pwm, struct blob_descriptor *blob,
 		     struct wim_resource_spec *rspec,
 		     int flags, struct wim_header_disk *hdr_ret)
 {
@@ -224,7 +224,7 @@ static int
 read_blobs_from_pipe(struct apply_ctx *ctx,
 		     const struct read_blob_list_callbacks *cbs)
 {
-	struct blob *found_blob = NULL;
+	struct blob_descriptor *found_blob = NULL;
 	struct wim_resource_spec *rspec = NULL;
 	struct blob_table *blob_table;
 	int ret;
@@ -248,7 +248,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 
 	while (ctx->num_blobs_remaining) {
 		struct wim_header_disk pwm_hdr;
-		struct blob *needed_blob;
+		struct blob_descriptor *needed_blob;
 
 		if (found_blob->resource_location != RESOURCE_NONEXISTENT)
 			blob_unbind_wim_resource_spec(found_blob);
@@ -314,7 +314,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 out:
 	if (found_blob && found_blob->resource_location != RESOURCE_IN_WIM)
 		FREE(rspec);
-	free_blob(found_blob);
+	free_blob_descriptor(found_blob);
 	return ret;
 }
 
@@ -358,7 +358,7 @@ retry:
 }
 
 static int
-begin_extract_blob_wrapper(struct blob *blob, void *_ctx)
+begin_extract_blob_wrapper(struct blob_descriptor *blob, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
 
@@ -451,8 +451,8 @@ extract_chunk_wrapper(const void *chunk, size_t size, void *_ctx)
 static int
 extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 {
-	struct blob tmpfile_blob;
-	struct blob *orig_blob = ctx->cur_blob;
+	struct blob_descriptor tmpfile_blob;
+	struct blob_descriptor *orig_blob = ctx->cur_blob;
 	const struct read_blob_list_callbacks *cbs = ctx->saved_cbs;
 	int ret;
 	const u32 orig_refcnt = orig_blob->out_refcnt;
@@ -467,7 +467,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 	 * This is executed only in the very uncommon case that a blob is being
 	 * extracted to more than MAX_OPEN_FILES locations!  */
 
-	memcpy(&tmpfile_blob, orig_blob, sizeof(struct blob));
+	memcpy(&tmpfile_blob, orig_blob, sizeof(struct blob_descriptor));
 	tmpfile_blob.resource_location = RESOURCE_IN_FILE_ON_DISK;
 	tmpfile_blob.file_on_disk = ctx->tmpfile_name;
 	ret = 0;
@@ -505,7 +505,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 }
 
 static int
-end_extract_blob_wrapper(struct blob *blob, int status, void *_ctx)
+end_extract_blob_wrapper(struct blob_descriptor *blob, int status, void *_ctx)
 {
 	struct apply_ctx *ctx = _ctx;
 
@@ -558,7 +558,7 @@ extract_blob_list(struct apply_ctx *ctx,
 		return read_blobs_from_pipe(ctx, &wrapper_cbs);
 	} else {
 		return read_blob_list(&ctx->blob_list,
-				      offsetof(struct blob,
+				      offsetof(struct blob_descriptor,
 					       extraction_list),
 				      &wrapper_cbs, VERIFY_BLOB_HASHES);
 	}
@@ -574,7 +574,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 			 const struct blob_table *blob_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	struct filedes _stdout;
 
 	if (inode->i_attributes & (FILE_ATTRIBUTE_REPARSE_POINT |
@@ -752,7 +752,7 @@ destroy_dentry_list(struct list_head *dentry_list)
 static void
 destroy_blob_list(struct list_head *blob_list)
 {
-	struct blob *blob;
+	struct blob_descriptor *blob;
 
 	list_for_each_entry(blob, blob_list, extraction_list)
 		if (blob->out_refcnt > ARRAY_LEN(blob->inline_blob_targets))
@@ -966,7 +966,7 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 			  struct blob_table *blob_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	int ret;
 	bool force = false;
 
@@ -974,7 +974,7 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 	 * initially empty, so "resolving" an inode's attributes is initially
 	 * not possible.  However, we still need to keep track of which blobs,
 	 * identified by SHA-1 message digests, need to be extracted, so we
-	 * "resolve" the inode's attributes anyway by allocating a 'struct blob'
+	 * "resolve" the inode's attributes anyway by allocating a 'struct blob_descriptor'
 	 * for each one.  */
 	if (extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE)
 		force = true;
@@ -991,7 +991,7 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 
 /*
  * For each dentry to be extracted, resolve all attributes in the corresponding
- * inode and set 'out_refcnt' in all referenced 'struct blob' to 0.
+ * inode and set 'out_refcnt' in all referenced 'struct blob_descriptor' to 0.
  *
  * Possible error codes: WIMLIB_ERR_RESOURCE_NOT_FOUND, WIMLIB_ERR_NOMEM.
  */
@@ -1017,7 +1017,7 @@ ref_attribute(struct wim_attribute *attr,
 	      struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct blob *blob = attr->attr_blob;
+	struct blob_descriptor *blob = attr->attr_blob;
 	struct blob_target *blob_targets;
 
 	if (!blob)
@@ -1931,7 +1931,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 	 * write_pipable_wim() for more details about the format of pipable
 	 * WIMs.)  */
 	{
-		struct blob xml_lte;
+		struct blob_descriptor xml_lte;
 		struct wim_resource_spec xml_rspec;
 		ret = read_pwm_blob_header(pwm, &xml_lte, &xml_rspec, 0, NULL);
 		if (ret)
@@ -1983,7 +1983,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 
 	/* Load the needed metadata resource.  */
 	for (i = 1; i <= pwm->hdr.image_count; i++) {
-		struct blob *metadata_blob;
+		struct blob_descriptor *metadata_blob;
 		struct wim_image_metadata *imd;
 		struct wim_resource_spec *metadata_rspec;
 
@@ -1995,7 +1995,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 		metadata_rspec = MALLOC(sizeof(struct wim_resource_spec));
 		if (metadata_rspec == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
-			free_blob(metadata_blob);
+			free_blob_descriptor(metadata_blob);
 			goto out_wimlib_free;
 		}
 

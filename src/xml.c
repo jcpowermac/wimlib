@@ -1214,7 +1214,7 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 	if (!(inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 				     FILE_ATTRIBUTE_REPARSE_POINT)))
 	{
-		struct blob *blob;
+		struct blob_descriptor *blob;
 
 		blob = inode_unnamed_lte(inode, info->blob_table);
 		if (blob) {

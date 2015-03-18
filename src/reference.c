@@ -62,7 +62,7 @@ static void
 rollback_reference_info(struct reference_info *info)
 {
 	WIMStruct *subwim;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 
 	while (!list_empty(&info->new_subwims)) {
 		subwim = list_first_entry(&info->new_subwims,
@@ -73,10 +73,10 @@ rollback_reference_info(struct reference_info *info)
 
 	while (!list_empty(&info->new_blobs)) {
 		blob = list_first_entry(&info->new_blobs,
-					struct blob, blob_table_list);
+					struct blob_descriptor, blob_table_list);
 		list_del(&blob->blob_table_list);
 		blob_table_unlink(info->dest_wim->blob_table, blob);
-		free_blob(blob);
+		free_blob_descriptor(blob);
 	}
 }
 
@@ -91,13 +91,13 @@ commit_or_rollback_reference_info(struct reference_info *info, int ret)
 }
 
 static bool
-need_blob(const struct reference_info *info, const struct blob *blob)
+need_blob(const struct reference_info *info, const struct blob_descriptor *blob)
 {
 	return !lookup_blob(info->dest_wim->blob_table, blob->hash);
 }
 
 static void
-reference_blob(struct reference_info *info, struct blob *blob)
+reference_blob(struct reference_info *info, struct blob_descriptor *blob)
 {
 	blob_table_insert(info->dest_wim->blob_table, blob);
 	list_add(&blob->blob_table_list, &info->new_blobs);
@@ -110,7 +110,7 @@ reference_subwim(struct reference_info *info, WIMStruct *subwim)
 }
 
 static int
-blob_clone_if_new(struct blob *blob, void *_info)
+blob_clone_if_new(struct blob_descriptor *blob, void *_info)
 {
 	struct reference_info *info = _info;
 
@@ -158,7 +158,7 @@ wimlib_reference_resources(WIMStruct *wim, WIMStruct **resource_wims,
 }
 
 static int
-blob_gift(struct blob *blob, void *_info)
+blob_gift(struct blob_descriptor *blob, void *_info)
 {
 	struct reference_info *info = _info;
 
@@ -166,7 +166,7 @@ blob_gift(struct blob *blob, void *_info)
 	if (need_blob(info, blob))
 		reference_blob(info, blob);
 	else
-		free_blob(blob);
+		free_blob_descriptor(blob);
 	return 0;
 }
 

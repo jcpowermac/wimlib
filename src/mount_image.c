@@ -97,12 +97,12 @@ struct wimfs_fd {
 	 * that reference it.  */
 	struct wim_inode *f_inode;
 
-	/* Pointer to the blob table entry for the data stream that has been
-	 * opened.  'num_opened_fds' of the blob table entry tracks the number
-	 * of file descriptors that reference it.  Or, this value may be NULL,
-	 * which indicates that the opened stream is empty and consequently does
-	 * not have a blob table entry.  */
-	struct blob *f_blob;
+	/* The blob descriptor for the data stream that has been opened.
+	 * 'num_opened_fds' of the blob descriptor tracks the number of file
+	 * descriptors that reference it.  Or, this value may be NULL, which
+	 * indicates that the opened stream is empty and consequently does not
+	 * have a blob descriptor.  */
+	struct blob_descriptor *f_blob;
 
 	/* If valid (filedes_valid(&f_staging_fd)), this contains the
 	 * corresponding native file descriptor for the staging file that has
@@ -531,7 +531,7 @@ inode_default_unix_mode(const struct wim_inode *inode)
  * This always returns 0.
  */
 static int
-inode_to_stbuf(const struct wim_inode *inode, const struct blob *blob,
+inode_to_stbuf(const struct wim_inode *inode, const struct blob_descriptor *blob,
 	       struct stat *stbuf)
 {
 	const struct wimfs_context *ctx = wimfs_get_context();
@@ -655,12 +655,12 @@ retry:
 static int
 extract_resource_to_staging_dir(struct wim_inode *inode,
 				struct wim_attribute *attr,
-				struct blob **blob_ptr,
+				struct blob_descriptor **blob_ptr,
 				off_t size,
 				const struct wimfs_context *ctx)
 {
-	struct blob *old_blob;
-	struct blob *new_blob;
+	struct blob_descriptor *old_blob;
+	struct blob_descriptor *new_blob;
 	char *staging_file_name;
 	int staging_fd;
 	off_t extract_size;
@@ -722,7 +722,7 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 		 * has other references.  Or, there was no old lookup table
 		 * entry, so we need to create a new one anyway.  */
 
-		new_blob = new_blob();
+		new_blob = new_blob_descriptor();
 		if (unlikely(!new_blob)) {
 			ret = -ENOMEM;
 			goto out_delete_staging_file;
@@ -775,11 +775,8 @@ extract_resource_to_staging_dir(struct wim_inode *inode,
 	new_blob->size              = size;
 
 	add_unhashed_blob(new_blob, inode, attr_id,
-			    &wim_get_current_image_metadata(ctx->wim)->unhashed_blobs);
-	if (attr_idx == 0)
-		inode->i_lte = new_blob;
-	else
-		inode->i_ads_entries[attr_idx - 1].blob = new_blob;
+			  &wim_get_current_image_metadata(ctx->wim)->unhashed_blobs);
+	attr->attr_blob = new_blob;
 	*blob_ptr = new_blob;
 	return 0;
 
@@ -795,7 +792,7 @@ out_revert_fd_changes:
 			new_blob->num_opened_fds--;
 		}
 	}
-	free_blob(new_blob);
+	free_blob_descriptor(new_blob);
 out_delete_staging_file:
 	unlinkat(ctx->staging_dir_fd, staging_file_name, 0);
 	FREE(staging_file_name);
@@ -952,7 +949,7 @@ release_extra_refcnts(struct wimfs_context *ctx)
 {
 	struct list_head *list = &ctx->orig_blob_list;
 	struct blob_table *blob_table = ctx->wim->blob_table;
-	struct blob *blob, *tmp;
+	struct blob_descriptor *blob, *tmp;
 
 	list_for_each_entry_safe(blob, tmp, list, orig_blob_list) {
 		u32 n = blob->out_refcnt;
@@ -961,21 +958,21 @@ release_extra_refcnts(struct wimfs_context *ctx)
 	}
 }
 
-/* Delete the 'struct blob' for any stream that was modified
+/* Delete the 'struct blob_descriptor' for any stream that was modified
  * or created in the read-write mounted image and had a final size of 0.  */
 static void
 delete_empty_streams(struct wimfs_context *ctx)
 {
-	struct blob *blob, *tmp;
+	struct blob_descriptor *blob, *tmp;
 	struct wim_image_metadata *imd;
 
 	imd = wim_get_current_image_metadata(ctx->wim);
 
-        image_for_each_unhashed_stream_safe(blob, tmp, imd) {
+        image_for_each_unhashed_blob_safe(blob, tmp, imd) {
                 if (!blob->size) {
                         *retrieve_blob_pointer(blob) = NULL;
                         list_del(&blob->unhashed_list);
-                        free_blob(blob);
+                        free_blob_descriptor(blob);
                 }
         }
 }
@@ -1018,7 +1015,7 @@ renew_current_image(struct wimfs_context *ctx)
 	int idx = wim->current_image - 1;
 	struct wim_image_metadata *imd = wim->image_metadata[idx];
 	struct wim_image_metadata *replace_imd;
-	struct blob *new_blob;
+	struct blob_descriptor *new_blob;
 	int ret;
 
 	/* Create 'replace_imd' structure to use for the reset original,
@@ -1028,10 +1025,10 @@ renew_current_image(struct wimfs_context *ctx)
 	if (!replace_imd)
 		goto err;
 
-	/* Create new stream reference for the modified image's metadata
+	/* Create new blob descriptor for the modified image's metadata
 	 * resource, which doesn't exist yet.  */
 	ret = WIMLIB_ERR_NOMEM;
-	new_blob = new_blob();
+	new_blob = new_blob_descriptor();
 	if (!new_blob)
 		goto err_put_replace_imd;
 	new_blob->flags = WIM_RESHDR_FLAG_METADATA;
@@ -1057,7 +1054,7 @@ renew_current_image(struct wimfs_context *ctx)
 err_undo_append:
 	wim->hdr.image_count--;
 err_free_new_blob:
-	free_blob(new_blob);
+	free_blob_descriptor(new_blob);
 err_put_replace_imd:
 	put_image_metadata(replace_imd, NULL);
 err:
@@ -1301,8 +1298,8 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 {
 	const struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_inode *inode;
-	struct wim_ads_entry *ads_entry;
-	struct blob *blob;
+	struct wim_attribute *attr;
+	struct blob_descriptor *blob;
 
 	if (!strncmp(name, "wimfs.", 6)) {
 		/* Handle some magical extended attributes.  These really should
@@ -1357,11 +1354,11 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 	if (!inode)
 		return -errno;
 
-	ads_entry = inode_get_ads_entry(inode, name);
-	if (!ads_entry)
+	attr = inode_get_attribute(inode, ATTR_DATA, name);
+	if (!attr)
 		return (errno == ENOENT) ? -ENOATTR : -errno;
 
-	blob = ads_entry->blob;
+	blob = attr->attr_blob;
 	if (!blob)
 		return 0;
 
@@ -1372,7 +1369,7 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 		if (size < blob->size)
 			return -ERANGE;
 
-		if (read_full_stream_into_buf(blob, value))
+		if (read_full_blob_into_buf(blob, value))
 			return errno ? -errno : -EIO;
 	}
 	return blob->size;
@@ -1410,7 +1407,7 @@ wimfs_link(const char *existing_path, const char *new_path)
 	if (new_dentry(new_name, &new_alias))
 		return -ENOMEM;
 
-	inode_ref_streams(inode);
+	inode_ref_attributes(inode);
 	d_associate(new_alias, inode);
 	dentry_add_child(dir, new_alias);
 	touch_inode(dir->d_inode);
@@ -1436,18 +1433,18 @@ wimfs_listxattr(const char *path, char *list, size_t size)
 	if (!inode)
 		return -errno;
 
-	for (u16 i = 0; i < inode->i_num_ads; i++) {
-		const struct wim_ads_entry *entry;
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		const struct wim_attribute *attr;
 		char *stream_name_mbs;
 		size_t stream_name_mbs_nbytes;
 
-		entry = &inode->i_ads_entries[i];
+		attr = &inode->i_attrs[i];
 
-		if (!entry->stream_name_nbytes)
+		if (attr->attr_type != ATTR_DATA || !*attr->attr_name)
 			continue;
 
-		if (utf16le_to_tstr(entry->stream_name,
-				    entry->stream_name_nbytes,
+		if (utf16le_to_tstr(attr->attr_name,
+				    utf16le_strlen(attr->attr_name),
 				    &stream_name_mbs,
 				    &stream_name_mbs_nbytes))
 			return -errno;
@@ -1497,9 +1494,8 @@ wimfs_mknod(const char *path, mode_t mode, dev_t rdev)
 	if ((wimfs_ctx->mount_flags & WIMLIB_MOUNT_FLAG_STREAM_INTERFACE_WINDOWS)
 	     && (stream_name = path_stream_name(path)))
 	{
-		struct wim_ads_entry *old_entry;
-		struct wim_ads_entry *new_entry;
 		struct wim_inode *inode;
+		struct wim_attribute *new_attr;
 		char *p;
 
 		/* Create a named data stream.  */
@@ -1515,14 +1511,8 @@ wimfs_mknod(const char *path, mode_t mode, dev_t rdev)
 		if (!inode)
 			return -errno;
 
-		old_entry = inode_get_ads_entry(inode, stream_name);
-		if (old_entry)
-			return -EEXIST;
-		if (errno != ENOENT)
-			return -errno;
-
-		new_entry = inode_add_ads(inode, stream_name);
-		if (!new_entry)
+		new_attr = inode_add_attribute(inode, ATTR_DATA, stream_name);
+		if (!new_attr)
 			return -errno;
 		return 0;
 	} else {
@@ -1553,7 +1543,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 	struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_dentry *dentry;
 	struct wim_inode *inode;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	unsigned attr_idx;
 	struct wimfs_fd *fd;
 	int ret;
@@ -1627,7 +1617,7 @@ wimfs_read(const char *path, char *buf, size_t size,
 	   off_t offset, struct fuse_file_info *fi)
 {
 	struct wimfs_fd *fd = WIMFS_FD(fi);
-	const struct blob *blob;
+	const struct blob_descriptor *blob;
 	ssize_t ret;
 
 	blob = fd->f_blob;
@@ -1881,7 +1871,7 @@ wimfs_truncate(const char *path, off_t size)
 {
 	const struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_dentry *dentry;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	unsigned attr_idx;
 	int ret;
 	int fd;
@@ -2127,7 +2117,7 @@ wimlib_mount_image(WIMStruct *wim, int image, const char *dir,
 	if (mount_flags & WIMLIB_MOUNT_FLAG_READWRITE) {
 		unsigned i;
 		struct wim_inode *inode;
-		struct blob *blob;
+		struct blob_descriptor *blob;
 
 		image_for_each_inode(inode, imd) {
 			for (i = 0; i < inode->i_num_attrs; i++) {

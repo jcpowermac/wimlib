@@ -145,7 +145,7 @@ write_split_wim(WIMStruct *orig_wim, const tchar *swm_name,
 }
 
 static int
-add_stream_to_swm(struct blob *blob, void *_swm_info)
+add_stream_to_swm(struct blob_descriptor *blob, void *_swm_info)
 {
 	struct swm_info *swm_info = _swm_info;
 	u64 stream_size;

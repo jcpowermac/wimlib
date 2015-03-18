@@ -276,7 +276,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 {
 	const wchar_t *path = L"\\Windows\\System32\\WimBootCompress.ini";
 	struct wim_dentry *dentry;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	int ret;
 	void *buf;
 	struct string_set *s;
@@ -374,7 +374,7 @@ will_externally_back_inode(struct wim_inode *inode, struct win32_apply_ctx *ctx,
 {
 	struct list_head *next;
 	struct wim_dentry *dentry;
-	struct blob *stream;
+	struct blob_descriptor *stream;
 	int ret;
 
 	if (inode->i_can_externally_back)
@@ -1298,7 +1298,7 @@ retry:
 
 /* Create empty named data streams.
  *
- * Since these won't have 'struct blob's, they won't show up
+ * Since these won't have 'struct blob_descriptor's, they won't show up
  * in the call to extract_blob_list().  Hence the need for the special case.
  */
 static int
@@ -1644,7 +1644,7 @@ prepare_data_buffer(struct win32_apply_ctx *ctx, u64 stream_size)
 }
 
 static int
-begin_extract_blob_instance(const struct blob *stream,
+begin_extract_blob_instance(const struct blob_descriptor *stream,
 			      struct wim_dentry *dentry,
 			      const wchar_t *stream_name,
 			      struct win32_apply_ctx *ctx)
@@ -2020,7 +2020,7 @@ retry:
 
 /* Called when starting to read a stream for extraction on Windows  */
 static int
-begin_extract_blob(struct blob *stream, void *_ctx)
+begin_extract_blob(struct blob_descriptor *stream, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	const struct blob_owner *owners = blob_owners(stream);
@@ -2110,7 +2110,7 @@ extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a stream has been fully read for extraction on Windows  */
 static int
-end_extract_blob(struct blob *stream, int status, void *_ctx)
+end_extract_blob(struct blob_descriptor *stream, int status, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
 	int ret;

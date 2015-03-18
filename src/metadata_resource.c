@@ -52,7 +52,7 @@
 int
 read_metadata_resource(struct wim_image_metadata *imd)
 {
-	const struct blob *metadata_blob;
+	const struct blob_descriptor *metadata_blob;
 	void *buf;
 	int ret;
 	struct wim_security_data *sd;

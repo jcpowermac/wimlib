@@ -31,7 +31,7 @@
 #include "wimlib/xml.h"
 
 static int
-blob_set_not_exported(struct blob *blob, void *_ignore)
+blob_set_not_exported(struct blob_descriptor *blob, void *_ignore)
 {
 	blob->out_refcnt = 0;
 	blob->was_exported = 0;
@@ -39,14 +39,14 @@ blob_set_not_exported(struct blob *blob, void *_ignore)
 }
 
 static int
-blob_rollback_export(struct blob *blob, void *_blob_table)
+blob_rollback_export(struct blob_descriptor *blob, void *_blob_table)
 {
 	struct blob_table *blob_table = _blob_table;
 
 	blob->refcnt -= blob->out_refcnt;
 	if (blob->was_exported) {
 		blob_table_unlink(blob_table, blob);
-		free_blob(blob);
+		free_blob_descriptor(blob);
 	}
 	return 0;
 }
@@ -57,7 +57,7 @@ inode_export_blobs(struct wim_inode *inode, struct blob_table *src_blob_table,
 {
 	unsigned i;
 	const u8 *hash;
-	struct blob *src_blob, *dest_blob;
+	struct blob_descriptor *src_blob, *dest_blob;
 
 	inode_unresolve_attributes(inode);
 
@@ -83,7 +83,7 @@ inode_export_blobs(struct wim_inode *inode, struct blob_table *src_blob_table,
 				dest_blob = src_blob;
 				blob_table_unlink(src_blob_table, src_blob);
 			} else {
-				dest_blob = clone_blob(src_blob);
+				dest_blob = clone_blob_descriptor(src_blob);
 				if (!dest_blob)
 					return WIMLIB_ERR_NOMEM;
 			}

@@ -80,9 +80,9 @@ oom:
 }
 
 static int
-do_free_blob(struct blob *blob, void *_ignore)
+do_free_blob_descriptor(struct blob_descriptor *blob, void *_ignore)
 {
-	free_blob(blob);
+	free_blob_descriptor(blob);
 	return 0;
 }
 
@@ -90,18 +90,18 @@ void
 free_blob_table(struct blob_table *table)
 {
 	if (table) {
-		for_blob_in_table(table, do_free_blob, NULL);
+		for_blob_in_table(table, do_free_blob_descriptor, NULL);
 		FREE(table->array);
 		FREE(table);
 	}
 }
 
-struct blob *
-new_blob(void)
+struct blob_descriptor *
+new_blob_descriptor(void)
 {
-	struct blob *blob;
+	struct blob_descriptor *blob;
 
-	blob = CALLOC(1, sizeof(struct blob));
+	blob = CALLOC(1, sizeof(struct blob_descriptor));
 	if (blob == NULL)
 		return NULL;
 
@@ -113,12 +113,12 @@ new_blob(void)
 	return blob;
 }
 
-struct blob *
-clone_blob(const struct blob *old)
+struct blob_descriptor *
+clone_blob_descriptor(const struct blob_descriptor *old)
 {
-	struct blob *new;
+	struct blob_descriptor *new;
 
-	new = memdup(old, sizeof(struct blob));
+	new = memdup(old, sizeof(struct blob_descriptor));
 	if (new == NULL)
 		return NULL;
 
@@ -174,12 +174,12 @@ clone_blob(const struct blob *old)
 	return new;
 
 out_free:
-	free_blob(new);
+	free_blob_descriptor(new);
 	return NULL;
 }
 
 void
-blob_put_resource(struct blob *blob)
+blob_put_resource(struct blob_descriptor *blob)
 {
 	switch (blob->resource_location) {
 	case RESOURCE_IN_WIM:
@@ -217,7 +217,7 @@ blob_put_resource(struct blob *blob)
 }
 
 void
-free_blob(struct blob *blob)
+free_blob_descriptor(struct blob_descriptor *blob)
 {
 	if (blob) {
 		blob_put_resource(blob);
@@ -227,16 +227,16 @@ free_blob(struct blob *blob)
 
 /* Should this blob be retained even if it has no references?  */
 static bool
-should_retain_blob(const struct blob *blob)
+should_retain_blob(const struct blob_descriptor *blob)
 {
 	return blob->resource_location == RESOURCE_IN_WIM;
 }
 
 static void
-finalize_blob(struct blob *blob)
+finalize_blob(struct blob_descriptor *blob)
 {
 	if (!should_retain_blob(blob))
-		free_blob(blob);
+		free_blob_descriptor(blob);
 }
 
 /*
@@ -263,7 +263,7 @@ finalize_blob(struct blob *blob)
  * recalculate by default when writing a new WIM file.
  */
 void
-blob_decrement_refcnt(struct blob *blob, struct blob_table *table)
+blob_decrement_refcnt(struct blob_descriptor *blob, struct blob_table *table)
 {
 	if (unlikely(blob->refcnt == 0))  /* See comment above  */
 		return;
@@ -297,7 +297,7 @@ blob_decrement_refcnt(struct blob *blob, struct blob_table *table)
 
 #ifdef WITH_FUSE
 void
-blob_decrement_num_opened_fds(struct blob *blob)
+blob_decrement_num_opened_fds(struct blob_descriptor *blob)
 {
 	wimlib_assert(blob->num_opened_fds != 0);
 
@@ -307,7 +307,7 @@ blob_decrement_num_opened_fds(struct blob *blob)
 #endif
 
 static void
-blob_table_insert_raw(struct blob_table *table, struct blob *blob)
+blob_table_insert_raw(struct blob_table *table, struct blob_descriptor *blob)
 {
 	size_t i = blob->hash_short % table->capacity;
 
@@ -319,7 +319,7 @@ enlarge_blob_table(struct blob_table *table)
 {
 	size_t old_capacity, new_capacity;
 	struct hlist_head *old_array, *new_array;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	struct hlist_node *cur, *tmp;
 	size_t i;
 
@@ -343,7 +343,7 @@ enlarge_blob_table(struct blob_table *table)
 
 /* Insert a blob into the blob table.  */
 void
-blob_table_insert(struct blob_table *table, struct blob *blob)
+blob_table_insert(struct blob_table *table, struct blob_descriptor *blob)
 {
 	blob_table_insert_raw(table, blob);
 	if (++table->num_blobs > table->capacity)
@@ -352,7 +352,7 @@ blob_table_insert(struct blob_table *table, struct blob *blob)
 
 /* Unlinks a blob from the blob table; does not free it.  */
 void
-blob_table_unlink(struct blob_table *table, struct blob *blob)
+blob_table_unlink(struct blob_table *table, struct blob_descriptor *blob)
 {
 	wimlib_assert(!blob->unhashed);
 	wimlib_assert(table->num_blobs != 0);
@@ -363,11 +363,11 @@ blob_table_unlink(struct blob_table *table, struct blob *blob)
 
 /* Given a SHA-1 message digest, return the corresponding blob from the
  * specified blob table, or NULL if there is none.  */
-struct blob *
+struct blob_descriptor *
 lookup_blob(const struct blob_table *table, const u8 hash[])
 {
 	size_t i;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	struct hlist_node *pos;
 
 	i = load_size_t_unaligned(hash) % table->capacity;
@@ -381,9 +381,9 @@ lookup_blob(const struct blob_table *table, const u8 hash[])
  * nonzero if any call to the function returns nonzero.  */
 int
 for_blob_in_table(struct blob_table *table,
-		  int (*visitor)(struct blob *, void *), void *arg)
+		  int (*visitor)(struct blob_descriptor *, void *), void *arg)
 {
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	struct hlist_node *pos, *tmp;
 	int ret;
 
@@ -408,12 +408,12 @@ for_blob_in_table(struct blob_table *table,
 int
 cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 {
-	const struct blob *blob1, *blob2;
+	const struct blob_descriptor *blob1, *blob2;
 	int v;
 	WIMStruct *wim1, *wim2;
 
-	blob1 = *(const struct blob**)p1;
-	blob2 = *(const struct blob**)p2;
+	blob1 = *(const struct blob_descriptor**)p1;
+	blob2 = *(const struct blob_descriptor**)p2;
 
 	v = (int)blob1->resource_location - (int)blob2->resource_location;
 
@@ -472,7 +472,7 @@ sort_blob_list(struct list_head *blob_list, size_t list_head_offset,
 	       int (*compar)(const void *, const void*))
 {
 	struct list_head *cur;
-	struct blob **array;
+	struct blob_descriptor **array;
 	size_t i;
 	size_t array_size;
 	size_t num_blobs = 0;
@@ -490,7 +490,7 @@ sort_blob_list(struct list_head *blob_list, size_t list_head_offset,
 
 	cur = blob_list->next;
 	for (i = 0; i < num_blobs; i++) {
-		array[i] = (struct blob*)((u8*)cur - list_head_offset);
+		array[i] = (struct blob_descriptor*)((u8*)cur - list_head_offset);
 		cur = cur->next;
 	}
 
@@ -517,9 +517,9 @@ sort_blob_list_by_sequential_order(struct list_head *blob_list,
 }
 
 static int
-add_blob_to_array(struct blob *blob, void *_pp)
+add_blob_to_array(struct blob_descriptor *blob, void *_pp)
 {
-	struct blob ***pp = _pp;
+	struct blob_descriptor ***pp = _pp;
 	*(*pp)++ = blob;
 	return 0;
 }
@@ -528,9 +528,9 @@ add_blob_to_array(struct blob *blob, void *_pp)
  * an order optimized for sequential reading.  */
 int
 for_blob_pos_sorted(struct blob_table *table,
-		    int (*visitor)(struct blob *, void *), void *arg)
+		    int (*visitor)(struct blob_descriptor *, void *), void *arg)
 {
-	struct blob **blob_array, **p;
+	struct blob_descriptor **blob_array, **p;
 	size_t num_blobs = table->num_blobs;
 	int ret;
 
@@ -554,8 +554,8 @@ for_blob_pos_sorted(struct blob_table *table,
 	return ret;
 }
 
-/* On-disk format of a WIM blob table entry  */
-struct blob_table_entry_disk {
+/* On-disk format of a WIM blob descriptor  */
+struct blob_descriptor_disk {
 
 	/* Size, offset, and flags of the blob.  */
 	struct wim_reshdr_disk reshdr;
@@ -572,15 +572,15 @@ struct blob_table_entry_disk {
 	u8 hash[SHA1_HASH_SIZE];
 } _packed_attribute;
 
-#define WIM_BLOB_TABLE_ENTRY_DISK_SIZE 50
+#define WIM_BLOB_DESCRIPTOR_DISK_SIZE 50
 
-/* Given a nonempty run of consecutive blob table entries with the SOLID flag
- * set, count how many specify resources (as opposed to blobs within those
+/* Given a nonempty run of consecutive blob descriptors with the SOLID flag set,
+ * count how many specify resources (as opposed to blobs within those
  * resources).
  *
  * Returns the resulting count.  */
 static size_t
-count_solid_resources(const struct blob_table_entry_disk *entries, size_t max)
+count_solid_resources(const struct blob_descriptor_disk *entries, size_t max)
 {
 	size_t count = 0;
 	do {
@@ -602,7 +602,7 @@ count_solid_resources(const struct blob_table_entry_disk *entries, size_t max)
 }
 
 /*
- * Given a run of consecutive blob table entries with the SOLID flag set and
+ * Given a run of consecutive blob descriptors with the SOLID flag set and
  * having @num_rspecs resource entries, load resource information from them into
  * the resource specifications in the @rspecs array.
  *
@@ -611,7 +611,7 @@ count_solid_resources(const struct blob_table_entry_disk *entries, size_t max)
 static int
 do_load_solid_info(WIMStruct *wim, struct wim_resource_spec **rspecs,
 		   size_t num_rspecs,
-		   const struct blob_table_entry_disk *entries)
+		   const struct blob_descriptor_disk *entries)
 {
 	for (size_t i = 0; i < num_rspecs; i++) {
 		struct wim_reshdr reshdr;
@@ -668,15 +668,15 @@ do_load_solid_info(WIMStruct *wim, struct wim_resource_spec **rspecs,
 }
 
 /*
- * Given a nonempty run of consecutive blob table entries with the SOLID flag
- * set, allocate a 'struct wim_resource_spec' for each resource within that run.
+ * Given a nonempty run of consecutive blob descriptors with the SOLID flag set,
+ * allocate a 'struct wim_resource_spec' for each resource within that run.
  *
  * Returns 0 on success, or a nonzero error code on failure.
  * Returns the pointers and count in *rspecs_ret and *num_rspecs_ret.
  */
 static int
 load_solid_info(WIMStruct *wim,
-		const struct blob_table_entry_disk *entries,
+		const struct blob_descriptor_disk *entries,
 		size_t num_remaining_entries,
 		struct wim_resource_spec ***rspecs_ret,
 		size_t *num_rspecs_ret)
@@ -714,11 +714,12 @@ out_free_rspecs:
 	return ret;
 }
 
-/* Given a 'struct blob' allocated for a blob table entry with the SOLID flag
- * set, try to bind it to resource in the current solid run.  */
+/* Given a 'struct blob_descriptor' allocated for an on-disk blob descriptor
+ * with the SOLID flag set, try to bind it to resource in the current solid run.
+ */
 static int
 bind_blob_to_solid_resource(const struct wim_reshdr *reshdr,
-			    struct blob *blob,
+			    struct blob_descriptor *blob,
 			    struct wim_resource_spec **rspecs,
 			    size_t num_rspecs)
 {
@@ -754,10 +755,10 @@ free_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
 static int
 cmp_blobs_by_offset_in_res(const void *p1, const void *p2)
 {
-	const struct blob *blob1, *blob2;
+	const struct blob_descriptor *blob1, *blob2;
 
-	blob1 = *(const struct blob**)p1;
-	blob2 = *(const struct blob**)p2;
+	blob1 = *(const struct blob_descriptor**)p1;
+	blob2 = *(const struct blob_descriptor**)p2;
 
 	return cmp_u64(blob1->offset_in_res, blob2->offset_in_res);
 }
@@ -766,7 +767,7 @@ cmp_blobs_by_offset_in_res(const void *p1, const void *p2)
 static int
 validate_resource(struct wim_resource_spec *rspec)
 {
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	bool out_of_order;
 	u64 expected_next_offset;
 	int ret;
@@ -795,7 +796,7 @@ validate_resource(struct wim_resource_spec *rspec)
 	 */
 	if (out_of_order) {
 		ret = sort_blob_list(&rspec->blob_list,
-				       offsetof(struct blob,
+				       offsetof(struct blob_descriptor,
 						rspec_node),
 				       cmp_blobs_by_offset_in_res);
 		if (ret)
@@ -835,23 +836,25 @@ finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
 }
 
 /*
- * Reads the blob table from a WIM file.  Usually, each entry specifies a blob
- * that the WIM file contains, along with its location and SHA-1 message digest.
+ * Reads the blob table from a WIM file.  Usually, each entry in this table
+ * specifies a blob that the WIM file contains, along with its location and
+ * SHA-1 message digest.
  *
- * Saves blob table entries for non-metadata blobs in a hash table (set to
- * wim->blob_table), and saves the metadata entry for each image in a special
- * per-image location (the wim->image_metadata array).
+ * Descriptors for non-metadata blobs will be saved in the in-memory blob table
+ * (wim->blob_table), whereas descriptors for metadata blobs will be saved in a
+ * special location per-image (the wim->image_metadata array).
  *
  * This works for both version WIM_VERSION_DEFAULT (68864) and version
  * WIM_VERSION_SOLID (3584) WIMs.  In the latter, a consecutive run of blob
- * table entries that all have flag WIM_RESHDR_FLAG_SOLID (0x10) set is a "solid
+ * descriptors that all have flag WIM_RESHDR_FLAG_SOLID (0x10) set is a "solid
  * run".  A solid run logically contains zero or more resources, each of which
- * logically contains zero or more blobs.  Physically, in such a run, a "lookup
- * table entry" with uncompressed size SOLID_RESOURCE_MAGIC_NUMBER (0x100000000)
- * specifies a resource, whereas any other entry specifies a blob.  Within such
- * a run, blob entries and resource entries need not be in any particular order,
- * except that the order of the resource entries is important, as it affects how
- * blobs are assigned to resources.  See the code for details.
+ * logically contains zero or more blobs.  Physically, in such a run, a "blob
+ * descriptor" with uncompressed size SOLID_RESOURCE_MAGIC_NUMBER (0x100000000)
+ * specifies a resource, whereas any other blob descriptor actually does specify
+ * a blob.  Within such a run, real blob descriptors and resource entries need
+ * not be in any particular order, except that the order of the resource entries
+ * is important, as it affects how blobs are assigned to resources.  See the
+ * code for details.
  *
  * Possible return values:
  *	WIMLIB_ERR_SUCCESS (0)
@@ -868,7 +871,7 @@ read_blob_table(WIMStruct *wim)
 	size_t num_entries;
 	void *buf = NULL;
 	struct blob_table *table = NULL;
-	struct blob *cur_entry = NULL;
+	struct blob_descriptor *cur_entry = NULL;
 	size_t num_duplicate_blobs = 0;
 	size_t num_wrong_part_blobs = 0;
 	u32 image_index = 0;
@@ -877,13 +880,13 @@ read_blob_table(WIMStruct *wim)
 
 	DEBUG("Reading blob table.");
 
-	/* Sanity check: blob table entries are 50 bytes each.  */
-	BUILD_BUG_ON(sizeof(struct blob_table_entry_disk) !=
-		     WIM_BLOB_TABLE_ENTRY_DISK_SIZE);
+	/* Sanity check: blob descriptors are 50 bytes each.  */
+	BUILD_BUG_ON(sizeof(struct blob_descriptor_disk) !=
+		     WIM_BLOB_DESCRIPTOR_DISK_SIZE);
 
 	/* Calculate the number of entries in the blob table.  */
 	num_entries = wim->hdr.blob_table_reshdr.uncompressed_size /
-		      sizeof(struct blob_table_entry_disk);
+		      sizeof(struct blob_descriptor_disk);
 
 	/* Read the blob table into a buffer.  */
 	ret = wim_reshdr_to_data(&wim->hdr.blob_table_reshdr, wim, &buf);
@@ -896,14 +899,11 @@ read_blob_table(WIMStruct *wim)
 	if (!table)
 		goto oom;
 
-	/* Allocate and initalize blob table entries ('struct blob's) from the
-	 * raw blob table buffer.  Each of these entries will point to a 'struct
-	 * wim_resource_spec' that describes the underlying resource.  In WIMs
-	 * with version number WIM_VERSION_SOLID, a resource may contain
-	 * multiple blobs.  */
+	/* Allocate and initalize blob descriptors from the raw blob table
+	 * buffer.  */
 	for (size_t i = 0; i < num_entries; i++) {
-		const struct blob_table_entry_disk *disk_entry =
-			&((const struct blob_table_entry_disk*)buf)[i];
+		const struct blob_descriptor_disk *disk_entry =
+			&((const struct blob_descriptor_disk*)buf)[i];
 		struct wim_reshdr reshdr;
 		u16 part_number;
 
@@ -922,8 +922,8 @@ read_blob_table(WIMStruct *wim)
 		if (wim->hdr.wim_version == WIM_VERSION_DEFAULT)
 			reshdr.flags &= ~WIM_RESHDR_FLAG_SOLID;
 
-		/* Allocate a new 'struct blob'.  */
-		cur_entry = new_blob();
+		/* Allocate a new 'struct blob_descriptor'.  */
+		cur_entry = new_blob_descriptor();
 		if (!cur_entry)
 			goto oom;
 
@@ -1092,7 +1092,7 @@ read_blob_table(WIMStruct *wim)
 		if (cur_solid_rspecs &&
 		    cur_entry->resource_location == RESOURCE_IN_WIM)
 			blob_unbind_wim_resource_spec(cur_entry);
-		free_blob(cur_entry);
+		free_blob_descriptor(cur_entry);
 	}
 	cur_entry = NULL;
 
@@ -1129,7 +1129,7 @@ oom:
 	ret = WIMLIB_ERR_NOMEM;
 out:
 	free_solid_rspecs(cur_solid_rspecs, cur_num_solid_rspecs);
-	free_blob(cur_entry);
+	free_blob_descriptor(cur_entry);
 	free_blob_table(table);
 out_free_buf:
 	FREE(buf);
@@ -1137,9 +1137,9 @@ out_free_buf:
 }
 
 static void
-put_blob(struct blob_table_entry_disk *disk_entry,
-			   const struct wim_reshdr *out_reshdr,
-			   u16 part_number, u32 refcnt, const u8 *hash)
+write_blob_descriptor(struct blob_descriptor_disk *disk_entry,
+		      const struct wim_reshdr *out_reshdr,
+		      u16 part_number, u32 refcnt, const u8 *hash)
 {
 	put_wim_reshdr(out_reshdr, &disk_entry->reshdr);
 	disk_entry->part_number = cpu_to_le16(part_number);
@@ -1147,8 +1147,8 @@ put_blob(struct blob_table_entry_disk *disk_entry,
 	copy_hash(disk_entry->hash, hash);
 }
 
-/* Note: the list of blob entries must be sorted so that all entries for the
- * same solid resource are consecutive.  In addition, entries with
+/* Note: the list of blob descriptors must be sorted so that all entries for the
+ * same solid resource are consecutive.  In addition, blob descriptors with
  * WIM_RESHDR_FLAG_METADATA set must be in the same order as the indices of the
  * underlying images.  */
 int
@@ -1159,9 +1159,9 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 				int write_resource_flags)
 {
 	size_t table_size;
-	struct blob *blob;
-	struct blob_table_entry_disk *table_buf;
-	struct blob_table_entry_disk *table_buf_ptr;
+	struct blob_descriptor *blob;
+	struct blob_descriptor_disk *table_buf;
+	struct blob_descriptor_disk *table_buf_ptr;
 	int ret;
 	u64 prev_res_offset_in_wim = ~0ULL;
 	u64 prev_uncompressed_size;
@@ -1169,12 +1169,12 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 
 	table_size = 0;
 	list_for_each_entry(blob, blob_list, blob_table_list) {
-		table_size += sizeof(struct blob_table_entry_disk);
+		table_size += sizeof(struct blob_descriptor_disk);
 
 		if (blob->out_reshdr.flags & WIM_RESHDR_FLAG_SOLID &&
 		    blob->out_res_offset_in_wim != prev_res_offset_in_wim)
 		{
-			table_size += sizeof(struct blob_table_entry_disk);
+			table_size += sizeof(struct blob_descriptor_disk);
 			prev_res_offset_in_wim = blob->out_res_offset_in_wim;
 		}
 	}
@@ -1208,8 +1208,8 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 				tmp_reshdr.uncompressed_size = SOLID_RESOURCE_MAGIC_NUMBER;
 				tmp_reshdr.flags = WIM_RESHDR_FLAG_SOLID;
 
-				put_blob(table_buf_ptr++, &tmp_reshdr,
-					 part_number, 1, zero_hash);
+				write_blob_descriptor(table_buf_ptr++, &tmp_reshdr,
+						      part_number, 1, zero_hash);
 
 				logical_offset += prev_uncompressed_size;
 
@@ -1218,11 +1218,11 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 			}
 			tmp_reshdr = blob->out_reshdr;
 			tmp_reshdr.offset_in_wim += logical_offset;
-			put_blob(table_buf_ptr++, &tmp_reshdr,
-				 part_number, blob->out_refcnt, blob->hash);
+			write_blob_descriptor(table_buf_ptr++, &tmp_reshdr,
+					      part_number, blob->out_refcnt, blob->hash);
 		} else {
-			put_blob(table_buf_ptr++, &blob->out_reshdr,
-				 part_number, blob->out_refcnt, blob->hash);
+			write_blob_descriptor(table_buf_ptr++, &blob->out_reshdr,
+					      part_number, blob->out_refcnt, blob->hash);
 		}
 
 	}
@@ -1244,14 +1244,14 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 	return ret;
 }
 
-/* Allocate a blob table entry for the contents of the buffer, or re-use an
- * existing entry in @blob_table for the same blob.  */
-struct blob *
+/* Allocate a blob descriptor for the contents of the buffer, or re-use an
+ * existing descriptor in @blob_table for an identical blob.  */
+struct blob_descriptor *
 new_blob_from_data_buffer(const void *buffer, size_t size,
 			  struct blob_table *blob_table)
 {
 	u8 hash[SHA1_HASH_SIZE];
-	struct blob *blob, *existing_blob;
+	struct blob_descriptor *blob, *existing_blob;
 
 	sha1_buffer(buffer, size, hash);
 	existing_blob = lookup_blob(blob_table, hash);
@@ -1261,12 +1261,12 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
 		blob->refcnt++;
 	} else {
 		void *buffer_copy;
-		blob = new_blob();
+		blob = new_blob_descriptor();
 		if (blob == NULL)
 			return NULL;
 		buffer_copy = memdup(buffer, size);
 		if (buffer_copy == NULL) {
-			free_blob(blob);
+			free_blob_descriptor(blob);
 			return NULL;
 		}
 		blob->resource_location = RESOURCE_IN_ATTACHED_BUFFER;
@@ -1279,27 +1279,28 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
 }
 
 /*
- * Calculate the SHA-1 message digest of a blob and move it from the list of
- * unhashed blobs to the blob table, possibly joining it with an identical blob.
+ * Calculate the SHA-1 message digest of a blob and move its descriptor from the
+ * list of unhashed blobs to the blob table, possibly joining it with an
+ * identical blob.
  *
  * @blob:
  *	An unhashed blob.
  * @blob_table:
  *	The blob table.
  * @blob_ret:
- *	On success, write a pointer to the resulting blob to this location.
- *	This will be the same as @blob if it was inserted into the blob table,
- *	or different if a duplicate blob was found.
+ *	On success, write a pointer to the resulting blob descriptor to this
+ *	location.  This will be the same as @blob if it was inserted into the
+ *	blob table, or different if a duplicate blob was found.
  *
  * Returns 0 on success; nonzero if there is an error reading the blob data.
  */
 int
-hash_unhashed_blob(struct blob *blob, struct blob_table *blob_table,
-		   struct blob **blob_ret)
+hash_unhashed_blob(struct blob_descriptor *blob, struct blob_table *blob_table,
+		   struct blob_descriptor **blob_ret)
 {
 	int ret;
-	struct blob *duplicate_blob;
-	struct blob **back_ptr;
+	struct blob_descriptor *duplicate_blob;
+	struct blob_descriptor **back_ptr;
 
 	wimlib_assert(blob->unhashed);
 
@@ -1337,7 +1338,7 @@ hash_unhashed_blob(struct blob *blob, struct blob_table *blob_table,
 }
 
 void
-blob_to_wimlib_resource_entry(const struct blob *blob,
+blob_to_wimlib_resource_entry(const struct blob_descriptor *blob,
 			      struct wimlib_resource_entry *wentry)
 {
 	memset(wentry, 0, sizeof(*wentry));
@@ -1371,7 +1372,7 @@ struct iterate_blob_context {
 };
 
 static int
-do_iterate_blob(struct blob *blob, void *_ctx)
+do_iterate_blob(struct blob_descriptor *blob, void *_ctx)
 {
 	struct iterate_blob_context *ctx = _ctx;
 	struct wimlib_resource_entry entry;

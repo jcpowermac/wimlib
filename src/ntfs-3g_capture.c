@@ -70,7 +70,7 @@ open_ntfs_attr(ntfs_inode *ni, struct ntfs_location *loc)
 }
 
 int
-read_ntfs_file_prefix(const struct blob *blob, u64 size,
+read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
 		      consume_data_callback_t cb, void *cb_ctx)
 {
 	struct ntfs_location *loc = blob->ntfs_loc;
@@ -177,7 +177,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 	ntfs_attr_search_ctx *actx;
 	struct ntfs_location *ntfs_loc;
 	int ret;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 
 	DEBUG("Capturing NTFS attributes from `%s'", path);
 
@@ -269,7 +269,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 	}
 	goto out_put_actx;
 out_free_lte:
-	free_blob(blob);
+	free_blob_descriptor(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {
 		FREE(ntfs_loc->path);

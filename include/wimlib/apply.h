@@ -31,7 +31,7 @@ struct wim_features {
 	unsigned long case_sensitive_filenames;
 };
 
-struct blob;
+struct blob_descriptor;
 struct read_blob_list_callbacks;
 struct apply_operations;
 struct wim_dentry;
@@ -70,7 +70,7 @@ struct apply_ctx {
 	unsigned long num_blobs_remaining;
 	struct list_head blob_list;
 	const struct read_blob_list_callbacks *saved_cbs;
-	struct blob *cur_blob;
+	struct blob_descriptor *cur_blob;
 	u64 cur_blob_offset;
 	struct filedes tmpfile_fd;
 	tchar *tmpfile_name;

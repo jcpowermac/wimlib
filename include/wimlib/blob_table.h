@@ -66,12 +66,12 @@ struct blob_target {
 };
 
 /*
- * Specification for a blob, which is a nonempty sequence of binary data.
+ * Descriptor for a blob, which is a nonempty sequence of binary data.
  *
  * Within a WIM file, blobs are single instanced and are identified by SHA-1
  * message digest.
  */
-struct blob {
+struct blob_descriptor {
 
 	/* List node for a hash bucket of the blob table.  */
 	struct hlist_node hash_list;
@@ -270,47 +270,47 @@ write_blob_table_from_blob_list(struct list_head *blob_list,
 					struct wim_reshdr *out_reshdr,
 					int write_resource_flags);
 
-/* Functions to create, clone, print, and free blob table entries  */
+/* Functions to create, clone, print, and free blob descriptors  */
 
-extern struct blob *
-new_blob(void) _malloc_attribute;
+extern struct blob_descriptor *
+new_blob_descriptor(void) _malloc_attribute;
 
-extern struct blob *
-clone_blob(const struct blob *blob)
+extern struct blob_descriptor *
+clone_blob_descriptor(const struct blob_descriptor *blob)
 			_malloc_attribute;
 
 extern void
-blob_decrement_refcnt(struct blob *blob,
-		     struct blob_table *table);
+blob_decrement_refcnt(struct blob_descriptor *blob,
+		      struct blob_table *table);
 #ifdef WITH_FUSE
 extern void
-blob_decrement_num_opened_fds(struct blob *blob);
+blob_decrement_num_opened_fds(struct blob_descriptor *blob);
 #endif
 
 extern void
-free_blob(struct blob *blob);
+free_blob_descriptor(struct blob_descriptor *blob);
 
 /* Functions to insert and delete entries from a blob table  */
 
 extern void
-blob_table_insert(struct blob_table *table, struct blob *blob);
+blob_table_insert(struct blob_table *table, struct blob_descriptor *blob);
 
 extern void
-blob_table_unlink(struct blob_table *table, struct blob *blob);
+blob_table_unlink(struct blob_table *table, struct blob_descriptor *blob);
 
 /* Function to lookup a blob by SHA-1 message digest  */
-extern struct blob *
+extern struct blob_descriptor *
 lookup_blob(const struct blob_table *table, const u8 hash[]);
 
 /* Functions to iterate through the entries of a blob table  */
 
 extern int
 for_blob_in_table(struct blob_table *table,
-	 int (*visitor)(struct blob *, void *), void *arg);
+	 int (*visitor)(struct blob_descriptor *, void *), void *arg);
 
 extern int
 for_blob_pos_sorted(struct blob_table *table,
-		    int (*visitor)(struct blob *, void *), void *arg);
+		    int (*visitor)(struct blob_descriptor *, void *), void *arg);
 
 /* Function to get a "resource entry" (should be called "blob entry") in stable
  * format  */
@@ -318,7 +318,7 @@ for_blob_pos_sorted(struct blob_table *table,
 struct wimlib_resource_entry;
 
 extern void
-blob_to_wimlib_resource_entry(const struct blob *blob,
+blob_to_wimlib_resource_entry(const struct blob_descriptor *blob,
 			      struct wimlib_resource_entry *wentry);
 
 /* Functions to sort a list of blobs  */
@@ -337,17 +337,17 @@ cmp_blobs_by_sequential_order(const void *p1, const void *p2);
 /* Utility functions  */
 
 extern int
-blob_zero_out_refcnt(struct blob *blob, void *ignore);
+blob_zero_out_refcnt(struct blob_descriptor *blob, void *ignore);
 
 static inline bool
-blob_is_in_solid_wim_resource(const struct blob * blob)
+blob_is_in_solid_wim_resource(const struct blob_descriptor * blob)
 {
 	return blob->resource_location == RESOURCE_IN_WIM &&
 	       blob->size != blob->rspec->uncompressed_size;
 }
 
 static inline bool
-blob_is_in_file(const struct blob *blob)
+blob_is_in_file(const struct blob_descriptor *blob)
 {
 	return blob->resource_location == RESOURCE_IN_FILE_ON_DISK
 #ifdef __WIN32__
@@ -358,7 +358,7 @@ blob_is_in_file(const struct blob *blob)
 }
 
 static inline const struct blob_target *
-blob_targets(struct blob *blob)
+blob_targets(struct blob_descriptor *blob)
 {
 	if (blob->out_refcnt <= ARRAY_LEN(blob->inline_blob_targets))
 		return blob->inline_blob_targets;
@@ -367,7 +367,7 @@ blob_targets(struct blob *blob)
 }
 
 static inline void
-blob_bind_wim_resource_spec(struct blob *blob, struct wim_resource_spec *rspec)
+blob_bind_wim_resource_spec(struct blob_descriptor *blob, struct wim_resource_spec *rspec)
 {
 	blob->resource_location = RESOURCE_IN_WIM;
 	blob->rspec = rspec;
@@ -375,21 +375,21 @@ blob_bind_wim_resource_spec(struct blob *blob, struct wim_resource_spec *rspec)
 }
 
 static inline void
-blob_unbind_wim_resource_spec(struct blob *blob)
+blob_unbind_wim_resource_spec(struct blob_descriptor *blob)
 {
 	list_del(&blob->rspec_node);
 	blob->resource_location = RESOURCE_NONEXISTENT;
 }
 
 extern void
-blob_put_resource(struct blob *blob);
+blob_put_resource(struct blob_descriptor *blob);
 
-extern struct blob *
+extern struct blob_descriptor *
 new_blob_from_data_buffer(const void *buffer, size_t size,
 			  struct blob_table *blob_table);
 
 static inline void
-add_unhashed_blob(struct blob *blob,
+add_unhashed_blob(struct blob_descriptor *blob,
 		  struct wim_inode *back_inode,
 		  u32 back_attr_id,
 		  struct list_head *unhashed_blobs)
@@ -401,11 +401,11 @@ add_unhashed_blob(struct blob *blob,
 }
 
 extern int
-hash_unhashed_blob(struct blob *blob,
+hash_unhashed_blob(struct blob_descriptor *blob,
 		   struct blob_table *blob_table,
-		   struct blob **lte_ret);
+		   struct blob_descriptor **lte_ret);
 
-extern struct blob **
-retrieve_blob_pointer(struct blob *blob);
+extern struct blob_descriptor **
+retrieve_blob_pointer(struct blob_descriptor *blob);
 
 #endif /* _WIMLIB_BLOB_TABLE_H */

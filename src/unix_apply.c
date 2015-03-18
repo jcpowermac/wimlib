@@ -500,7 +500,7 @@ unix_create_symlink(const struct wim_inode *inode, const char *path,
 {
 	char link_target[REPARSE_DATA_MAX_SIZE];
 	int ret;
-	struct blob blob_override;
+	struct blob_descriptor blob_override;
 
 	blob_override.resource_location = RESOURCE_IN_ATTACHED_BUFFER;
 	blob_override.attached_buffer = (void *)rpdata;
@@ -546,7 +546,7 @@ unix_cleanup_open_fds(struct unix_apply_ctx *ctx, unsigned offset)
 }
 
 static int
-unix_begin_extract_blob_instance(const struct blob *blob,
+unix_begin_extract_blob_instance(const struct blob_descriptor *blob,
 				 const struct wim_inode *inode,
 				 struct unix_apply_ctx *ctx)
 {
@@ -587,7 +587,7 @@ retry_create:
 
 /* Called when starting to read a blob for extraction  */
 static int
-unix_begin_extract_blob(struct blob *blob, void *_ctx)
+unix_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
 	const struct blob_target *targets = blob_targets(blob);
@@ -627,7 +627,7 @@ unix_extract_chunk(const void *chunk, size_t size, void *_ctx)
 
 /* Called when a blob has been fully read for extraction  */
 static int
-unix_end_extract_blob(struct blob *blob, int status, void *_ctx)
+unix_end_extract_blob(struct blob_descriptor *blob, int status, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
 	int ret;

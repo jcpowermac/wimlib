@@ -64,10 +64,10 @@ get_extension(const utf16lechar *name, size_t nbytes)
 static int
 cmp_blobs_by_solid_sort_name(const void *p1, const void *p2)
 {
-	const struct blob *blob1, *blob2;
+	const struct blob_descriptor *blob1, *blob2;
 
-	blob1 = *(const struct blob **)p1;
-	blob2 = *(const struct blob **)p2;
+	blob1 = *(const struct blob_descriptor **)p1;
+	blob2 = *(const struct blob_descriptor **)p2;
 
 	if (blob1->solid_sort_name) {
 		if (!blob2->solid_sort_name)
@@ -105,7 +105,7 @@ cmp_blobs_by_solid_sort_name(const void *p1, const void *p2)
 }
 
 static void
-blob_set_solid_sort_name_from_inode(struct blob *blob,
+blob_set_solid_sort_name_from_inode(struct blob_descriptor *blob,
 				   const struct wim_inode *inode)
 {
 	const struct wim_dentry *dentry;
@@ -139,7 +139,7 @@ dentry_fill_in_solid_sort_names(struct wim_dentry *dentry, void *_blob_table)
 	const u8 *hash;
 	struct hlist_head *head;
 	struct hlist_node *cur;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 
 	hash = inode_unnamed_stream_hash(inode);
 	head = &blob_table->table[load_size_t_unaligned(hash) %
@@ -168,7 +168,7 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 	struct temp_blob_table blob_table;
 	WIMStruct *wims[128];
 	int num_wims = 0;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	int ret;
 
 	/* Count the number of blobs to be written.  */
@@ -232,7 +232,7 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 	}
 
 	ret = sort_blob_list(blob_list,
-			       offsetof(struct blob,
+			       offsetof(struct blob_descriptor,
 					write_blobs_list),
 			       cmp_blobs_by_solid_sort_name);
 

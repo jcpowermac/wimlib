@@ -6,14 +6,14 @@
 #include "wimlib/sha1.h"
 #include "wimlib/types.h"
 
-struct blob;
+struct blob_descriptor;
 struct filedes;
 struct wim_image_metadata;
 
 /*
  * Specification of a resource in a WIM file.
  *
- * If a `struct blob' blob has (blob->resource_location == RESOURCE_IN_WIM),
+ * If a `struct blob_descriptor' blob has (blob->resource_location == RESOURCE_IN_WIM),
  * then blob->rspec points to an instance of this structure.
  *
  * Normally, there is a one-to-one correspondence between "blobs" (each of which
@@ -186,14 +186,14 @@ get_chunk_entry_size(u64 res_size, bool is_alt)
 /* Functions to read blobs  */
 
 extern int
-read_partial_wim_blob_into_buf(const struct blob *blob,
+read_partial_wim_blob_into_buf(const struct blob_descriptor *blob,
 			       size_t size, u64 offset, void *buf);
 
 extern int
-read_full_blob_into_buf(const struct blob *blob, void *buf);
+read_full_blob_into_buf(const struct blob_descriptor *blob, void *buf);
 
 extern int
-read_full_blob_into_alloc_buf(const struct blob *blob, void **buf_ret);
+read_full_blob_into_alloc_buf(const struct blob_descriptor *blob, void **buf_ret);
 
 extern int
 wim_reshdr_to_data(const struct wim_reshdr *reshdr,
@@ -204,7 +204,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 		   u8 hash[SHA1_HASH_SIZE]);
 
 extern int
-skip_wim_blob(struct blob *blob);
+skip_wim_blob(struct blob_descriptor *blob);
 
 /*
  * Type of callback function for beginning to read a blob.
@@ -220,7 +220,7 @@ skip_wim_blob(struct blob *blob);
  * read, and read_blob_list() should continue on to the next blob (without
  * calling @consume_chunk or @end_blob).
  */
-typedef int (*read_blob_list_begin_blob_t)(struct blob *blob, void *ctx);
+typedef int (*read_blob_list_begin_blob_t)(struct blob_descriptor *blob, void *ctx);
 
 #define BEGIN_BLOB_STATUS_SKIP_BLOB	-1
 
@@ -238,7 +238,7 @@ typedef int (*read_blob_list_begin_blob_t)(struct blob *blob, void *ctx);
  * @ctx:
  *	User-provided context.
  */
-typedef int (*read_blob_list_end_blob_t)(struct blob *blob, int status, void *ctx);
+typedef int (*read_blob_list_end_blob_t)(struct blob_descriptor *blob, int status, void *ctx);
 
 
 /* Callback functions and contexts for read_blob_list().  */
@@ -276,19 +276,19 @@ read_blob_list(struct list_head *blob_list, size_t list_head_offset,
 /* Functions to extract blobs.  */
 
 extern int
-extract_blob(struct blob *blob, u64 size,
+extract_blob(struct blob_descriptor *blob, u64 size,
 	     consume_data_callback_t extract_chunk, void *extract_chunk_arg);
 
 extern int
-extract_blob_to_fd(struct blob *blob, struct filedes *fd, u64 size);
+extract_blob_to_fd(struct blob_descriptor *blob, struct filedes *fd, u64 size);
 
 extern int
-extract_full_blob_to_fd(struct blob *blob, struct filedes *fd);
+extract_full_blob_to_fd(struct blob_descriptor *blob, struct filedes *fd);
 
 /* Miscellaneous blob functions.  */
 
 extern int
-sha1_blob(struct blob *blob);
+sha1_blob(struct blob_descriptor *blob);
 
 /* Functions to read/write metadata resources.  */
 

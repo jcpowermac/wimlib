@@ -239,7 +239,7 @@ void
 inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
 		       struct blob_table *blob_table)
 {
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	unsigned idx = attr - inode->i_attrs;
 
 	wimlib_assert(idx < inode->i_num_attrs);
@@ -293,16 +293,16 @@ inode_has_named_data_stream(const struct wim_inode *inode)
  * Resolve an inode's attributes.
  *
  * For each attribute, this replaces the SHA-1 message digest of the blob data
- * with a pointer to the 'struct blob' itself.  Blobs are looked up in @table.
+ * with a pointer to the 'struct blob_descriptor' itself.  Blobs are looked up in @table.
  *
  * If @force is %false:
  *	If any of the needed blobs do not exist in @table, return
  *	WIMLIB_ERR_RESOURCE_NOT_FOUND and leave the inode unmodified.
  * If @force is %true:
- *	If any of the needed blobs do not exist in @table, allocate new entries
- *	for them and insert them into @table.  This does not, of course, cause
- *	the data of these blobs to magically exist, but this is needed by the
- *	code for extraction from a pipe.
+ *	If any of the needed blobs do not exist in @table, allocate new blob
+ *	descriptors for them and insert them into @table.  This does not, of
+ *	course, cause the data of these blobs to magically exist, but this is
+ *	needed by the code for extraction from a pipe.
  *
  * If the inode is already resolved, this function does nothing.
  *
@@ -314,7 +314,7 @@ int
 inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 			 bool force)
 {
-	struct blob *blobs[inode->i_num_attrs];
+	struct blob_descriptor *blobs[inode->i_num_attrs];
 
 	if (inode->i_resolved)
 		return 0;
@@ -322,14 +322,14 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 
 		const u8 *hash = inode->i_attrs[i].attr_hash;
-		struct blob *blob = NULL;
+		struct blob_descriptor *blob = NULL;
 
 		if (!is_zero_hash(hash)) {
 			blob = lookup_blob(table, hash);
 			if (!blob) {
 				if (!force)
 					return blob_not_found_error(inode, hash);
-				blob = new_blob();
+				blob = new_blob_descriptor();
 				if (!blob)
 					return WIMLIB_ERR_NOMEM;
 				copy_hash(blob->hash, hash);
@@ -385,7 +385,7 @@ blob_not_found_error(const struct wim_inode *inode, const u8 *hash)
 	return WIMLIB_ERR_RESOURCE_NOT_FOUND;
 }
 
-struct blob *
+struct blob_descriptor *
 attribute_blob(const struct wim_attribute *attr, const struct blob_table *table)
 {
 	if (attr->attr_resolved)
@@ -395,11 +395,11 @@ attribute_blob(const struct wim_attribute *attr, const struct blob_table *table)
 }
 
 /*
- * Return the blob table entry for the unnamed data stream of a *resolved*
- * inode, or NULL if the inode's unnamed data stream is empty.  Also return the
- * 0-based index of the unnamed data stream in *stream_idx_ret.
+ * Return the blob descriptor for the unnamed data stream of a *resolved* inode,
+ * or NULL if the inode's unnamed data stream is empty.  Also return the 0-based
+ * index of the unnamed data stream in *stream_idx_ret.
  */
-struct blob *
+struct blob_descriptor *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
 			      unsigned *attr_idx_ret)
 {
@@ -417,10 +417,10 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
 }
 
 /*
- * Return the blob table entry for the unnamed data stream of an inode, or NULL
+ * Return the blob descriptor for the unnamed data stream of an inode, or NULL
  * if the inode's unnamed data stream is empty or not available.
  */
-struct blob *
+struct blob_descriptor *
 inode_unnamed_stream(const struct wim_inode *inode,
 		     const struct blob_table *table)
 {
@@ -481,7 +481,7 @@ void
 inode_unref_attributes(struct wim_inode *inode, struct blob_table *blob_table)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		struct blob *blob;
+		struct blob_descriptor *blob;
 
 		blob = attribute_blob(&inode->i_attrs[i], blob_table);
 		if (blob)
@@ -490,16 +490,16 @@ inode_unref_attributes(struct wim_inode *inode, struct blob_table *blob_table)
 }
 
 /*
- * Given a blob entry, return the pointer contained in the attribute that
+ * Given a blob descriptor, return the pointer contained in the attribute that
  * references it.
  *
- * This is only possible for "unhashed" streams, which are guaranteed to have
- * only one referencing attribute, and that reference is guaranteed to be in a
- * resolved inode.  (It can't be in an unresolved inode, since that would imply
- * the hash is known!)
+ * This is only possible for "unhashed" blobs, which are guaranteed to have only
+ * one referencing attribute, and that reference is guaranteed to be in a
+ * resolved attribute.  (It can't be in an unresolved attribute, since that
+ * would imply the hash is known!)
  */
-struct blob **
-retrieve_blob_pointer(struct blob *blob)
+struct blob_descriptor **
+retrieve_blob_pointer(struct blob_descriptor *blob)
 {
 	wimlib_assert(blob->unhashed);
 

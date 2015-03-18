@@ -103,7 +103,7 @@ static int
 unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		       struct list_head *unhashed_blobs)
 {
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	struct wim_attribute *attr;
 
 	inode->i_attributes = FILE_ATTRIBUTE_NORMAL;
@@ -127,7 +127,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 
 	attr = inode_add_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
 	if (!attr) {
-		free_blob(blob);
+		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
 	add_unhashed_blob(blob, inode, 0, unhashed_blobs);

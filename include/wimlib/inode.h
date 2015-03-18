@@ -8,7 +8,7 @@
 struct avl_tree_node;
 struct wim_dentry;
 struct blob_table;
-struct blob;
+struct blob_descriptor;
 struct wim_security_data;
 struct wimfs_fd;
 
@@ -34,7 +34,7 @@ struct wim_attribute {
 	utf16lechar *attr_name;
 	union {
 		u8 attr_hash[SHA1_HASH_SIZE];
-		struct blob *attr_blob;
+		struct blob_descriptor *attr_blob;
 	};
 	u32 attr_resolved : 1;
 	u32 attr_id : 27;
@@ -106,9 +106,9 @@ struct wim_inode {
 	 * "resolved".  By default, the inode starts as "unresolved", meaning
 	 * the 'attr_hash' field of each associated attribute is valid and
 	 * should be used as a key into the blob table to find the associated
-	 * 'struct blob'.  But if the inode has been "resolved", then each
+	 * 'struct blob_descriptor'.  But if the inode has been "resolved", then each
 	 * 'attr_hash' field has been overlain with a pointer directly to the
-	 * appropriate 'struct blob'.  */
+	 * appropriate 'struct blob_descriptor'.  */
 	u8 i_resolved : 1;
 
 	/* Flag used to mark this inode as visited; this is used when visiting
@@ -366,15 +366,15 @@ inode_unresolve_attributes(struct wim_inode *inode);
 extern int
 blob_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
-extern struct blob *
+extern struct blob_descriptor *
 attribute_blob(const struct wim_attribute *attr,
 	       const struct blob_table *table);
 
-extern struct blob *
+extern struct blob_descriptor *
 inode_unnamed_stream_resolved(const struct wim_inode *inode,
 			      unsigned *attr_idx_ret);
 
-extern struct blob *
+extern struct blob_descriptor *
 inode_unnamed_stream(const struct wim_inode *inode,
 		     const struct blob_table *table);
 

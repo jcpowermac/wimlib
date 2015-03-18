@@ -1071,7 +1071,7 @@ out:
  */
 bool
 wimboot_set_pointer(HANDLE h,
-		    const struct blob *blob,
+		    const struct blob_descriptor *blob,
 		    u64 data_source_id,
 		    const u8 blob_table_hash[SHA1_HASH_SIZE],
 		    bool wof_running)

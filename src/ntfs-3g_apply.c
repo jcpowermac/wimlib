@@ -317,7 +317,7 @@ out_close:
 
 /* Create empty alternate (named) data streams.
  *
- * Since these won't have 'struct blob's, they won't show up in the call to
+ * Since these won't have 'struct blob_descriptor's, they won't show up in the call to
  * extract_blob_list().  Hence the need for the special case.
  */
 static int
@@ -681,7 +681,7 @@ ntfs_3g_create_nondirectories(struct list_head *dentry_list,
 }
 
 static int
-ntfs_3g_begin_extract_blob_to_attr(struct blob *blob,
+ntfs_3g_begin_extract_blob_to_attr(struct blob_descriptor *blob,
 				   ntfs_inode *ni,
 				   struct wim_inode *inode,
 				   const struct wim_attribute *attr,
@@ -788,7 +788,7 @@ ntfs_3g_open_inode(struct wim_inode *inode, struct ntfs_3g_apply_ctx *ctx)
 }
 
 static int
-ntfs_3g_begin_extract_blob(struct blob *blob, void *_ctx)
+ntfs_3g_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
 	const struct blob_target *targets = blob_targets(blob);
@@ -839,7 +839,7 @@ ntfs_3g_extract_chunk(const void *chunk, size_t size, void *_ctx)
 }
 
 static int
-ntfs_3g_end_extract_blob(struct blob *blob, int status, void *_ctx)
+ntfs_3g_end_extract_blob(struct blob_descriptor *blob, int status, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
 	int ret;

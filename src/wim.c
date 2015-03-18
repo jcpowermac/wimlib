@@ -226,13 +226,13 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 	imd->security_data = NULL;
 
 	if (free_metadata_blob) {
-		free_blob(imd->metadata_blob);
+		free_blob_descriptor(imd->metadata_blob);
 		imd->metadata_blob = NULL;
 	}
 	if (!table) {
-		struct blob *blob, *tmp;
+		struct blob_descriptor *blob, *tmp;
 		list_for_each_entry_safe(blob, tmp, &imd->unhashed_blobs, unhashed_list)
-			free_blob(blob);
+			free_blob_descriptor(blob);
 	}
 	INIT_LIST_HEAD(&imd->unhashed_blobs);
 	INIT_LIST_HEAD(&imd->inode_list);
@@ -823,15 +823,15 @@ wim_checksum_unhashed_blobs(WIMStruct *wim)
 	if (!wim_has_metadata(wim))
 		return 0;
 	for (int i = 0; i < wim->hdr.image_count; i++) {
-		struct blob *blob, *tmp;
+		struct blob_descriptor *blob, *tmp;
 		struct wim_image_metadata *imd = wim->image_metadata[i];
 		image_for_each_unhashed_blob_safe(blob, tmp, imd) {
-			struct blob *new_blob;
+			struct blob_descriptor *new_blob;
 			ret = hash_unhashed_blob(blob, wim->blob_table, &new_blob);
 			if (ret)
 				return ret;
 			if (new_blob != blob)
-				free_blob(blob);
+				free_blob_descriptor(blob);
 		}
 	}
 	return 0;

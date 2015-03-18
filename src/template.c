@@ -62,7 +62,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
 
 	/* Iterate through each stream and do some more checks.  */
 	for (unsigned i = 0; i <= inode->i_num_ads; i++) {
-		const struct blob *blob, *template_lte;
+		const struct blob_descriptor *blob, *template_lte;
 
 		blob = inode_stream_lte_resolved(inode, i);
 		template_lte = inode_stream_lte(template_inode, i,
@@ -97,7 +97,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
  * useful stream information (e.g. checksums) from @template_inode.
  *
  * This assumes that the streams for @inode have been resolved (to point
- * directly to the appropriate `struct blob's)  but do not
+ * directly to the appropriate `struct blob_descriptor's)  but do not
  * necessarily have checksum information filled in.
  */
 static int
@@ -107,8 +107,8 @@ inode_copy_checksums(struct wim_inode *inode,
 		     WIMStruct *template_wim)
 {
 	for (unsigned i = 0; i <= inode->i_num_ads; i++) {
-		struct blob *blob, *template_lte;
-		struct blob *replace_lte;
+		struct blob_descriptor *blob, *template_lte;
+		struct blob_descriptor *replace_lte;
 
 		blob = inode_stream_lte_resolved(inode, i);
 		template_lte = inode_stream_lte(template_inode, i,
@@ -138,7 +138,7 @@ inode_copy_checksums(struct wim_inode *inode,
 
 		list_del(&blob->unhashed_list);
 		if (replace_lte) {
-			free_blob(blob);
+			free_blob_descriptor(blob);
 		} else {
 			copy_hash(blob->hash, template_lte->hash);
 			blob->unhashed = 0;

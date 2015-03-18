@@ -45,7 +45,7 @@ attr_to_wimlib_stream_entry(const struct wim_inode *inode,
 			    const struct blob_table *blob_table,
 			    int flags)
 {
-	const struct blob *blob;
+	const struct blob_descriptor *blob;
 	const u8 *hash;
 
 	if (!attr)

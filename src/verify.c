@@ -33,7 +33,7 @@
 #include "wimlib/security.h"
 
 static int
-append_lte_to_list(struct blob *blob, void *_list)
+append_lte_to_list(struct blob_descriptor *blob, void *_list)
 {
 	list_add(&blob->extraction_list, (struct list_head *)_list);
 	return 0;
@@ -47,7 +47,7 @@ struct verify_blob_list_ctx {
 };
 
 static int
-end_verify_stream(struct blob *blob, int status, void *_ctx)
+end_verify_stream(struct blob_descriptor *blob, int status, void *_ctx)
 {
 	struct verify_blob_list_ctx *ctx = _ctx;
 	union wimlib_progress_info *progress = ctx->progress;
@@ -115,7 +115,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	LIST_HEAD(blob_list);
 	union wimlib_progress_info progress;
 	struct verify_blob_list_ctx ctx;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	struct read_blob_list_callbacks cbs = {
 		.end_blob = end_verify_stream,
 		.end_blob_ctx = &ctx,
@@ -188,6 +188,6 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 		return ret;
 
 	return read_blob_list(&blob_list,
-			      offsetof(struct blob, extraction_list),
+			      offsetof(struct blob_descriptor, extraction_list),
 			      &cbs, VERIFY_BLOB_HASHES);
 }

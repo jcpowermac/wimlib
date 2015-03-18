@@ -105,7 +105,7 @@ retry:
 /* Read the first @size bytes from the file, or named data stream of a file,
  * from which the stream entry @blob was created.  */
 int
-read_winnt_file_prefix(const struct blob *blob, u64 size,
+read_winnt_file_prefix(const struct blob_descriptor *blob, u64 size,
 		       consume_data_callback_t cb, void *cb_ctx)
 {
 	const wchar_t *path;
@@ -184,7 +184,7 @@ win32_encrypted_export_cb(unsigned char *data, void *_ctx, unsigned long len)
 }
 
 int
-read_win32_encrypted_file_prefix(const struct blob *blob,
+read_win32_encrypted_file_prefix(const struct blob_descriptor *blob,
 				 u64 size,
 				 consume_data_callback_t cb, void *cb_ctx)
 {
@@ -827,7 +827,7 @@ static int
 winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path,
 				 struct list_head *unhashed_blobs)
 {
-	struct blob *blob = new_blob();
+	struct blob_descriptor *blob = new_blob();
 	int ret;
 
 	if (unlikely(!blob))
@@ -835,7 +835,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 
 	blob->file_on_disk = WCSDUP(nt_path);
 	if (unlikely(!blob->file_on_disk)) {
-		free_blob(blob);
+		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
 	blob->resource_location = RESOURCE_WIN32_ENCRYPTED;
@@ -848,7 +848,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 					    (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY),
 					    &blob->size);
 	if (unlikely(ret)) {
-		free_blob(blob);
+		free_blob_descriptor(blob);
 		return ret;
 	}
 
@@ -925,7 +925,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 	size_t stream_name_nchars;
 	struct wim_ads_entry *ads_entry;
 	wchar_t *stream_path;
-	struct blob *blob;
+	struct blob_descriptor *blob;
 	u32 stream_id;
 
 	/* Given the raw stream name (which is something like
