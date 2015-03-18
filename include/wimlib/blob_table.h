@@ -302,7 +302,7 @@ lookup_blob(const struct blob_table *table, const u8 hash[]);
 /* Functions to iterate through the entries of a blob table  */
 
 extern int
-for_blob(struct blob_table *table,
+for_blob_in_table(struct blob_table *table,
 	 int (*visitor)(struct blob *, void *), void *arg);
 
 extern int
@@ -341,6 +341,17 @@ blob_is_in_solid_wim_resource(const struct blob * blob)
 {
 	return blob->resource_location == RESOURCE_IN_WIM &&
 	       blob->size != blob->rspec->uncompressed_size;
+}
+
+static inline bool
+blob_is_in_file(const struct blob *blob)
+{
+	return blob->resource_location == RESOURCE_IN_FILE_ON_DISK
+#ifdef __WIN32__
+	    || blob->resource_location == RESOURCE_IN_WINNT_FILE_ON_DISK
+	    || blob->resource_location == RESOURCE_WIN32_ENCRYPTED
+#endif
+	   ;
 }
 
 static inline const struct blob_owner *

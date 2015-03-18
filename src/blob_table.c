@@ -1,10 +1,12 @@
 /*
  * blob_table.c
  *
- * The blob table for a WIM is a table that maps SHA-1 message digests to blobs.
+ * The blob table maps SHA-1 message digests to "blobs", which are known length
+ * sequences of binary data.
  *
  * This file also contains code to read and write the corresponding on-disk
- * representation of this table.
+ * representation of this table in the WIM file format.  A WIM file has one blob
+ * table.
  */
 
 /*
@@ -43,16 +45,7 @@
 #include "wimlib/util.h"
 #include "wimlib/write.h"
 
-/*
- * Blob table:
- *
- * This is a logical mapping from SHA-1 message digests to the binary blobs
- * contained in a WIM.
- *
- * Here it is implemented as a hash table.
- *
- * Note: Everything will break horribly if there is a SHA-1 collision.
- */
+/* A hash table mapping SHA-1 message digests to blobs.  */
 struct blob_table {
 	struct hlist_head *array;
 	size_t num_blobs;
@@ -87,7 +80,7 @@ oom:
 }
 
 static int
-do_free_blob(struct blob *blob, void *ignore)
+do_free_blob(struct blob *blob, void *_ignore)
 {
 	free_blob(blob);
 	return 0;
@@ -97,7 +90,7 @@ void
 free_blob_table(struct blob_table *table)
 {
 	if (table) {
-		for_blob(table, do_free_blob, NULL);
+		for_blob_in_table(table, do_free_blob, NULL);
 		FREE(table->array);
 		FREE(table);
 	}
@@ -270,8 +263,7 @@ finalize_blob(struct blob *blob)
  * recalculate by default when writing a new WIM file.
  */
 void
-blob_decrement_refcnt(struct blob *blob,
-		      struct blob_table *table)
+blob_decrement_refcnt(struct blob *blob, struct blob_table *table)
 {
 	if (unlikely(blob->refcnt == 0))  /* See comment above  */
 		return;
@@ -369,8 +361,8 @@ blob_table_unlink(struct blob_table *table, struct blob *blob)
 	table->num_blobs--;
 }
 
-/* Given a SHA-1 message digest, return the corresponding blob in the WIM's blob
- * table, or NULL if there is none.  */
+/* Given a SHA-1 message digest, return the corresponding blob from the
+ * specified blob table, or NULL if there is none.  */
 struct blob *
 lookup_blob(const struct blob_table *table, const u8 hash[])
 {
@@ -385,11 +377,11 @@ lookup_blob(const struct blob_table *table, const u8 hash[])
 	return NULL;
 }
 
-/* Calls a function on all the blobs in the WIM blob table.  Stop early and
- * return nonzero if any call to the function returns nonzero.  */
+/* Call a function on all the blobs in the blob table.  Stop early and return
+ * nonzero if any call to the function returns nonzero.  */
 int
-for_blob(struct blob_table *table,
-	 int (*visitor)(struct blob *, void *), void *arg)
+for_blob_in_table(struct blob_table *table,
+		  int (*visitor)(struct blob *, void *), void *arg)
 {
 	struct blob *blob;
 	struct hlist_node *pos, *tmp;
@@ -476,9 +468,8 @@ cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 }
 
 int
-sort_blob_list(struct list_head *blob_list,
-		 size_t list_head_offset,
-		 int (*compar)(const void *, const void*))
+sort_blob_list(struct list_head *blob_list, size_t list_head_offset,
+	       int (*compar)(const void *, const void*))
 {
 	struct list_head *cur;
 	struct blob **array;
@@ -499,8 +490,7 @@ sort_blob_list(struct list_head *blob_list,
 
 	cur = blob_list->next;
 	for (i = 0; i < num_blobs; i++) {
-		array[i] = (struct blob*)((u8*)cur -
-							    list_head_offset);
+		array[i] = (struct blob*)((u8*)cur - list_head_offset);
 		cur = cur->next;
 	}
 
@@ -516,7 +506,8 @@ sort_blob_list(struct list_head *blob_list,
 	return 0;
 }
 
-/* Sort the specified list of blobs in an order optimized for reading.  */
+/* Sort the specified list of blobs in an order optimized for sequential
+ * reading.  */
 int
 sort_blob_list_by_sequential_order(struct list_head *blob_list,
 				   size_t list_head_offset)
@@ -524,7 +515,6 @@ sort_blob_list_by_sequential_order(struct list_head *blob_list,
 	return sort_blob_list(blob_list, list_head_offset,
 			      cmp_blobs_by_sequential_order);
 }
-
 
 static int
 add_blob_to_array(struct blob *blob, void *_pp)
@@ -535,7 +525,7 @@ add_blob_to_array(struct blob *blob, void *_pp)
 }
 
 /* Iterate through the blobs in the specified blob table, but first sort them in
- * order for sequential reading.  */
+ * an order optimized for sequential reading.  */
 int
 for_blob_pos_sorted(struct blob_table *table,
 		    int (*visitor)(struct blob *, void *), void *arg)
@@ -548,7 +538,7 @@ for_blob_pos_sorted(struct blob_table *table,
 	if (!blob_array)
 		return WIMLIB_ERR_NOMEM;
 	p = blob_array;
-	for_blob(table, add_blob_to_array, &p);
+	for_blob_in_table(table, add_blob_to_array, &p);
 
 	wimlib_assert(p == blob_array + num_blobs);
 
@@ -1412,5 +1402,5 @@ wimlib_iterate_lookup_table(WIMStruct *wim, int flags,
 				return ret;
 		}
 	}
-	return for_blob(wim->blob_table, do_iterate_blob, &ctx);
+	return for_blob_in_table(wim->blob_table, do_iterate_blob, &ctx);
 }

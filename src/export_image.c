@@ -162,7 +162,7 @@ wimlib_export_image(WIMStruct *src_wim,
 		return ret;
 
 	/* Enable rollbacks  */
-	for_blob(dest_wim->blob_table, blob_set_not_exported, NULL);
+	for_blob_in_table(dest_wim->blob_table, blob_set_not_exported, NULL);
 
 	/* Export each requested image.  */
 	for (src_image = start_src_image;
@@ -273,7 +273,7 @@ out_rollback:
 		put_image_metadata(dest_wim->image_metadata[
 					--dest_wim->hdr.image_count], NULL);
 	}
-	for_blob(dest_wim->blob_table, blob_rollback_export,
+	for_blob_in_table(dest_wim->blob_table, blob_rollback_export,
 		 dest_wim->blob_table);
 	return ret;
 }

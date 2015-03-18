@@ -22,18 +22,17 @@ struct wim_image_metadata {
 	/* Pointer to the security data of the image. */
 	struct wim_security_data *security_data;
 
-	/* Pointer to the lookup table entry for this image's metadata resource
-	 */
+	/* Pointer to the blob table entry for this image's metadata resource */
 	struct blob *metadata_blob;
 
 	/* Linked list of 'struct wim_inode's for this image. */
 	struct list_head inode_list;
 
-	/* Linked list of 'struct blob's for this image that
-	 * are referred to in the dentry tree, but have not had a SHA1 message
-	 * digest calculated yet and therefore have not been inserted into the
-	 * WIM's lookup table.  This list is added to during wimlib_add_image()
-	 * and wimlib_mount_image() (read-write only). */
+	/* Linked list of 'struct blob's for this image that are referred to in
+	 * the dentry tree, but have not had a SHA-1 message digest calculated
+	 * yet and therefore have not been inserted into the WIMStruct's blob
+	 * table.  This list is added to during wimlib_add_image() and
+	 * wimlib_mount_image() (read-write only). */
 	struct list_head unhashed_blobs;
 
 	/* 1 iff the dentry tree has been modified.  If this is the case, the

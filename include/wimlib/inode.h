@@ -101,14 +101,13 @@ struct wim_inode {
 	/* Number of dentries that are aliases for this inode.  */
 	u32 i_nlink;
 
-	/* Flag that indicates whether this inode's streams have been
+	/* Flag that indicates whether this inode's attributes have been
 	 * "resolved".  By default, the inode starts as "unresolved", meaning
-	 * that the i_hash field, along with the hash field of any associated
-	 * wim_attribute's, are valid and should be used as keys in the WIM
-	 * lookup table to find the associated `struct blob'.
-	 * But if the inode has been resolved, then each of these fields is
-	 * replaced with a pointer directly to the appropriate `struct
-	 * blob', or NULL if the stream is empty.  */
+	 * the 'attr_hash' field of each associated attribute is valid and
+	 * should be used as a key into the blob table to find the associated
+	 * 'struct blob'.  But if the inode has been "resolved", then each
+	 * 'attr_hash' field has been overlain with a pointer directly to the
+	 * appropriate 'struct blob'.  */
 	u8 i_resolved : 1;
 
 	/* Flag used to mark this inode as visited; this is used when visiting
@@ -116,10 +115,6 @@ struct wim_inode {
 	 * default and must be cleared following the tree traversal, even in
 	 * error paths.  */
 	u8 i_visited : 1;
-
-	/* 1 iff all ADS entries of this inode are named or if this inode
-	 * has no ADS entries  */
-	u8 i_canonical_streams : 1;
 
 	/* Cached value  */
 	u8 i_can_externally_back : 1;
@@ -197,9 +192,9 @@ struct wim_inode {
 
 		/* Used during WIM writing with
 		 * WIMLIB_WRITE_FLAG_SEND_DONE_WITH_FILE_MESSAGES:  the number
-		 * of data streams this inode has that have not yet been fully
+		 * of attributes this inode has that have not yet been fully
 		 * read.  */
-		u32 num_remaining_streams;
+		u32 num_remaining_attrs;
 
 #ifdef WITH_FUSE
 		struct {

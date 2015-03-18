@@ -93,8 +93,8 @@ struct wim_reshdr {
  * to overwrite.  Currently ignored by wimlib.  */
 #define WIM_RESHDR_FLAG_FREE            0x01
 
-/* The resource is a metadata resource for a WIM image, or is the lookup table
- * or XML data for the WIM.  */
+/* The resource is a metadata resource for a WIM image, or is the blob table or
+ * XML data for the WIM.  */
 #define WIM_RESHDR_FLAG_METADATA        0x02
 
 /* The resource is a non-solid resource compressed using the WIM's default

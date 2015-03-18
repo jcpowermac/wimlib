@@ -87,7 +87,7 @@ struct wim_header_disk {
 	 * least 1.  wimlib allows 0.  */
 	u32 image_count;
 
-	/* +0x30: Location and size of the WIM's lookup table.  */
+	/* +0x30: Location and size of the WIM's blob table.  */
 	struct wim_reshdr_disk blob_table_reshdr;
 
 	/* +0x48: Location and size of the WIM's XML data.  */
@@ -153,14 +153,14 @@ struct wim_header {
 /* The WIM is part of a split WIM.  */
 #define WIM_HDR_FLAG_SPANNED            0x00000008
 
-/* All streams included in the WIM's lookup table are non-metadata (do not have
+/* All blobs included in the WIM's blob table are non-metadata (do not have
  * WIM_RESHDR_FLAG_METADATA set).  wimlib ignores this flag and clears it on new
  * WIM files it writes.  */
 #define WIM_HDR_FLAG_RESOURCE_ONLY      0x00000010
 
-/* All streams included in the WIM's lookup table are metadata (have
- * WIM_RESHDR_FLAG_METADATA set).  wimlib ignores this flag and clears it on
- * new WIM files it writes.  */
+/* All streams included in the WIM's blob table are metadata (have
+ * WIM_RESHDR_FLAG_METADATA set).  wimlib ignores this flag and clears it on new
+ * WIM files it writes.  */
 #define WIM_HDR_FLAG_METADATA_ONLY      0x00000020
 
 /* The WIM is currently being written or appended to.  */

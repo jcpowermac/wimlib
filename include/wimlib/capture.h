@@ -22,10 +22,10 @@ struct capture_config {
 /* Common parameters to implementations of building an in-memory dentry tree
  * from an on-disk directory structure. */
 struct capture_params {
-	/* Pointer to the lookup table of the WIM.  */
+	/* Pointer to the blob table of the WIM.  */
 	struct blob_table *blob_table;
 
-	/* List of streams that have been added so far, but without their SHA1
+	/* List of blob that have been added so far, but without their SHA-1
 	 * message digests being calculated (as a shortcut).  */
 	struct list_head *unhashed_blobs;
 

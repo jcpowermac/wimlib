@@ -617,7 +617,7 @@ open_wim_file(const tchar *filename, struct filedes *fd_ret)
 
 /*
  * Begins the reading of a WIM file; opens the file and reads its header and
- * lookup table, and optionally checks the integrity.
+ * blob table, and optionally checks the integrity.
  */
 static int
 begin_read(WIMStruct *wim, const void *wim_filename_or_fd, int open_flags)
@@ -813,7 +813,7 @@ wimlib_open_wim(const tchar *wimfile, int open_flags, WIMStruct **wim_ret)
 }
 
 /* Checksum all blobs that are unhashed (other than the metadata blobs), merging
- * them into the lookup table as needed.  This is a no-op unless the library has
+ * them into the blob table as needed.  This is a no-op unless the library has
  * previously used to add or mount an image using the same WIMStruct. */
 int
 wim_checksum_unhashed_blobs(WIMStruct *wim)

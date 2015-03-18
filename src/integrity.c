@@ -292,7 +292,7 @@ out_free_new_table:
  *	seekable descriptor to the original WIM file opened for reading.
  *
  * @new_blob_table_end:
- *	The offset of the byte directly following the lookup table in the WIM
+ *	The offset of the byte directly following the blob table in the WIM
  *	being written.
  *
  * @old_blob_table_end:
@@ -358,7 +358,7 @@ write_integrity_table(WIMStruct *wim,
  *
  * @bytes_to_check:
  *	Number of bytes in the WIM that need to be checked (offset of end of the
- *	lookup table minus offset of end of the header).
+ *	blob table minus offset of end of the header).
  *
  * Returns:
  *	> 0 (WIMLIB_ERR_READ, WIMLIB_ERR_UNEXPECTED_END_OF_FILE) on error
@@ -453,7 +453,7 @@ check_wim_integrity(WIMStruct *wim)
 				  wim->hdr.blob_table_reshdr.size_in_wim;
 
 	if (end_blob_table_offset < WIM_HEADER_DISK_SIZE) {
-		ERROR("WIM lookup table ends before WIM header ends!");
+		ERROR("WIM blob table ends before WIM header ends!");
 		return WIMLIB_ERR_INVALID_INTEGRITY_TABLE;
 	}
 

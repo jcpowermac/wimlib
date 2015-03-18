@@ -63,10 +63,10 @@ struct wim_provider_rpdata {
 	/* Integer ID that identifies the WIM.  */
 	le64 data_source_id;
 
-	/* SHA1 message digest of the file's unnamed data stream.  */
+	/* SHA-1 message digest of the file's unnamed data stream.  */
 	u8 resource_hash[20];
 
-	/* SHA1 message digest of the WIM's lookup table.  */
+	/* SHA-1 message digest of the WIM's blob table.  */
 	u8 blob_table_hash[20];
 
 	/* Uncompressed size of the file's unnamed data stream, in bytes.  */

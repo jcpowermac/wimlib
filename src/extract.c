@@ -972,10 +972,10 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 	int ret;
 	bool force = false;
 
-	/* Special case:  when extracting from a pipe, the WIM lookup table is
+	/* Special case:  when extracting from a pipe, the WIM blob table is
 	 * initially empty, so "resolving" an inode's streams is initially not
 	 * possible.  However, we still need to keep track of which streams,
-	 * identified by SHA1 message digests, need to be extracted, so we
+	 * identified by SHA-1 message digests, need to be extracted, so we
 	 * "resolve" the inode's streams anyway by allocating new entries.  */
 	if (extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE)
 		force = true;
@@ -1494,8 +1494,8 @@ extract_trees(WIMStruct *wim, struct wim_dentry **trees, size_t num_trees,
 	if (extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE) {
 		/* When extracting from a pipe, the number of bytes of data to
 		 * extract can't be determined in the normal way (examining the
-		 * lookup table), since at this point all we have is a set of
-		 * SHA1 message digests of streams that need to be extracted.
+		 * blob table), since at this point all we have is a set of SHA1
+		 * message digests of streams that need to be extracted.
 		 * However, we can get a reasonably accurate estimate by taking
 		 * <TOTALBYTES> from the corresponding <IMAGE> in the WIM XML
 		 * data.  This does assume that a full image is being extracted,
@@ -1905,8 +1905,8 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 
 	/* Read the WIM header from the pipe and get a WIMStruct to represent
 	 * the pipable WIM.  Caveats:  Unlike getting a WIMStruct with
-	 * wimlib_open_wim(), getting a WIMStruct in this way will result in
-	 * an empty lookup table, no XML data read, and no filename set.  */
+	 * wimlib_open_wim(), getting a WIMStruct in this way will result in an
+	 * empty blob table, no XML data read, and no filename set.  */
 	ret = open_wim_as_WIMStruct(&pipe_fd, WIMLIB_OPEN_FLAG_FROM_PIPE, &pwm,
 				    progfunc, progctx);
 	if (ret)

@@ -396,7 +396,7 @@ inode_attribute_blob(const struct wim_inode *inode, unsigned attr_idx,
 }
 
 /*
- * Return the lookup table entry for the unnamed data stream of a *resolved*
+ * Return the blob table entry for the unnamed data stream of a *resolved*
  * inode, or NULL if the inode's unnamed data stream is empty.  Also return the
  * 0-based index of the unnamed data stream in *stream_idx_ret.
  */
@@ -418,8 +418,8 @@ inode_unnamed_stream_resolved(const struct wim_inode *inode,
 }
 
 /*
- * Return the lookup table entry for the unnamed data stream of an inode, or
- * NULL if the inode's unnamed data stream is empty or not available.
+ * Return the blob table entry for the unnamed data stream of an inode, or NULL
+ * if the inode's unnamed data stream is empty or not available.
  */
 struct blob *
 inode_unnamed_stream(const struct wim_inode *inode,

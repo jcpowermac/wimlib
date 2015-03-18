@@ -148,7 +148,7 @@ wimlib_reference_resources(WIMStruct *wim, WIMStruct **resource_wims,
 	init_reference_info(&info, wim, ref_flags);
 
 	for (i = 0; i < num_resource_wims; i++) {
-		ret = for_blob(resource_wims[i]->blob_table,
+		ret = for_blob_in_table(resource_wims[i]->blob_table,
 			       blob_clone_if_new, &info);
 		if (ret)
 			break;
@@ -184,7 +184,7 @@ reference_resource_path(struct reference_info *info, const tchar *path,
 		return ret;
 
 	info->src_table = src_wim->blob_table;
-	for_blob(src_wim->blob_table, blob_gift, info);
+	for_blob_in_table(src_wim->blob_table, blob_gift, info);
 	reference_subwim(info, src_wim);
 	return 0;
 }

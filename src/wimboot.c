@@ -1062,7 +1062,7 @@ out:
  * @data_source_id
  *	Allocated identifier for the WIM data source on the destination volume.
  * @blob_table_hash
- *	SHA-1 message digest of the WIM's lookup table.
+ *	SHA-1 message digest of the WIM's blob table.
  * @wof_running
  *	%true if the WOF driver appears to be available and working; %false if
  *	not.

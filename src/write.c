@@ -91,19 +91,19 @@ struct filter_context {
 	WIMStruct *wim;
 };
 
-/* Determine specified stream should be filtered out from the write.
+/*
+ * Determine whether the specified blob should be filtered out from the write.
  *
  * Return values:
  *
- *  < 0 : The stream should be hard-filtered; that is, not included in the
- *        output WIM at all.
- *    0 : The stream should not be filtered out.
- *  > 0 : The stream should be soft-filtered; that is, it already exists in the
+ *  < 0 : The blob should be hard-filtered; that is, not included in the output
+ *	  WIM file at all.
+ *    0 : The blob should not be filtered out.
+ *  > 0 : The blob should be soft-filtered; that is, it already exists in the
  *	  WIM file and may not need to be written again.
  */
 static int
-stream_filtered(const struct blob *blob,
-		const struct filter_context *ctx)
+blob_filtered(const struct blob *blob, const struct filter_context *ctx)
 {
 	int write_flags;
 	WIMStruct *wim;
@@ -128,14 +128,13 @@ stream_filtered(const struct blob *blob,
 }
 
 static bool
-stream_hard_filtered(const struct blob *blob,
-		     struct filter_context *ctx)
+blob_hard_filtered(const struct blob *blob, struct filter_context *ctx)
 {
-	return stream_filtered(blob, ctx) < 0;
+	return blob_filtered(blob, ctx) < 0;
 }
 
 static inline int
-may_soft_filter_streams(const struct filter_context *ctx)
+may_soft_filter_blobs(const struct filter_context *ctx)
 {
 	if (ctx == NULL)
 		return 0;
@@ -143,7 +142,7 @@ may_soft_filter_streams(const struct filter_context *ctx)
 }
 
 static inline int
-may_hard_filter_streams(const struct filter_context *ctx)
+may_hard_filter_blobs(const struct filter_context *ctx)
 {
 	if (ctx == NULL)
 		return 0;
@@ -151,12 +150,10 @@ may_hard_filter_streams(const struct filter_context *ctx)
 }
 
 static inline int
-may_filter_streams(const struct filter_context *ctx)
+may_filter_blobs(const struct filter_context *ctx)
 {
-	return (may_soft_filter_streams(ctx) ||
-		may_hard_filter_streams(ctx));
+	return (may_soft_filter_blobs(ctx) || may_hard_filter_blobs(ctx));
 }
-
 
 /* Return true if the specified resource is compressed and the compressed data
  * can be reused with the specified output parameters.  */
@@ -190,7 +187,7 @@ can_raw_copy(const struct blob *blob,
 	if ((rspec->flags & WIM_RESHDR_FLAG_SOLID) &&
 	    (write_resource_flags & WRITE_RESOURCE_FLAG_SOLID))
 	{
-		/* Solid resource: Such resources may contain multiple streams,
+		/* Solid resource: Such resources may contain multiple blobs,
 		 * and in general only a subset of them need to be written.  As
 		 * a heuristic, re-use the raw data if more than two-thirds the
 		 * uncompressed size is being written.  */
@@ -200,12 +197,12 @@ can_raw_copy(const struct blob *blob,
 		 * check if they are compatible with @out_ctype and
 		 * @out_chunk_size.  */
 
-		struct blob *res_stream;
+		struct blob *res_blob;
 		u64 write_size = 0;
 
-		list_for_each_entry(res_stream, &rspec->blob_list, rspec_node)
-			if (res_stream->will_be_in_output_wim)
-				write_size += res_stream->size;
+		list_for_each_entry(res_blob, &rspec->blob_list, rspec_node)
+			if (res_blob->will_be_in_output_wim)
+				write_size += res_blob->size;
 
 		return (write_size > rspec->uncompressed_size * 2 / 3);
 	}
@@ -223,7 +220,7 @@ filter_resource_flags(u8 flags)
 }
 
 static void
-stream_set_out_reshdr_for_reuse(struct blob *blob)
+blob_set_out_reshdr_for_reuse(struct blob *blob)
 {
 	const struct wim_resource_spec *rspec;
 
@@ -252,35 +249,34 @@ stream_set_out_reshdr_for_reuse(struct blob *blob)
 }
 
 
-/* Write the header for a stream in a pipable WIM.  */
+/* Write the header for a blob in a pipable WIM.  */
 static int
-write_pwm_stream_header(const struct blob *blob,
-			struct filedes *out_fd,
-			int additional_reshdr_flags)
+write_pwm_blob_header(const struct blob *blob, struct filedes *out_fd,
+		      int additional_reshdr_flags)
 {
-	struct pwm_blob_hdr stream_hdr;
+	struct pwm_blob_hdr blob_hdr;
 	u32 reshdr_flags;
 	int ret;
 
-	stream_hdr.magic = cpu_to_le64(PWM_BLOB_MAGIC);
-	stream_hdr.uncompressed_size = cpu_to_le64(blob->size);
+	blob_hdr.magic = cpu_to_le64(PWM_BLOB_MAGIC);
+	blob_hdr.uncompressed_size = cpu_to_le64(blob->size);
 	if (additional_reshdr_flags & PWM_RESHDR_FLAG_UNHASHED) {
-		zero_out_hash(stream_hdr.hash);
+		zero_out_hash(blob_hdr.hash);
 	} else {
 		wimlib_assert(!blob->unhashed);
-		copy_hash(stream_hdr.hash, blob->hash);
+		copy_hash(blob_hdr.hash, blob->hash);
 	}
 
 	reshdr_flags = filter_resource_flags(blob->flags);
 	reshdr_flags |= additional_reshdr_flags;
-	stream_hdr.flags = cpu_to_le32(reshdr_flags);
-	ret = full_write(out_fd, &stream_hdr, sizeof(stream_hdr));
+	blob_hdr.flags = cpu_to_le32(reshdr_flags);
+	ret = full_write(out_fd, &blob_hdr, sizeof(blob_hdr));
 	if (ret)
 		ERROR_WITH_ERRNO("Write error");
 	return ret;
 }
 
-struct write_streams_progress_data {
+struct write_blobs_progress_data {
 	wimlib_progress_func_t progfunc;
 	void *progctx;
 	union wimlib_progress_info progress;
@@ -288,10 +284,8 @@ struct write_streams_progress_data {
 };
 
 static int
-do_write_streams_progress(struct write_streams_progress_data *progress_data,
-			  u64 complete_size,
-			  u32 complete_count,
-			  bool discarded)
+do_write_blobs_progress(struct write_blobs_progress_data *progress_data,
+			u64 complete_size, u32 complete_count, bool discarded)
 {
 	union wimlib_progress_info *progress = &progress_data->progress;
 	int ret;
@@ -348,11 +342,11 @@ do_write_streams_progress(struct write_streams_progress_data *progress_data,
 	return 0;
 }
 
-struct write_streams_ctx {
-	/* File descriptor the streams are being written to.  */
+struct write_blobs_ctx {
+	/* File descriptor to which the blobs are being written.  */
 	struct filedes *out_fd;
 
-	/* Lookup table for the WIMStruct on whose behalf the streams are being
+	/* Blob table for the WIMStruct on whose behalf the blobs are being
 	 * written.  */
 	struct blob_table *blob_table;
 
@@ -362,11 +356,11 @@ struct write_streams_ctx {
 	/* Maximum uncompressed chunk size in compressed resources to use.  */
 	u32 out_chunk_size;
 
-	/* Flags that affect how the streams will be written.  */
+	/* Flags that affect how the blobs will be written.  */
 	int write_resource_flags;
 
 	/* Data used for issuing WRITE_STREAMS progress.  */
-	struct write_streams_progress_data progress_data;
+	struct write_blobs_progress_data progress_data;
 
 	struct filter_context *filter_ctx;
 
@@ -387,21 +381,21 @@ struct write_streams_ctx {
 	/* Number of bytes in @cur_chunk_buf that are currently filled.  */
 	size_t cur_chunk_buf_filled;
 
-	/* List of streams that currently have chunks being compressed.  */
-	struct list_head pending_streams;
+	/* List of blobs that currently have chunks being compressed.  */
+	struct list_head blobs_being_compressed;
 
-	/* List of streams in the solid resource.  Streams are moved here after
-	 * @pending_streams only when writing a solid resource.  */
-	struct list_head solid_streams;
+	/* List of blobs in the solid resource.  Blobs are moved here after
+	 * @blobs_being_compressed only when writing a solid resource.  */
+	struct list_head blobs_in_solid_resource;
 
-	/* Current uncompressed offset in the stream being read.  */
+	/* Current uncompressed offset in the blob being read.  */
 	u64 cur_read_blob_offset;
 
-	/* Uncompressed size of the stream currently being read.  */
+	/* Uncompressed size of the blob currently being read.  */
 	u64 cur_read_blob_size;
 
-	/* Current uncompressed offset in the stream being written.  */
-	u64 cur_write_stream_offset;
+	/* Current uncompressed offset in the blob being written.  */
+	u64 cur_write_blob_offset;
 
 	/* Uncompressed size of resource currently being written.  */
 	u64 cur_write_res_size;
@@ -424,7 +418,7 @@ struct write_streams_ctx {
 /* Reserve space for the chunk table and prepare to accumulate the chunk table
  * in memory.  */
 static int
-begin_chunk_table(struct write_streams_ctx *ctx, u64 res_expected_size)
+begin_chunk_table(struct write_blobs_ctx *ctx, u64 res_expected_size)
 {
 	u64 expected_num_chunks;
 	u64 expected_num_chunk_entries;
@@ -433,8 +427,8 @@ begin_chunk_table(struct write_streams_ctx *ctx, u64 res_expected_size)
 
 	/* Calculate the number of chunks and chunk entries that should be
 	 * needed for the resource.  These normally will be the final values,
-	 * but in SOLID mode some of the streams we're planning to write into
-	 * the resource may be duplicates, and therefore discarded, potentially
+	 * but in SOLID mode some of the blobs we're planning to write into the
+	 * resource may be duplicates, and therefore discarded, potentially
 	 * decreasing the number of chunk entries needed.  */
 	expected_num_chunks = DIV_ROUND_UP(res_expected_size, ctx->out_chunk_size);
 	expected_num_chunk_entries = expected_num_chunks;
@@ -485,7 +479,7 @@ begin_chunk_table(struct write_streams_ctx *ctx, u64 res_expected_size)
 }
 
 static int
-begin_write_resource(struct write_streams_ctx *ctx, u64 res_expected_size)
+begin_write_resource(struct write_blobs_ctx *ctx, u64 res_expected_size)
 {
 	int ret;
 
@@ -500,13 +494,13 @@ begin_write_resource(struct write_streams_ctx *ctx, u64 res_expected_size)
 	/* Output file descriptor is now positioned at the offset at which to
 	 * write the first chunk of the resource.  */
 	ctx->chunks_start_offset = ctx->out_fd->offset;
-	ctx->cur_write_stream_offset = 0;
+	ctx->cur_write_blob_offset = 0;
 	ctx->cur_write_res_size = res_expected_size;
 	return 0;
 }
 
 static int
-end_chunk_table(struct write_streams_ctx *ctx, u64 res_actual_size,
+end_chunk_table(struct write_blobs_ctx *ctx, u64 res_actual_size,
 		u64 *res_start_offset_ret, u64 *res_store_size_ret)
 {
 	size_t actual_num_chunks;
@@ -612,14 +606,14 @@ write_error:
 /* Finish writing a WIM resource by writing or updating the chunk table (if not
  * writing the data uncompressed) and loading its metadata into @out_reshdr.  */
 static int
-end_write_resource(struct write_streams_ctx *ctx, struct wim_reshdr *out_reshdr)
+end_write_resource(struct write_blobs_ctx *ctx, struct wim_reshdr *out_reshdr)
 {
 	int ret;
 	u64 res_size_in_wim;
 	u64 res_uncompressed_size;
 	u64 res_offset_in_wim;
 
-	wimlib_assert(ctx->cur_write_stream_offset == ctx->cur_write_res_size ||
+	wimlib_assert(ctx->cur_write_blob_offset == ctx->cur_write_res_size ||
 		      (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID));
 	res_uncompressed_size = ctx->cur_write_res_size;
 
@@ -640,7 +634,7 @@ end_write_resource(struct write_streams_ctx *ctx, struct wim_reshdr *out_reshdr)
 	return 0;
 }
 
-/* No more data streams of the file at @path are needed.  */
+/* Call when no more data from the file at @path is needed.  */
 static int
 done_with_file(const tchar *path, wimlib_progress_func_t progfunc, void *progctx)
 {
@@ -652,19 +646,8 @@ done_with_file(const tchar *path, wimlib_progress_func_t progfunc, void *progctx
 			     &info, progctx);
 }
 
-static inline bool
-is_file_stream(const struct blob *blob)
-{
-	return blob->resource_location == RESOURCE_IN_FILE_ON_DISK
-#ifdef __WIN32__
-	    || blob->resource_location == RESOURCE_IN_WINNT_FILE_ON_DISK
-	    || blob->resource_location == RESOURCE_WIN32_ENCRYPTED
-#endif
-	   ;
-}
-
 static int
-do_done_with_stream(struct blob *blob,
+do_done_with_blob(struct blob *blob,
 		    wimlib_progress_func_t progfunc, void *progctx)
 {
 	int ret;
@@ -676,8 +659,8 @@ do_done_with_stream(struct blob *blob,
 	inode = blob->file_inode;
 
 	wimlib_assert(inode != NULL);
-	wimlib_assert(inode->num_remaining_streams > 0);
-	if (--inode->num_remaining_streams > 0)
+	wimlib_assert(inode->num_remaining_attrs > 0);
+	if (--inode->num_remaining_attrs > 0)
 		return 0;
 
 #ifdef __WIN32__
@@ -717,21 +700,21 @@ do_done_with_stream(struct blob *blob,
 
 /* Handle WIMLIB_WRITE_FLAG_SEND_DONE_WITH_FILE_MESSAGES mode.  */
 static inline int
-done_with_stream(struct blob *blob,
-		 struct write_streams_ctx *ctx)
+done_with_blob(struct blob *blob,
+		 struct write_blobs_ctx *ctx)
 {
 	if (likely(!(ctx->write_resource_flags &
 		     WRITE_RESOURCE_FLAG_SEND_DONE_WITH_FILE)))
 		return 0;
-	return do_done_with_stream(blob, ctx->progress_data.progfunc,
+	return do_done_with_blob(blob, ctx->progress_data.progfunc,
 				   ctx->progress_data.progctx);
 }
 
 /* Begin processing a stream for writing.  */
 static int
-write_stream_begin_read(struct blob *blob, void *_ctx)
+write_blob_begin_read(struct blob *blob, void *_ctx)
 {
-	struct write_streams_ctx *ctx = _ctx;
+	struct write_blobs_ctx *ctx = _ctx;
 	int ret;
 
 	wimlib_assert(blob->size > 0);
@@ -740,14 +723,14 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 	ctx->cur_read_blob_size = blob->size;
 
 	/* As an optimization, we allow some streams to be "unhashed", meaning
-	 * their SHA1 message digests are unknown.  This is the case with
+	 * their SHA-1 message digests are unknown.  This is the case with
 	 * streams that are added by scanning a directry tree with
 	 * wimlib_add_image(), for example.  Since WIM uses single-instance
 	 * streams, we don't know whether such each such stream really need to
 	 * written until it is actually checksummed, unless it has a unique
 	 * size.  In such cases we read and checksum the stream in this
 	 * function, thereby advancing ahead of read_blob_list(), which will
-	 * still provide the data again to write_stream_process_chunk().  This
+	 * still provide the data again to write_blob_process_chunk().  This
 	 * is okay because an unhashed stream cannot be in a WIM resource, which
 	 * might be costly to decompress.  */
 	if (ctx->blob_table != NULL && blob->unhashed && !blob->unique_size) {
@@ -761,7 +744,7 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 			/* Duplicate stream detected.  */
 
 			if (lte_new->will_be_in_output_wim ||
-			    stream_filtered(lte_new, ctx->filter_ctx))
+			    blob_filtered(lte_new, ctx->filter_ctx))
 			{
 				/* The duplicate stream is already being
 				 * included in the output WIM, or it would be
@@ -771,17 +754,16 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 				 * duplicate stream in the former case.  */
 				DEBUG("Discarding duplicate stream of "
 				      "length %"PRIu64, blob->size);
-				ret = do_write_streams_progress(&ctx->progress_data,
-								blob->size,
-								1, true);
-				list_del(&blob->write_streams_list);
+				ret = do_write_blobs_progress(&ctx->progress_data,
+							      blob->size, 1, true);
+				list_del(&blob->write_blobs_list);
 				list_del(&blob->blob_table_list);
 				if (lte_new->will_be_in_output_wim)
 					lte_new->out_refcnt += blob->out_refcnt;
 				if (ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID)
 					ctx->cur_write_res_size -= blob->size;
 				if (!ret)
-					ret = done_with_stream(blob, ctx);
+					ret = done_with_blob(blob, ctx);
 				free_blob(blob);
 				if (ret)
 					return ret;
@@ -795,8 +777,8 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 				 * reading its data.  */
 				DEBUG("Stream duplicate, but not already "
 				      "selected for writing.");
-				list_replace(&blob->write_streams_list,
-					     &lte_new->write_streams_list);
+				list_replace(&blob->write_blobs_list,
+					     &lte_new->write_blobs_list);
 				list_replace(&blob->blob_table_list,
 					     &lte_new->blob_table_list);
 				blob->will_be_in_output_wim = 0;
@@ -807,7 +789,7 @@ write_stream_begin_read(struct blob *blob, void *_ctx)
 			}
 		}
 	}
-	list_move_tail(&blob->write_streams_list, &ctx->pending_streams);
+	list_move_tail(&blob->write_blobs_list, &ctx->blobs_being_compressed);
 	return 0;
 }
 
@@ -863,7 +845,7 @@ write_stream_uncompressed(struct blob *blob,
  * and re-written as uncompressed.  blob->out_reshdr must be filled in from the
  * initial write of the stream.  */
 static bool
-should_rewrite_stream_uncompressed(const struct write_streams_ctx *ctx,
+should_rewrite_stream_uncompressed(const struct write_blobs_ctx *ctx,
 				   const struct blob *blob)
 {
 	/* If the compressed data is smaller than the uncompressed data, prefer
@@ -905,7 +887,7 @@ should_rewrite_stream_uncompressed(const struct write_streams_ctx *ctx,
 }
 
 static int
-maybe_rewrite_stream_uncompressed(struct write_streams_ctx *ctx,
+maybe_rewrite_stream_uncompressed(struct write_blobs_ctx *ctx,
 				  struct blob *blob)
 {
 	if (!should_rewrite_stream_uncompressed(ctx, blob))
@@ -929,7 +911,7 @@ maybe_rewrite_stream_uncompressed(struct write_streams_ctx *ctx,
 /* Write the next chunk of (typically compressed) data to the output WIM,
  * handling the writing of the chunk table.  */
 static int
-write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
+write_chunk(struct write_blobs_ctx *ctx, const void *cchunk,
 	    size_t csize, size_t usize)
 {
 	int ret;
@@ -938,10 +920,10 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 	u32 completed_stream_count;
 	u32 completed_size;
 
-	blob = list_entry(ctx->pending_streams.next,
-			 struct blob, write_streams_list);
+	blob = list_entry(ctx->blobs_being_compressed.next,
+			 struct blob, write_blobs_list);
 
-	if (ctx->cur_write_stream_offset == 0 &&
+	if (ctx->cur_write_blob_offset == 0 &&
 	    !(ctx->write_resource_flags & WRITE_RESOURCE_FLAG_SOLID))
 	{
 		/* Starting to write a new stream in non-solid mode.  */
@@ -954,8 +936,8 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 			DEBUG("Writing pipable WIM stream header "
 			      "(offset=%"PRIu64")", ctx->out_fd->offset);
 
-			ret = write_pwm_stream_header(blob, ctx->out_fd,
-						      additional_reshdr_flags);
+			ret = write_pwm_blob_header(blob, ctx->out_fd,
+						    additional_reshdr_flags);
 			if (ret)
 				return ret;
 		}
@@ -988,7 +970,7 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 	if (ret)
 		goto write_error;
 
-	ctx->cur_write_stream_offset += usize;
+	ctx->cur_write_blob_offset += usize;
 
 	completed_size = usize;
 	completed_stream_count = 0;
@@ -997,21 +979,21 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 		 * streams.  */
 		struct blob *next_lte;
 
-		while (blob && ctx->cur_write_stream_offset >= blob->size) {
+		while (blob && ctx->cur_write_blob_offset >= blob->size) {
 
-			ctx->cur_write_stream_offset -= blob->size;
+			ctx->cur_write_blob_offset -= blob->size;
 
-			if (ctx->cur_write_stream_offset)
-				next_lte = list_entry(blob->write_streams_list.next,
+			if (ctx->cur_write_blob_offset)
+				next_lte = list_entry(blob->write_blobs_list.next,
 						      struct blob,
-						      write_streams_list);
+						      write_blobs_list);
 			else
 				next_lte = NULL;
 
-			ret = done_with_stream(blob, ctx);
+			ret = done_with_blob(blob, ctx);
 			if (ret)
 				return ret;
-			list_move_tail(&blob->write_streams_list, &ctx->solid_streams);
+			list_move_tail(&blob->write_blobs_list, &ctx->blobs_in_solid_resource);
 			completed_stream_count++;
 
 			blob = next_lte;
@@ -1019,9 +1001,9 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 	} else {
 		/* Wrote chunk in non-solid mode.  It may have finished a
 		 * stream.  */
-		if (ctx->cur_write_stream_offset == blob->size) {
+		if (ctx->cur_write_blob_offset == blob->size) {
 
-			wimlib_assert(ctx->cur_write_stream_offset ==
+			wimlib_assert(ctx->cur_write_blob_offset ==
 				      ctx->cur_write_res_size);
 
 			ret = end_write_resource(ctx, &blob->out_reshdr);
@@ -1038,19 +1020,18 @@ write_chunk(struct write_streams_ctx *ctx, const void *cchunk,
 
 			wimlib_assert(blob->out_reshdr.uncompressed_size == blob->size);
 
-			ctx->cur_write_stream_offset = 0;
+			ctx->cur_write_blob_offset = 0;
 
-			ret = done_with_stream(blob, ctx);
+			ret = done_with_blob(blob, ctx);
 			if (ret)
 				return ret;
-			list_del(&blob->write_streams_list);
+			list_del(&blob->write_blobs_list);
 			completed_stream_count++;
 		}
 	}
 
-	return do_write_streams_progress(&ctx->progress_data,
-					 completed_size, completed_stream_count,
-					 false);
+	return do_write_blobs_progress(&ctx->progress_data, completed_size,
+				       completed_stream_count, false);
 
 write_error:
 	ERROR_WITH_ERRNO("Write error");
@@ -1058,7 +1039,7 @@ write_error:
 }
 
 static int
-prepare_chunk_buffer(struct write_streams_ctx *ctx)
+prepare_chunk_buffer(struct write_blobs_ctx *ctx)
 {
 	/* While we are unable to get a new chunk buffer due to too many chunks
 	 * already outstanding, retrieve and write the next compressed chunk. */
@@ -1086,9 +1067,9 @@ prepare_chunk_buffer(struct write_streams_ctx *ctx)
 
 /* Process the next chunk of data to be written to a WIM resource.  */
 static int
-write_stream_process_chunk(const void *chunk, size_t size, void *_ctx)
+write_blob_process_chunk(const void *chunk, size_t size, void *_ctx)
 {
-	struct write_streams_ctx *ctx = _ctx;
+	struct write_blobs_ctx *ctx = _ctx;
 	int ret;
 	const u8 *chunkptr, *chunkend;
 
@@ -1151,30 +1132,30 @@ write_stream_process_chunk(const void *chunk, size_t size, void *_ctx)
  * written yet, as the chunk_compressor implementation may still have chunks
  * buffered or being compressed.  */
 static int
-write_stream_end_read(struct blob *blob, int status, void *_ctx)
+write_blob_end_read(struct blob *blob, int status, void *_ctx)
 {
-	struct write_streams_ctx *ctx = _ctx;
+	struct write_blobs_ctx *ctx = _ctx;
 
 	wimlib_assert(ctx->cur_read_blob_offset == ctx->cur_read_blob_size || status);
 
 	if (!blob->will_be_in_output_wim) {
-		/* The 'blob' stream was a duplicate.  Now that its data has
-		 * finished being read, it is being discarded in favor of the
-		 * duplicate entry.  It therefore is no longer needed, and we
-		 * can fire the DONE_WITH_FILE callback because the file will
-		 * not be read again.
+		/* The blob was a duplicate.  Now that its data has finished
+		 * being read, it is being discarded in favor of the duplicate
+		 * entry.  It therefore is no longer needed, and we can fire the
+		 * DONE_WITH_FILE callback because the file will not be read
+		 * again.
 		 *
 		 * Note: we can't yet fire DONE_WITH_FILE for non-duplicate
-		 * streams, since it needs to be possible to re-read the file if
+		 * blobs, since it needs to be possible to re-read the file if
 		 * it does not compress to less than its original size.  */
 		if (!status)
-			status = done_with_stream(blob, ctx);
+			status = done_with_blob(blob, ctx);
 		free_blob(blob);
 	} else if (!status && blob->unhashed && ctx->blob_table != NULL) {
-		/* The 'blob' stream was not a duplicate and was previously
-		 * unhashed.  Since we passed COMPUTE_MISSING_BLOB_HASHES to
+		/* The blob was not a duplicate and was previously unhashed.
+		 * Since we passed COMPUTE_MISSING_BLOB_HASHES to
 		 * read_blob_list(), blob->hash is now computed and valid.  So
-		 * turn this stream into a "hashed" stream.  */
+		 * turn this blob into a "hashed" blob.  */
 		list_del(&blob->unhashed_list);
 		blob_table_insert(ctx->blob_table, blob);
 		blob->unhashed = 0;
@@ -1188,7 +1169,7 @@ write_stream_end_read(struct blob *blob, int status, void *_ctx)
  * WIM (specified by WIMStruct) are together.  */
 static void
 compute_blob_list_stats(struct list_head *blob_list,
-			  struct write_streams_ctx *ctx)
+			struct write_blobs_ctx *ctx)
 {
 	struct blob *blob;
 	u64 total_bytes = 0;
@@ -1196,7 +1177,7 @@ compute_blob_list_stats(struct list_head *blob_list,
 	u64 total_parts = 0;
 	WIMStruct *prev_wim_part = NULL;
 
-	list_for_each_entry(blob, blob_list, write_streams_list) {
+	list_for_each_entry(blob, blob_list, write_blobs_list) {
 		num_streams++;
 		total_bytes += blob->size;
 		if (blob->resource_location == RESOURCE_IN_WIM) {
@@ -1218,37 +1199,37 @@ compute_blob_list_stats(struct list_head *blob_list,
 
 /* Find streams in @blob_list that can be copied to the output WIM in raw form
  * rather than compressed.  Delete these streams from @blob_list and move them
- * to @raw_copy_streams.  Return the total uncompressed size of the streams that
+ * to @raw_copy_blobs.  Return the total uncompressed size of the streams that
  * need to be compressed.  */
 static u64
-find_raw_copy_streams(struct list_head *blob_list,
+find_raw_copy_blobs(struct list_head *blob_list,
 		      int write_resource_flags,
 		      int out_ctype,
 		      u32 out_chunk_size,
-		      struct list_head *raw_copy_streams)
+		      struct list_head *raw_copy_blobs)
 {
 	struct blob *blob, *tmp;
 	u64 num_bytes_to_compress = 0;
 
-	INIT_LIST_HEAD(raw_copy_streams);
+	INIT_LIST_HEAD(raw_copy_blobs);
 
 	/* Initialize temporary raw_copy_ok flag.  */
-	list_for_each_entry(blob, blob_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_blobs_list)
 		if (blob->resource_location == RESOURCE_IN_WIM)
 			blob->rspec->raw_copy_ok = 0;
 
-	list_for_each_entry_safe(blob, tmp, blob_list, write_streams_list) {
+	list_for_each_entry_safe(blob, tmp, blob_list, write_blobs_list) {
 		if (blob->resource_location == RESOURCE_IN_WIM &&
 		    blob->rspec->raw_copy_ok)
 		{
-			list_move_tail(&blob->write_streams_list,
-				       raw_copy_streams);
+			list_move_tail(&blob->write_blobs_list,
+				       raw_copy_blobs);
 		} else if (can_raw_copy(blob, write_resource_flags,
 				 out_ctype, out_chunk_size))
 		{
 			blob->rspec->raw_copy_ok = 1;
-			list_move_tail(&blob->write_streams_list,
-				       raw_copy_streams);
+			list_move_tail(&blob->write_blobs_list,
+				       raw_copy_blobs);
 		} else {
 			num_bytes_to_compress += blob->size;
 		}
@@ -1308,7 +1289,7 @@ write_raw_copy_resource(struct wim_resource_spec *in_rspec,
 
 	list_for_each_entry(blob, &in_rspec->blob_list, rspec_node) {
 		if (blob->will_be_in_output_wim) {
-			stream_set_out_reshdr_for_reuse(blob);
+			blob_set_out_reshdr_for_reuse(blob);
 			if (in_rspec->flags & WIM_RESHDR_FLAG_SOLID)
 				blob->out_res_offset_in_wim = out_offset_in_wim;
 			else
@@ -1322,27 +1303,27 @@ write_raw_copy_resource(struct wim_resource_spec *in_rspec,
 /* Copy a list of raw compressed resources located in other WIM file(s) to the
  * WIM file being written.  */
 static int
-write_raw_copy_resources(struct list_head *raw_copy_streams,
+write_raw_copy_resources(struct list_head *raw_copy_blobs,
 			 struct filedes *out_fd,
-			 struct write_streams_progress_data *progress_data)
+			 struct write_blobs_progress_data *progress_data)
 {
 	struct blob *blob;
 	int ret;
 
-	list_for_each_entry(blob, raw_copy_streams, write_streams_list)
+	list_for_each_entry(blob, raw_copy_blobs, write_blobs_list)
 		blob->rspec->raw_copy_ok = 1;
 
-	list_for_each_entry(blob, raw_copy_streams, write_streams_list) {
+	list_for_each_entry(blob, raw_copy_blobs, write_blobs_list) {
 		if (blob->rspec->raw_copy_ok) {
 			/* Write each solid resource only one time, no matter
-			 * how many streams reference it.  */
+			 * how many blobs reference it.  */
 			ret = write_raw_copy_resource(blob->rspec, out_fd);
 			if (ret)
 				return ret;
 			blob->rspec->raw_copy_ok = 0;
 		}
-		ret = do_write_streams_progress(progress_data, blob->size,
-						1, false);
+		ret = do_write_blobs_progress(progress_data, blob->size,
+					      1, false);
 		if (ret)
 			return ret;
 	}
@@ -1351,7 +1332,7 @@ write_raw_copy_resources(struct list_head *raw_copy_streams,
 
 /* Wait for and write all chunks pending in the compressor.  */
 static int
-finish_remaining_chunks(struct write_streams_ctx *ctx)
+finish_remaining_chunks(struct write_blobs_ctx *ctx)
 {
 	const void *cdata;
 	u32 csize;
@@ -1377,14 +1358,14 @@ finish_remaining_chunks(struct write_streams_ctx *ctx)
 }
 
 static void
-remove_zero_length_streams(struct list_head *blob_list)
+remove_empty_blobs(struct list_head *blob_list)
 {
 	struct blob *blob, *tmp;
 
-	list_for_each_entry_safe(blob, tmp, blob_list, write_streams_list) {
+	list_for_each_entry_safe(blob, tmp, blob_list, write_blobs_list) {
 		wimlib_assert(blob->will_be_in_output_wim);
 		if (blob->size == 0) {
-			list_del(&blob->write_streams_list);
+			list_del(&blob->write_blobs_list);
 			blob->out_reshdr.offset_in_wim = 0;
 			blob->out_reshdr.size_in_wim = 0;
 			blob->out_reshdr.uncompressed_size = 0;
@@ -1398,32 +1379,32 @@ init_done_with_file_info(struct list_head *blob_list)
 {
 	struct blob *blob;
 
-	list_for_each_entry(blob, blob_list, write_streams_list) {
-		if (is_file_stream(blob)) {
-			blob->file_inode->num_remaining_streams = 0;
+	list_for_each_entry(blob, blob_list, write_blobs_list) {
+		if (blob_is_in_file(blob)) {
+			blob->file_inode->num_remaining_attrs = 0;
 			blob->may_send_done_with_file = 1;
 		} else {
 			blob->may_send_done_with_file = 0;
 		}
 	}
 
-	list_for_each_entry(blob, blob_list, write_streams_list)
+	list_for_each_entry(blob, blob_list, write_blobs_list)
 		if (blob->may_send_done_with_file)
-			blob->file_inode->num_remaining_streams++;
+			blob->file_inode->num_remaining_attrs++;
 }
 
 /*
- * Write a list of streams to the output WIM file.
+ * Write a list of blobs to the output WIM file.
  *
  * @blob_list
- *	The list of streams to write, specified by a list of `struct
- *	blob's linked by the 'write_streams_list' member.
+ *	The list of blobs to write, specified by a list of 'struct blob' linked
+ *	by the 'write_blobs_list' member.
  *
  * @out_fd
- *	The file descriptor, opened for writing, to which to write the streams.
+ *	The file descriptor, opened for writing, to which to write the blobs.
  *
  * @write_resource_flags
- *	Flags to modify how the streams are written:
+ *	Flags to modify how the blobs are written:
  *
  *	WRITE_RESOURCE_FLAG_RECOMPRESS:
  *		Force compression of all resources, even if they could otherwise
@@ -1436,21 +1417,21 @@ init_done_with_file_info(struct list_head *blob_list)
  *		@out_fd will be performed (so it may be a pipe).
  *
  *	WRITE_RESOURCE_FLAG_SOLID:
- *		Combine all the streams into a single resource rather than
- *		writing them in separate resources.  This flag is only valid if
- *		the WIM version number has been, or will be, set to
- *		WIM_VERSION_SOLID.  This flag may not be combined with
- *		WRITE_RESOURCE_FLAG_PIPABLE.
+ *		Combine all the blobs into a single resource rather than writing
+ *		them in separate resources.  This flag is only valid if the WIM
+ *		version number has been, or will be, set to WIM_VERSION_SOLID.
+ *		This flag may not be combined with WRITE_RESOURCE_FLAG_PIPABLE.
  *
  * @out_ctype
- *	Compression format to use to write the output streams, specified as one
- *	of the WIMLIB_COMPRESSION_TYPE_* constants.
- *	WIMLIB_COMPRESSION_TYPE_NONE is allowed.
+ *	Compression format to use in the output resources, specified as one of
+ *	the WIMLIB_COMPRESSION_TYPE_* constants.  WIMLIB_COMPRESSION_TYPE_NONE
+ *	is allowed.
  *
  * @out_chunk_size
- *	Chunk size to use to write the streams.  It must be a valid chunk size
- *	for the specified compression format @out_ctype, unless @out_ctype is
- *	WIMLIB_COMPRESSION_TYPE_NONE, in which case this parameter is ignored.
+ *	Compression chunk size to use in the output resources.  It must be a
+ *	valid chunk size for the specified compression format @out_ctype, unless
+ *	@out_ctype is WIMLIB_COMPRESSION_TYPE_NONE, in which case this parameter
+ *	is ignored.
  *
  * @num_threads
  *	Number of threads to use to compress data.  If 0, a default number of
@@ -1458,81 +1439,78 @@ init_done_with_file_info(struct list_head *blob_list)
  *	from the specified value if insufficient memory is detected.
  *
  * @blob_table
- *	If on-the-fly deduplication of unhashed streams is desired, this
- *	parameter must be pointer to the lookup table for the WIMStruct on whose
- *	behalf the streams are being written.  Otherwise, this parameter can be
- *	NULL.
+ *	If on-the-fly deduplication of unhashed blobs is desired, this parameter
+ *	must be pointer to the blob table for the WIMStruct on whose behalf the
+ *	blobs are being written.  Otherwise, this parameter can be NULL.
  *
  * @filter_ctx
- *	If on-the-fly deduplication of unhashed streams is desired, this
- *	parameter can be a pointer to a context for stream filtering used to
- *	detect whether the duplicate stream has been hard-filtered or not.  If
- *	no streams are hard-filtered or no streams are unhashed, this parameter
- *	can be NULL.
+ *	If on-the-fly deduplication of unhashed blobs is desired, this parameter
+ *	can be a pointer to a context for blob filtering used to detect whether
+ *	the duplicate blob has been hard-filtered or not.  If no blobs are
+ *	hard-filtered or no blobs are unhashed, this parameter can be NULL.
  *
- * This function will write the streams in @blob_list to resources in
+ * This function will write the blobs in @blob_list to resources in
  * consecutive positions in the output WIM file, or to a single solid resource
  * if WRITE_RESOURCE_FLAG_SOLID was specified in @write_resource_flags.  In both
- * cases, the @out_reshdr of the `struct blob' for each stream
- * written will be updated to specify its location, size, and flags in the
- * output WIM.  In the solid resource case, WIM_RESHDR_FLAG_SOLID will be set in
- * the @flags field of each @out_reshdr, and furthermore @out_res_offset_in_wim
- * and @out_res_size_in_wim of each @out_reshdr will be set to the offset and
- * size, respectively, in the output WIM of the solid resource containing the
- * corresponding stream.
+ * cases, the @out_reshdr of the `struct blob' for each blob written will be
+ * updated to specify its location, size, and flags in the output WIM.  In the
+ * solid resource case, WIM_RESHDR_FLAG_SOLID will be set in the @flags field of
+ * each @out_reshdr, and furthermore @out_res_offset_in_wim and
+ * @out_res_size_in_wim of each @out_reshdr will be set to the offset and size,
+ * respectively, in the output WIM of the solid resource containing the
+ * corresponding blob.
  *
- * Each of the streams to write may be in any location supported by the
- * resource-handling code (specifically, read_blob_list()), such as the
- * contents of external file that has been logically added to the output WIM, or
- * a stream in another WIM file that has been imported, or even a stream in the
- * "same" WIM file of which a modified copy is being written.  In the case that
- * a stream is already in a WIM file and uses compatible compression parameters,
- * by default this function will re-use the raw data instead of decompressing
- * it, then recompressing it; however, with WRITE_RESOURCE_FLAG_RECOMPRESS
+ * Each of the blobs to write may be in any location supported by the
+ * resource-handling code (specifically, read_blob_list()), such as the contents
+ * of external file that has been logically added to the output WIM, or a blob
+ * in another WIM file that has been imported, or even a blob in the "same" WIM
+ * file of which a modified copy is being written.  In the case that a blob is
+ * already in a WIM file and uses compatible compression parameters, by default
+ * this function will re-use the raw data instead of decompressing it, then
+ * recompressing it; however, with WRITE_RESOURCE_FLAG_RECOMPRESS
  * specified in @write_resource_flags, this is not done.
  *
  * As a further requirement, this function requires that the
- * @will_be_in_output_wim member be set to 1 on all streams in @blob_list as
- * well as any other streams not in @blob_list that will be in the output WIM
- * file, but set to 0 on any other streams in the output WIM's lookup table or
- * sharing a solid resource with a stream in @blob_list.  Still furthermore,
- * if on-the-fly deduplication of streams is possible, then all streams in
- * @blob_list must also be linked by @blob_table_list along with any other
- * streams that have @will_be_in_output_wim set.
+ * @will_be_in_output_wim member be set to 1 on all blobs in @blob_list as well
+ * as any other blobs not in @blob_list that will be in the output WIM file, but
+ * set to 0 on any other blobs in the output WIM's blob table or sharing a solid
+ * resource with a blob in @blob_list.  Still furthermore, if on-the-fly
+ * deduplication of blobs is possible, then all blobs in @blob_list must also be
+ * linked by @blob_table_list along with any other blobs that have
+ * @will_be_in_output_wim set.
  *
- * This function handles on-the-fly deduplication of streams for which SHA1
- * message digests have not yet been calculated.  Such streams may or may not
- * need to be written.  If @blob_table is non-NULL, then each stream in
- * @blob_list that has @unhashed set but not @unique_size set is checksummed
- * immediately before it would otherwise be read for writing in order to
- * determine if it is identical to another stream already being written or one
- * that would be filtered out of the output WIM using stream_filtered() with the
- * context @filter_ctx.  Each such duplicate stream will be removed from
- * @blob_list, its reference count transfered to the pre-existing duplicate
- * stream, its memory freed, and will not be written.  Alternatively, if a
- * stream in @blob_list is a duplicate with any stream in @blob_table that
- * has not been marked for writing or would not be hard-filtered, it is freed
- * and the pre-existing duplicate is written instead, taking ownership of the
- * reference count and slot in the @blob_table_list.
+ * This function handles on-the-fly deduplication of blobs for which SHA-1
+ * message digests have not yet been calculated.  Such blobs may or may not need
+ * to be written.  If @blob_table is non-NULL, then each blob in @blob_list that
+ * has @unhashed set but not @unique_size set is checksummed immediately before
+ * it would otherwise be read for writing in order to determine if it is
+ * identical to another blob already being written or one that would be filtered
+ * out of the output WIM using blob_filtered() with the context @filter_ctx.
+ * Each such duplicate blob will be removed from @blob_list, its reference count
+ * transfered to the pre-existing duplicate blob, its memory freed, and will not
+ * be written.  Alternatively, if a blob in @blob_list is a duplicate with any
+ * blob in @blob_table that has not been marked for writing or would not be
+ * hard-filtered, it is freed and the pre-existing duplicate is written instead,
+ * taking ownership of the reference count and slot in the @blob_table_list.
  *
- * Returns 0 if every stream was either written successfully or did not need to
- * be written; otherwise returns a non-zero error code.
+ * Returns 0 if every blob was either written successfully or did not need to be
+ * written; otherwise returns a non-zero error code.
  */
 static int
 write_blob_list(struct list_head *blob_list,
-		  struct filedes *out_fd,
-		  int write_resource_flags,
-		  int out_ctype,
-		  u32 out_chunk_size,
-		  unsigned num_threads,
-		  struct blob_table *blob_table,
-		  struct filter_context *filter_ctx,
-		  wimlib_progress_func_t progfunc,
-		  void *progctx)
+		struct filedes *out_fd,
+		int write_resource_flags,
+		int out_ctype,
+		u32 out_chunk_size,
+		unsigned num_threads,
+		struct blob_table *blob_table,
+		struct filter_context *filter_ctx,
+		wimlib_progress_func_t progfunc,
+		void *progctx)
 {
 	int ret;
-	struct write_streams_ctx ctx;
-	struct list_head raw_copy_streams;
+	struct write_blobs_ctx ctx;
+	struct list_head raw_copy_blobs;
 
 	wimlib_assert((write_resource_flags &
 		       (WRITE_RESOURCE_FLAG_SOLID |
@@ -1540,10 +1518,10 @@ write_blob_list(struct list_head *blob_list,
 				(WRITE_RESOURCE_FLAG_SOLID |
 				 WRITE_RESOURCE_FLAG_PIPABLE));
 
-	remove_zero_length_streams(blob_list);
+	remove_empty_blobs(blob_list);
 
 	if (list_empty(blob_list)) {
-		DEBUG("No streams to write.");
+		DEBUG("No blobs to write.");
 		return 0;
 	}
 
@@ -1562,7 +1540,7 @@ write_blob_list(struct list_head *blob_list,
 	ctx.filter_ctx = filter_ctx;
 
 	/*
-	 * We normally sort the streams to write by a "sequential" order that is
+	 * We normally sort the blobs to write by a "sequential" order that is
 	 * optimized for reading.  But when using solid compression, we instead
 	 * sort the streams by file extension and file name (when applicable;
 	 * and we don't do this for streams from solid resources) so that
@@ -1576,7 +1554,7 @@ write_blob_list(struct list_head *blob_list,
 
 	ret = sort_blob_list_by_sequential_order(blob_list,
 						   offsetof(struct blob,
-							    write_streams_list));
+							    write_blobs_list));
 	if (ret)
 		return ret;
 
@@ -1585,19 +1563,19 @@ write_blob_list(struct list_head *blob_list,
 	if (write_resource_flags & WRITE_RESOURCE_FLAG_SOLID_SORT) {
 		ret = sort_blob_list_for_solid_compression(blob_list);
 		if (unlikely(ret))
-			WARNING("Failed to sort streams for solid compression. Continuing anyways.");
+			WARNING("Failed to sort blobs for solid compression. Continuing anyways.");
 	}
 
 	ctx.progress_data.progfunc = progfunc;
 	ctx.progress_data.progctx = progctx;
 
-	ctx.num_bytes_to_compress = find_raw_copy_streams(blob_list,
+	ctx.num_bytes_to_compress = find_raw_copy_blobs(blob_list,
 							  write_resource_flags,
 							  out_ctype,
 							  out_chunk_size,
-							  &raw_copy_streams);
+							  &raw_copy_blobs);
 
-	DEBUG("Writing stream list "
+	DEBUG("Writing blob list "
 	      "(offset = %"PRIu64", write_resource_flags=0x%08x, "
 	      "out_ctype=%d, out_chunk_size=%u, num_threads=%u, "
 	      "total_bytes=%"PRIu64", num_bytes_to_compress=%"PRIu64")",
@@ -1648,8 +1626,8 @@ write_blob_list(struct list_head *blob_list,
 	DEBUG("Actually using %u threads",
 	      ctx.progress_data.progress.write_streams.num_threads);
 
-	INIT_LIST_HEAD(&ctx.pending_streams);
-	INIT_LIST_HEAD(&ctx.solid_streams);
+	INIT_LIST_HEAD(&ctx.blobs_being_compressed);
+	INIT_LIST_HEAD(&ctx.blobs_in_solid_resource);
 
 	ret = call_progress(ctx.progress_data.progfunc,
 			    WIMLIB_PROGRESS_MSG_WRITE_STREAMS,
@@ -1664,24 +1642,24 @@ write_blob_list(struct list_head *blob_list,
 			goto out_destroy_context;
 	}
 
-	/* Read the list of streams needing to be compressed, using the
-	 * specified callbacks to execute processing of the data.  */
+	/* Read the list of blobs needing to be compressed, using the specified
+	 * callbacks to execute processing of the data.  */
 
 	struct read_blob_list_callbacks cbs = {
-		.begin_blob		= write_stream_begin_read,
-		.begin_blob_ctx	= &ctx,
-		.consume_chunk		= write_stream_process_chunk,
+		.begin_blob		= write_blob_begin_read,
+		.begin_blob_ctx		= &ctx,
+		.consume_chunk		= write_blob_process_chunk,
 		.consume_chunk_ctx	= &ctx,
-		.end_blob		= write_stream_end_read,
+		.end_blob		= write_blob_end_read,
 		.end_blob_ctx		= &ctx,
 	};
 
 	ret = read_blob_list(blob_list,
-			       offsetof(struct blob, write_streams_list),
-			       &cbs,
-			       BLOB_LIST_ALREADY_SORTED |
-					VERIFY_BLOB_HASHES |
-					COMPUTE_MISSING_BLOB_HASHES);
+			     offsetof(struct blob, write_blobs_list),
+			     &cbs,
+			     BLOB_LIST_ALREADY_SORTED |
+				VERIFY_BLOB_HASHES |
+				COMPUTE_MISSING_BLOB_HASHES);
 
 	if (ret)
 		goto out_destroy_context;
@@ -1705,7 +1683,7 @@ write_blob_list(struct list_head *blob_list,
 		      reshdr.uncompressed_size);
 
 		offset_in_res = 0;
-		list_for_each_entry(blob, &ctx.solid_streams, write_streams_list) {
+		list_for_each_entry(blob, &ctx.blobs_in_solid_resource, write_blobs_list) {
 			blob->out_reshdr.size_in_wim = blob->size;
 			blob->out_reshdr.flags = filter_resource_flags(blob->flags);
 			blob->out_reshdr.flags |= WIM_RESHDR_FLAG_SOLID;
@@ -1722,7 +1700,7 @@ write_blob_list(struct list_head *blob_list,
 out_write_raw_copy_resources:
 	/* Copy any compressed resources for which the raw data can be reused
 	 * without decompression.  */
-	ret = write_raw_copy_resources(&raw_copy_streams, ctx.out_fd,
+	ret = write_raw_copy_resources(&raw_copy_blobs, ctx.out_fd,
 				       &ctx.progress_data);
 
 out_destroy_context:
@@ -1734,7 +1712,7 @@ out_destroy_context:
 }
 
 static int
-is_stream_in_solid_resource(struct blob *blob, void *_ignore)
+is_blob_in_solid_resource(struct blob *blob, void *_ignore)
 {
 	return blob_is_in_solid_wim_resource(blob);
 }
@@ -1742,16 +1720,15 @@ is_stream_in_solid_resource(struct blob *blob, void *_ignore)
 static bool
 wim_has_solid_resources(WIMStruct *wim)
 {
-	return for_blob(wim->blob_table,
-				      is_stream_in_solid_resource, NULL);
+	return for_blob_in_table(wim->blob_table, is_blob_in_solid_resource, NULL);
 }
 
 static int
 wim_write_blob_list(WIMStruct *wim,
-		      struct list_head *blob_list,
-		      int write_flags,
-		      unsigned num_threads,
-		      struct filter_context *filter_ctx)
+		    struct list_head *blob_list,
+		    int write_flags,
+		    unsigned num_threads,
+		    struct filter_context *filter_ctx)
 {
 	int out_ctype;
 	u32 out_chunk_size;
@@ -1760,9 +1737,9 @@ wim_write_blob_list(WIMStruct *wim,
 	write_resource_flags = write_flags_to_resource_flags(write_flags);
 
 	/* wimlib v1.7.0: create a solid WIM file by default if the WIM version
-	 * has been set to WIM_VERSION_SOLID and at least one stream in the
-	 * WIM's lookup table is located in a solid resource (may be the same
-	 * WIM, or a different one in the case of export).  */
+	 * has been set to WIM_VERSION_SOLID and at least one blob in the WIM's
+	 * blob table is located in a solid resource (may be the same WIM, or a
+	 * different one in the case of export).  */
 	if (wim->hdr.wim_version == WIM_VERSION_SOLID &&
 	    wim_has_solid_resources(wim))
 	{
@@ -1797,7 +1774,7 @@ write_wim_resource(struct blob *blob,
 		   int write_resource_flags)
 {
 	LIST_HEAD(blob_list);
-	list_add(&blob->write_streams_list, &blob_list);
+	list_add(&blob->write_blobs_list, &blob_list);
 	blob->will_be_in_output_wim = 1;
 	return write_blob_list(&blob_list,
 				 out_fd,
@@ -1823,7 +1800,7 @@ write_wim_resource_from_buffer(const void *buf, size_t buf_size,
 	int ret;
 	struct blob *blob;
 
-	/* Set up a temporary lookup table entry to provide to
+	/* Set up a temporary blob table entry to provide to
 	 * write_wim_resource().  */
 
 	blob = new_blob();
@@ -1858,14 +1835,14 @@ out_free_lte:
 	return ret;
 }
 
-struct stream_size_table {
+struct blob_size_table {
 	struct hlist_head *array;
 	size_t num_entries;
 	size_t capacity;
 };
 
 static int
-init_stream_size_table(struct stream_size_table *tab, size_t capacity)
+init_blob_size_table(struct blob_size_table *tab, size_t capacity)
 {
 	tab->array = CALLOC(capacity, sizeof(tab->array[0]));
 	if (tab->array == NULL)
@@ -1876,15 +1853,15 @@ init_stream_size_table(struct stream_size_table *tab, size_t capacity)
 }
 
 static void
-destroy_stream_size_table(struct stream_size_table *tab)
+destroy_blob_size_table(struct blob_size_table *tab)
 {
 	FREE(tab->array);
 }
 
 static int
-stream_size_table_insert(struct blob *blob, void *_tab)
+blob_size_table_insert(struct blob *blob, void *_tab)
 {
-	struct stream_size_table *tab = _tab;
+	struct blob_size_table *tab = _tab;
 	size_t pos;
 	struct blob *same_size_lte;
 	struct hlist_node *tmp;
@@ -1904,65 +1881,63 @@ stream_size_table_insert(struct blob *blob, void *_tab)
 	return 0;
 }
 
-struct find_streams_ctx {
+struct find_blobs_ctx {
 	WIMStruct *wim;
 	int write_flags;
 	struct list_head blob_list;
-	struct stream_size_table stream_size_tab;
+	struct blob_size_table blob_size_tab;
 };
 
 static void
-reference_stream_for_write(struct blob *blob,
+reference_blob_for_write(struct blob *blob,
 			   struct list_head *blob_list, u32 nref)
 {
 	if (!blob->will_be_in_output_wim) {
 		blob->out_refcnt = 0;
-		list_add_tail(&blob->write_streams_list, blob_list);
+		list_add_tail(&blob->write_blobs_list, blob_list);
 		blob->will_be_in_output_wim = 1;
 	}
 	blob->out_refcnt += nref;
 }
 
 static int
-fully_reference_stream_for_write(struct blob *blob,
+fully_reference_blob_for_write(struct blob *blob,
 				 void *_blob_list)
 {
 	struct list_head *blob_list = _blob_list;
 	blob->will_be_in_output_wim = 0;
-	reference_stream_for_write(blob, blob_list, blob->refcnt);
+	reference_blob_for_write(blob, blob_list, blob->refcnt);
 	return 0;
 }
 
 static int
-inode_find_streams_to_reference(const struct wim_inode *inode,
-				const struct blob_table *table,
-				struct list_head *blob_list)
+inode_find_blobs_to_reference(const struct wim_inode *inode,
+			      const struct blob_table *table,
+			      struct list_head *blob_list)
 {
-	struct blob *blob;
-	unsigned i;
-
 	wimlib_assert(inode->i_nlink > 0);
 
-	for (i = 0; i <= inode->i_num_ads; i++) {
-		blob = inode_stream_lte(inode, i, table);
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		struct blob *blob;
+		
+		blob = inode_attribute_blob(inode, i, table);
 		if (blob)
-			reference_stream_for_write(blob, blob_list,
-						   inode->i_nlink);
-		else if (!is_zero_hash(inode_stream_hash(inode, i)))
+			reference_blob_for_write(blob, blob_list, inode->i_nlink);
+		else if (!is_zero_hash(inode_attribute_hash(inode, i)))
 			return WIMLIB_ERR_RESOURCE_NOT_FOUND;
 	}
 	return 0;
 }
 
 static int
-do_stream_set_not_in_output_wim(struct blob *blob, void *_ignore)
+do_blob_set_not_in_output_wim(struct blob *blob, void *_ignore)
 {
 	blob->will_be_in_output_wim = 0;
 	return 0;
 }
 
 static int
-image_find_streams_to_reference(WIMStruct *wim)
+image_find_blobs_to_reference(WIMStruct *wim)
 {
 	struct wim_image_metadata *imd;
 	struct wim_inode *inode;
@@ -1972,12 +1947,12 @@ image_find_streams_to_reference(WIMStruct *wim)
 
 	imd = wim_get_current_image_metadata(wim);
 
-	image_for_each_unhashed_stream(blob, imd)
+	image_for_each_unhashed_blob(blob, imd)
 		blob->will_be_in_output_wim = 0;
 
 	blob_list = wim->private;
 	image_for_each_inode(inode, imd) {
-		ret = inode_find_streams_to_reference(inode,
+		ret = inode_find_blobs_to_reference(inode,
 						      wim->blob_table,
 						      blob_list);
 		if (ret)
@@ -1987,40 +1962,40 @@ image_find_streams_to_reference(WIMStruct *wim)
 }
 
 static int
-prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
-						 int image,
-						 int streams_ok,
-						 struct list_head *blob_list_ret)
+prepare_unfiltered_list_of_blobs_in_output_wim(WIMStruct *wim,
+					       int image,
+					       int blobs_ok,
+					       struct list_head *blob_list_ret)
 {
 	int ret;
 
 	INIT_LIST_HEAD(blob_list_ret);
 
-	if (streams_ok && (image == WIMLIB_ALL_IMAGES ||
+	if (blobs_ok && (image == WIMLIB_ALL_IMAGES ||
 			   (image == 1 && wim->hdr.image_count == 1)))
 	{
-		/* Fast case:  Assume that all streams are being written and
-		 * that the reference counts are correct.  */
+		/* Fast case:  Assume that all blobs are being written and that
+		 * the reference counts are correct.  */
 		struct blob *blob;
 		struct wim_image_metadata *imd;
 		unsigned i;
 
-		for_blob(wim->blob_table,
-				       fully_reference_stream_for_write,
-				       blob_list_ret);
+		for_blob_in_table(wim->blob_table,
+				  fully_reference_blob_for_write,
+				  blob_list_ret);
 
 		for (i = 0; i < wim->hdr.image_count; i++) {
 			imd = wim->image_metadata[i];
-			image_for_each_unhashed_stream(blob, imd)
-				fully_reference_stream_for_write(blob, blob_list_ret);
+			image_for_each_unhashed_blob(blob, imd)
+				fully_reference_blob_for_write(blob, blob_list_ret);
 		}
 	} else {
 		/* Slow case:  Walk through the images being written and
-		 * determine the streams referenced.  */
-		for_blob(wim->blob_table,
-				       do_stream_set_not_in_output_wim, NULL);
+		 * determine the blobs referenced.  */
+		for_blob_in_table(wim->blob_table,
+				  do_blob_set_not_in_output_wim, NULL);
 		wim->private = blob_list_ret;
-		ret = for_image(wim, image, image_find_streams_to_reference);
+		ret = for_image(wim, image, image_find_blobs_to_reference);
 		if (ret)
 			return ret;
 	}
@@ -2029,7 +2004,7 @@ prepare_unfiltered_list_of_streams_in_output_wim(WIMStruct *wim,
 }
 
 struct insert_other_if_hard_filtered_ctx {
-	struct stream_size_table *tab;
+	struct blob_size_table *tab;
 	struct filter_context *filter_ctx;
 };
 
@@ -2039,36 +2014,36 @@ insert_other_if_hard_filtered(struct blob *blob, void *_ctx)
 	struct insert_other_if_hard_filtered_ctx *ctx = _ctx;
 
 	if (!blob->will_be_in_output_wim &&
-	    stream_hard_filtered(blob, ctx->filter_ctx))
-		stream_size_table_insert(blob, ctx->tab);
+	    blob_hard_filtered(blob, ctx->filter_ctx))
+		blob_size_table_insert(blob, ctx->tab);
 	return 0;
 }
 
 static int
-determine_stream_size_uniquity(struct list_head *blob_list,
+determine_blob_size_uniquity(struct list_head *blob_list,
 			       struct blob_table *lt,
 			       struct filter_context *filter_ctx)
 {
 	int ret;
-	struct stream_size_table tab;
+	struct blob_size_table tab;
 	struct blob *blob;
 
-	ret = init_stream_size_table(&tab, 9001);
+	ret = init_blob_size_table(&tab, 9001);
 	if (ret)
 		return ret;
 
-	if (may_hard_filter_streams(filter_ctx)) {
+	if (may_hard_filter_blobs(filter_ctx)) {
 		struct insert_other_if_hard_filtered_ctx ctx = {
 			.tab = &tab,
 			.filter_ctx = filter_ctx,
 		};
-		for_blob(lt, insert_other_if_hard_filtered, &ctx);
+		for_blob_in_table(lt, insert_other_if_hard_filtered, &ctx);
 	}
 
-	list_for_each_entry(blob, blob_list, write_streams_list)
-		stream_size_table_insert(blob, &tab);
+	list_for_each_entry(blob, blob_list, write_blobs_list)
+		blob_size_table_insert(blob, &tab);
 
-	destroy_stream_size_table(&tab);
+	destroy_blob_size_table(&tab);
 	return 0;
 }
 
@@ -2079,9 +2054,9 @@ filter_blob_list_for_write(struct list_head *blob_list,
 	struct blob *blob, *tmp;
 
 	list_for_each_entry_safe(blob, tmp,
-				 blob_list, write_streams_list)
+				 blob_list, write_blobs_list)
 	{
-		int status = stream_filtered(blob, filter_ctx);
+		int status = blob_filtered(blob, filter_ctx);
 
 		if (status == 0) {
 			/* Not filtered.  */
@@ -2094,7 +2069,7 @@ filter_blob_list_for_write(struct list_head *blob_list,
 				blob->will_be_in_output_wim = 0;
 				list_del(&blob->blob_table_list);
 			}
-			list_del(&blob->write_streams_list);
+			list_del(&blob->write_blobs_list);
 		}
 	}
 }
@@ -2102,8 +2077,8 @@ filter_blob_list_for_write(struct list_head *blob_list,
 /*
  * prepare_blob_list_for_write() -
  *
- * Prepare the list of streams to write for writing a WIM containing the
- * specified image(s) with the specified write flags.
+ * Prepare the list of blobs to write for writing a WIM containing the specified
+ * image(s) with the specified write flags.
  *
  * @wim
  *	The WIMStruct on whose behalf the write is occurring.
@@ -2114,64 +2089,62 @@ filter_blob_list_for_write(struct list_head *blob_list,
  * @write_flags
  *	WIMLIB_WRITE_FLAG_* flags for the write operation:
  *
- *	STREAMS_OK:  For writes of all images, assume that all streams in the
- *	lookup table of @wim and the per-image lists of unhashed streams should
- *	be taken as-is, and image metadata should not be searched for
- *	references.  This does not exclude filtering with OVERWRITE and
- *	SKIP_EXTERNAL_WIMS, below.
+ *	STREAMS_OK:  For writes of all images, assume that all blobs in the blob
+ *	table of @wim and the per-image lists of unhashed blobs should be taken
+ *	as-is, and image metadata should not be searched for references.  This
+ *	does not exclude filtering with OVERWRITE and SKIP_EXTERNAL_WIMS, below.
  *
- *	OVERWRITE:  Streams already present in @wim shall not be returned in
+ *	OVERWRITE:  Blobs already present in @wim shall not be returned in
  *	@blob_list_ret.
  *
- *	SKIP_EXTERNAL_WIMS:  Streams already present in a WIM file, but not
- *	@wim, shall be returned in neither @blob_list_ret nor
- *	@blob_table_list_ret.
+ *	SKIP_EXTERNAL_WIMS:  Blobs already present in a WIM file, but not @wim,
+ *	shall be returned in neither @blob_list_ret nor @blob_table_list_ret.
  *
  * @blob_list_ret
- *	List of streams, linked by write_streams_list, that need to be written
- *	will be returned here.
+ *	List of blobs, linked by write_blobs_list, that need to be written will
+ *	be returned here.
  *
- *	Note that this function assumes that unhashed streams will be written;
- *	it does not take into account that they may become duplicates when
- *	actually hashed.
+ *	Note that this function assumes that unhashed blobs will be written; it
+ *	does not take into account that they may become duplicates when actually
+ *	hashed.
  *
  * @blob_table_list_ret
- *	List of streams, linked by blob_table_list, that need to be included
- *	in the WIM's lookup table will be returned here.  This will be a
- *	superset of the streams in @blob_list_ret.
+ *	List of blobs, linked by blob_table_list, that need to be included in
+ *	the WIM's blob table will be returned here.  This will be a superset of
+ *	the blobs in @blob_list_ret.
  *
  *	This list will be a proper superset of @blob_list_ret if and only if
  *	WIMLIB_WRITE_FLAG_OVERWRITE was specified in @write_flags and some of
- *	the streams that would otherwise need to be written were already located
+ *	the blobs that would otherwise need to be written were already located
  *	in the WIM file.
  *
- *	All streams in this list will have @out_refcnt set to the number of
- *	references to the stream in the output WIM.  If
+ *	All blobs in this list will have @out_refcnt set to the number of
+ *	references to the blob in the output WIM.  If
  *	WIMLIB_WRITE_FLAG_STREAMS_OK was specified in @write_flags, @out_refcnt
  *	may be as low as 0.
  *
  * @filter_ctx_ret
- *	A context for queries of stream filter status with stream_filtered() is
+ *	A context for queries of blob filter status with blob_filtered() is
  *	returned in this location.
  *
- * In addition, @will_be_in_output_wim will be set to 1 in all stream entries
- * inserted into @blob_table_list_ret and to 0 in all stream entries in the
- * lookup table of @wim not inserted into @blob_table_list_ret.
+ * In addition, @will_be_in_output_wim will be set to 1 in all blobs inserted
+ * into @blob_table_list_ret and to 0 in all blobs in the blob table of @wim not
+ * inserted into @blob_table_list_ret.
  *
- * Still furthermore, @unique_size will be set to 1 on all stream entries in
- * @blob_list_ret that have unique size among all stream entries in
- * @blob_list_ret and among all stream entries in the lookup table of @wim
- * that are ineligible for being written due to filtering.
+ * Still furthermore, @unique_size will be set to 1 on all blobs in
+ * @blob_list_ret that have unique size among all blobs in @blob_list_ret and
+ * among all blobs in the blob table of @wim that are ineligible for being
+ * written due to filtering.
  *
  * Returns 0 on success; nonzero on read error, memory allocation error, or
  * otherwise.
  */
 static int
 prepare_blob_list_for_write(WIMStruct *wim, int image,
-			      int write_flags,
-			      struct list_head *blob_list_ret,
-			      struct list_head *blob_table_list_ret,
-			      struct filter_context *filter_ctx_ret)
+			    int write_flags,
+			    struct list_head *blob_list_ret,
+			    struct list_head *blob_table_list_ret,
+			    struct filter_context *filter_ctx_ret)
 {
 	int ret;
 	struct blob *blob;
@@ -2179,7 +2152,7 @@ prepare_blob_list_for_write(WIMStruct *wim, int image,
 	filter_ctx_ret->write_flags = write_flags;
 	filter_ctx_ret->wim = wim;
 
-	ret = prepare_unfiltered_list_of_streams_in_output_wim(
+	ret = prepare_unfiltered_list_of_blobs_in_output_wim(
 				wim,
 				image,
 				write_flags & WIMLIB_WRITE_FLAG_STREAMS_OK,
@@ -2188,22 +2161,22 @@ prepare_blob_list_for_write(WIMStruct *wim, int image,
 		return ret;
 
 	INIT_LIST_HEAD(blob_table_list_ret);
-	list_for_each_entry(blob, blob_list_ret, write_streams_list)
+	list_for_each_entry(blob, blob_list_ret, write_blobs_list)
 		list_add_tail(&blob->blob_table_list, blob_table_list_ret);
 
-	ret = determine_stream_size_uniquity(blob_list_ret, wim->blob_table,
-					     filter_ctx_ret);
+	ret = determine_blob_size_uniquity(blob_list_ret, wim->blob_table,
+					   filter_ctx_ret);
 	if (ret)
 		return ret;
 
-	if (may_filter_streams(filter_ctx_ret))
+	if (may_filter_blobs(filter_ctx_ret))
 		filter_blob_list_for_write(blob_list_ret, filter_ctx_ret);
 
 	return 0;
 }
 
 static int
-write_wim_streams(WIMStruct *wim, int image, int write_flags,
+write_nonmetadata_blobs_to_wim(WIMStruct *wim, int image, int write_flags,
 		  unsigned num_threads,
 		  struct list_head *blob_list_override,
 		  struct list_head *blob_table_list_ret)
@@ -2216,7 +2189,7 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 	struct filter_context *filter_ctx;
 
 	if (blob_list_override == NULL) {
-		/* Normal case: prepare stream list from image(s) being written.
+		/* Normal case: prepare blob list from image(s) being written.
 		 */
 		blob_list = &_blob_list;
 		filter_ctx = &_filter_ctx;
@@ -2228,12 +2201,12 @@ write_wim_streams(WIMStruct *wim, int image, int write_flags,
 			return ret;
 	} else {
 		/* Currently only as a result of wimlib_split() being called:
-		 * use stream list already explicitly provided.  Use existing
+		 * use blob list already explicitly provided.  Use existing
 		 * reference counts.  */
 		blob_list = blob_list_override;
 		filter_ctx = NULL;
 		INIT_LIST_HEAD(blob_table_list_ret);
-		list_for_each_entry(blob, blob_list, write_streams_list) {
+		list_for_each_entry(blob, blob_list, write_blobs_list) {
 			blob->out_refcnt = blob->refcnt;
 			blob->will_be_in_output_wim = 1;
 			blob->unique_size = 0;
@@ -2297,7 +2270,7 @@ write_wim_metadata_resources(WIMStruct *wim, int image, int write_flags)
 		} else if (write_flags & WIMLIB_WRITE_FLAG_OVERWRITE) {
 			DEBUG("Image %u was not modified; re-using existing "
 			      "metadata resource.", i);
-			stream_set_out_reshdr_for_reuse(imd->metadata_blob);
+			blob_set_out_reshdr_for_reuse(imd->metadata_blob);
 			ret = 0;
 		} else {
 			DEBUG("Image %u was not modified; copying existing "
@@ -2348,7 +2321,7 @@ close_wim_writable(WIMStruct *wim, int write_flags)
 }
 
 static int
-cmp_streams_by_out_rspec(const void *p1, const void *p2)
+cmp_blobs_by_out_rspec(const void *p1, const void *p2)
 {
 	const struct blob *lte1, *lte2;
 
@@ -2378,7 +2351,7 @@ write_blob_table(WIMStruct *wim, int image, int write_flags,
 {
 	int ret;
 
-	/* Set output resource metadata for streams already present in WIM.  */
+	/* Set output resource metadata for blobs already present in WIM.  */
 	if (write_flags & WIMLIB_WRITE_FLAG_OVERWRITE) {
 		struct blob *blob;
 		list_for_each_entry(blob, blob_table_list, blob_table_list)
@@ -2386,14 +2359,14 @@ write_blob_table(WIMStruct *wim, int image, int write_flags,
 			if (blob->resource_location == RESOURCE_IN_WIM &&
 			    blob->rspec->wim == wim)
 			{
-				stream_set_out_reshdr_for_reuse(blob);
+				blob_set_out_reshdr_for_reuse(blob);
 			}
 		}
 	}
 
 	ret = sort_blob_list(blob_table_list,
-			       offsetof(struct blob, blob_table_list),
-			       cmp_streams_by_out_rspec);
+			     offsetof(struct blob, blob_table_list),
+			     cmp_blobs_by_out_rspec);
 	if (ret)
 		return ret;
 
@@ -2410,8 +2383,8 @@ write_blob_table(WIMStruct *wim, int image, int write_flags,
 			end_image = image;
 		}
 
-		/* Push metadata resource lookup table entries onto the front of
-		 * the list in reverse order, so that they're written in order.
+		/* Push metadata blob table entries onto the front of the list
+		 * in reverse order, so that they're written in order.
 		 */
 		for (int i = end_image; i >= start_image; i--) {
 			struct blob *metadata_blob;
@@ -2433,7 +2406,7 @@ write_blob_table(WIMStruct *wim, int image, int write_flags,
 /*
  * finish_write():
  *
- * Finish writing a WIM file: write the lookup table, xml data, and integrity
+ * Finish writing a WIM file: write the blob table, xml data, and integrity
  * table, then overwrite the WIM header.  By default, closes the WIM file
  * descriptor (@wim->out_fd) if successful.
  *
@@ -2447,19 +2420,18 @@ write_blob_table(WIMStruct *wim, int image, int write_flags,
  *
  *	(public) WIMLIB_WRITE_FLAG_PIPABLE:
  *		Writing a pipable WIM, possibly to a pipe; include pipable WIM
- *		stream headers before the lookup table and XML data, and also
- *		write the WIM header at the end instead of seeking to the
- *		beginning.  Can't be combined with
- *		WIMLIB_WRITE_FLAG_CHECK_INTEGRITY.
+ *		blob headers before the blob table and XML data, and also write
+ *		the WIM header at the end instead of seeking to the beginning.
+ *		Can't be combined with WIMLIB_WRITE_FLAG_CHECK_INTEGRITY.
  *
- *	(private) WIMLIB_WRITE_FLAG_NO_LOOKUP_TABLE:
- *		Don't write the lookup table.
+ *	(private) WIMLIB_WRITE_FLAG_NO_BLOB_TABLE:
+ *		Don't write the blob table.
  *
  *	(private) WIMLIB_WRITE_FLAG_CHECKPOINT_AFTER_XML:
  *		After writing the XML data but before writing the integrity
- *		table, write a temporary WIM header and flush the stream so that
- *		the WIM is less likely to become corrupted upon abrupt program
- *		termination.
+ *		table, write a temporary WIM header and flush the file
+ *		descriptor so that the WIM is less likely to become corrupted
+ *		upon abrupt program termination.
  *	(private) WIMLIB_WRITE_FLAG_HEADER_AT_END:
  *		Instead of overwriting the WIM header at the beginning of the
  *		file, simply append it to the end of the file.  (Used when
@@ -2525,11 +2497,11 @@ finish_write(WIMStruct *wim, int image, int write_flags,
 		 * ignoring of the return value.  */
 	}
 
-	/* Write lookup table.  */
-	if (!(write_flags & WIMLIB_WRITE_FLAG_NO_LOOKUP_TABLE)) {
+	/* Write blob table.  */
+	if (!(write_flags & WIMLIB_WRITE_FLAG_NO_BLOB_TABLE)) {
 		ret = write_blob_table(wim, image, write_flags,
-					     &wim->hdr.blob_table_reshdr,
-					     blob_table_list);
+				       &wim->hdr.blob_table_reshdr,
+				       blob_table_list);
 		if (ret) {
 			free_integrity_table(old_integrity_table);
 			return ret;
@@ -2657,9 +2629,9 @@ unlock_wim_for_append(WIMStruct *wim)
  *   stops other software from trying to read the file as a normal WIM.
  *
  * - The header at the beginning of the file does not contain all the normal
- *   information; in particular it will have all 0's for the lookup table and
- *   XML data resource entries.  This is because this information cannot be
- *   determined until the lookup table and XML data have been written.
+ *   information; in particular it will have all 0's for the blob table and XML
+ *   data resource entries.  This is because this information cannot be
+ *   determined until the blob table and XML data have been written.
  *   Consequently, wimlib will write the full header at the very end of the
  *   file.  The header at the end, however, is only used when reading the WIM
  *   from a seekable file (not a pipe).
@@ -2669,14 +2641,14 @@ unlock_wim_for_append(WIMStruct *wim)
  *   reading the WIM from a pipe.  This copy of the XML data is ignored if the
  *   WIM is read from a seekable file (not a pipe).
  *
- * - The format of resources, or streams, has been modified to allow them to be
- *   used before the "lookup table" has been read.  Each stream is prefixed with
- *   a `struct pwm_blob_hdr' that is basically an abbreviated form of `struct
- *   blob_disk' that only contains the SHA1 message digest,
- *   uncompressed stream size, and flags that indicate whether the stream is
- *   compressed.  The data of uncompressed streams then follows literally, while
- *   the data of compressed streams follows in a modified format.  Compressed
- *   streams do not begin with a chunk table, since the chunk table cannot be
+ * - The format of resources, or blobs, has been modified to allow them to be
+ *   used before the "blob table" has been read.  Each blob is prefixed with a
+ *   `struct pwm_blob_hdr' that is basically an abbreviated form of `struct
+ *   blob_table_entry_disk' that only contains the SHA-1 message digest,
+ *   uncompressed blob size, and flags that indicate whether the blob is
+ *   compressed.  The data of uncompressed blobs then follows literally, while
+ *   the data of compressed blobs follows in a modified format.  Compressed
+ *   blobs do not begin with a chunk table, since the chunk table cannot be
  *   written until all chunks have been compressed.  Instead, each compressed
  *   chunk is prefixed by a `struct pwm_chunk_hdr' that gives its size.
  *   Furthermore, the chunk table is written at the end of the resource instead
@@ -2684,16 +2656,16 @@ unlock_wim_for_append(WIMStruct *wim)
  *   `struct pwm_chunk_hdr's were not present; also, the chunk table is only
  *   used if the WIM is being read from a seekable file (not a pipe).
  *
- * - Metadata resources always come before other file resources (streams).
- *   (This does not by itself constitute an incompatibility with normal WIMs,
- *   since this is valid in normal WIMs.)
+ * - Metadata blobs always come before non-metadata blobs.  (This does not by
+ *   itself constitute an incompatibility with normal WIMs, since this is valid
+ *   in normal WIMs.)
  *
- * - At least up to the end of the file resources, all components must be packed
- *   as tightly as possible; there cannot be any "holes" in the WIM.  (This does
+ * - At least up to the end of the blobs, all components must be packed as
+ *   tightly as possible; there cannot be any "holes" in the WIM.  (This does
  *   not by itself consititute an incompatibility with normal WIMs, since this
  *   is valid in normal WIMs.)
  *
- * Note: the lookup table, XML data, and header at the end are not used when
+ * Note: the blob table, XML data, and header at the end are not used when
  * applying from a pipe.  They exist to support functionality such as image
  * application and export when the WIM is *not* read from a pipe.
  *
@@ -2736,21 +2708,20 @@ write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 	 * been written.  */
 
 	/* For efficiency, when wimlib adds an image to the WIM with
-	 * wimlib_add_image(), the SHA1 message digests of files is not
+	 * wimlib_add_image(), the SHA-1 message digests of files is not
 	 * calculated; instead, they are calculated while the files are being
 	 * written.  However, this does not work when writing a pipable WIM,
-	 * since when writing a stream to a pipable WIM, its SHA1 message digest
-	 * needs to be known before the stream data is written.  Therefore,
-	 * before getting much farther, we need to pre-calculate the SHA1
-	 * message digests of all streams that will be written.  */
+	 * since when writing a blob to a pipable WIM, its SHA-1 message digest
+	 * needs to be known before the blob data is written.  Therefore, before
+	 * getting much farther, we need to pre-calculate the SHA-1 message
+	 * digests of all blobs that will be written.  */
 	ret = wim_checksum_unhashed_blobs(wim);
 	if (ret)
 		return ret;
 
 	/* Write extra copy of the XML data.  */
 	ret = write_wim_xml_data(wim, image, WIM_TOTALBYTES_OMIT,
-				 &xml_reshdr,
-				 WRITE_RESOURCE_FLAG_PIPABLE);
+				 &xml_reshdr, WRITE_RESOURCE_FLAG_PIPABLE);
 	if (ret)
 		return ret;
 
@@ -2760,12 +2731,13 @@ write_pipable_wim(WIMStruct *wim, int image, int write_flags,
 	if (ret)
 		return ret;
 
-	/* Write streams needed for the image(s) being included in the output
-	 * WIM, or streams needed for the split WIM part.  */
-	return write_wim_streams(wim, image, write_flags, num_threads,
-				 blob_list_override, blob_table_list_ret);
+	/* Write blobs needed for the image(s) being included in the output WIM,
+	 * or blobs needed for the split WIM part.  */
+	return write_nonmetadata_blobs_to_wim(wim, image, write_flags,
+					      num_threads, blob_list_override,
+					      blob_table_list_ret);
 
-	/* The lookup table, XML data, and header at end are handled by
+	/* The blob table, XML data, and header at end are handled by
 	 * finish_write().  */
 }
 
@@ -2853,7 +2825,7 @@ write_wim_part(WIMStruct *wim,
 	else
 		DEBUG("Number of threads: %u", num_threads);
 	DEBUG("Progress function: %s", (wim->progfunc ? "yes" : "no"));
-	DEBUG("Stream list:       %s", (blob_list_override ? "specified" : "autodetect"));
+	DEBUG("Blob list:       %s", (blob_list_override ? "specified" : "autodetect"));
 	DEBUG("GUID:              %s", (write_flags &
 					WIMLIB_WRITE_FLAG_RETAIN_GUID) ? "retain"
 						: guid ? "explicit" : "generate new");
@@ -3016,12 +2988,13 @@ write_wim_part(WIMStruct *wim,
 	if (ret)
 		goto out_restore_hdr;
 
-	/* Write metadata resources and streams.  */
+	/* Write metadata resources and blobs.  */
 	if (!(write_flags & WIMLIB_WRITE_FLAG_PIPABLE)) {
 		/* Default case: create a normal (non-pipable) WIM.  */
-		ret = write_wim_streams(wim, image, write_flags, num_threads,
-					blob_list_override,
-					&blob_table_list);
+		ret = write_nonmetadata_blobs_to_wim(wim, image, write_flags,
+						     num_threads,
+						     blob_list_override,
+						     &blob_table_list);
 		if (ret)
 			goto out_restore_hdr;
 
@@ -3039,7 +3012,7 @@ write_wim_part(WIMStruct *wim,
 	}
 
 
-	/* Write lookup table, XML data, and (optional) integrity table.  */
+	/* Write blob table, XML data, and (optional) integrity table.  */
 	ret = finish_write(wim, image, write_flags, &blob_table_list);
 out_restore_hdr:
 	memcpy(&wim->hdr, &hdr_save, sizeof(struct wim_header));
@@ -3102,7 +3075,8 @@ check_resource_offset(struct blob *blob, void *_wim)
 	const WIMStruct *wim = _wim;
 	off_t end_offset = *(const off_t*)wim->private;
 
-	if (blob->resource_location == RESOURCE_IN_WIM && blob->rspec->wim == wim &&
+	if (blob->resource_location == RESOURCE_IN_WIM &&
+	    blob->rspec->wim == wim &&
 	    blob->rspec->offset_in_wim + blob->rspec->size_in_wim > end_offset)
 		return WIMLIB_ERR_RESOURCE_ORDER;
 	return 0;
@@ -3118,7 +3092,7 @@ check_resource_offsets(WIMStruct *wim, off_t end_offset)
 	unsigned i;
 
 	wim->private = &end_offset;
-	ret = for_blob(wim->blob_table, check_resource_offset, wim);
+	ret = for_blob_in_table(wim->blob_table, check_resource_offset, wim);
 	if (ret)
 		return ret;
 
@@ -3131,17 +3105,17 @@ check_resource_offsets(WIMStruct *wim, off_t end_offset)
 }
 
 /*
- * Overwrite a WIM, possibly appending streams to it.
+ * Overwrite a WIM, possibly appending new resources to it.
  *
  * A WIM looks like (or is supposed to look like) the following:
  *
  *                   Header (212 bytes)
- *                   Streams and metadata resources (variable size)
- *                   Lookup table (variable size)
+ *                   Resources for metadata and files (variable size)
+ *                   Blob table (variable size)
  *                   XML data (variable size)
  *                   Integrity table (optional) (variable size)
  *
- * If we are not adding any streams or metadata resources, the lookup table is
+ * If we are not adding any new files or metadata, then the blob table is
  * unchanged--- so we only need to overwrite the XML data, integrity table, and
  * header.  This operation is potentially unsafe if the program is abruptly
  * terminated while the XML data or integrity table are being overwritten, but
@@ -3152,40 +3126,40 @@ check_resource_offsets(WIMStruct *wim, off_t end_offset)
  * the program is terminated while the integrity table is being calculated (but
  * no guarantees, due to write re-ordering...).
  *
- * If we are adding new streams or images (metadata resources), the lookup table
- * needs to be changed, and those streams need to be written.  In this case, we
- * try to perform a safe update of the WIM file by writing the streams *after*
- * the end of the previous WIM, then writing the new lookup table, XML data, and
- * (optionally) integrity table following the new streams.  This will produce a
- * layout like the following:
+ * If we are adding new blobs, including new file data as well as any metadata
+ * for any new images, then the blob table needs to be changed, and those blobs
+ * need to be written.  In this case, we try to perform a safe update of the WIM
+ * file by writing the blobs *after* the end of the previous WIM, then writing
+ * the new blob table, XML data, and (optionally) integrity table following the
+ * new blobs.  This will produce a layout like the following:
  *
  *                   Header (212 bytes)
- *                   (OLD) Streams and metadata resources (variable size)
+ *                   (OLD) Resources for metadata and files (variable size)
  *                   (OLD) Lookup table (variable size)
  *                   (OLD) XML data (variable size)
  *                   (OLD) Integrity table (optional) (variable size)
- *                   (NEW) Streams and metadata resources (variable size)
- *                   (NEW) Lookup table (variable size)
+ *                   (NEW) Resources for metadata and files (variable size)
+ *                   (NEW) Blob table (variable size)
  *                   (NEW) XML data (variable size)
  *                   (NEW) Integrity table (optional) (variable size)
  *
  * At all points, the WIM is valid as nothing points to the new data yet.  Then,
- * the header is overwritten to point to the new lookup table, XML data, and
+ * the header is overwritten to point to the new blob table, XML data, and
  * integrity table, to produce the following layout:
  *
  *                   Header (212 bytes)
- *                   Streams and metadata resources (variable size)
+ *                   Resources for metadata and files (variable size)
  *                   Nothing (variable size)
- *                   More Streams and metadata resources (variable size)
- *                   Lookup table (variable size)
+ *                   Resources for metadata and files (variable size)
+ *                   Blob table (variable size)
  *                   XML data (variable size)
  *                   Integrity table (optional) (variable size)
  *
  * This method allows an image to be appended to a large WIM very quickly, and
- * is crash-safe except in the case of write re-ordering, but the
- * disadvantage is that a small hole is left in the WIM where the old lookup
- * table, xml data, and integrity table were.  (These usually only take up a
- * small amount of space compared to the streams, however.)
+ * is crash-safe except in the case of write re-ordering, but the disadvantage
+ * is that a small hole is left in the WIM where the old blob table, xml data,
+ * and integrity table were.  (These usually only take up a small amount of
+ * space compared to the blobs, however.)
  */
 static int
 overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
@@ -3217,10 +3191,9 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 	write_flags |= WIMLIB_WRITE_FLAG_OVERWRITE |
 		       WIMLIB_WRITE_FLAG_STREAMS_OK;
 
-	/* Make sure that the integrity table (if present) is after the XML
-	 * data, and that there are no stream resources, metadata resources, or
-	 * lookup tables after the XML data.  Otherwise, these data would be
-	 * overwritten. */
+	/* Make sure there is no data after the XML data, except possibily an
+	 * integrity table.  If this were the case, then this data would be
+	 * overwritten.  */
 	old_xml_begin = wim->hdr.xml_data_reshdr.offset_in_wim;
 	old_xml_end = old_xml_begin + wim->hdr.xml_data_reshdr.size_in_wim;
 	old_blob_table_end = wim->hdr.blob_table_reshdr.offset_in_wim +
@@ -3233,7 +3206,7 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 	}
 
 	if (old_blob_table_end > old_xml_begin) {
-		WARNING("Didn't expect the lookup table to be after the XML data");
+		WARNING("Didn't expect the blob table to be after the XML data");
 		ret = WIMLIB_ERR_RESOURCE_ORDER;
 		goto out_restore_memory_hdr;
 	}
@@ -3244,22 +3217,22 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 	 * overwrite these resources). */
 	if (!wim->image_deletion_occurred && !any_images_modified(wim)) {
 		/* If no images have been modified and no images have been
-		 * deleted, a new lookup table does not need to be written.  We
+		 * deleted, a new blob table does not need to be written.  We
 		 * shall write the new XML data and optional integrity table
-		 * immediately after the lookup table.  Note that this may
+		 * immediately after the blob table.  Note that this may
 		 * overwrite an existing integrity table. */
-		DEBUG("Skipping writing lookup table "
+		DEBUG("Skipping writing blob table "
 		      "(no images modified or deleted)");
 		old_wim_end = old_blob_table_end;
-		write_flags |= WIMLIB_WRITE_FLAG_NO_LOOKUP_TABLE |
+		write_flags |= WIMLIB_WRITE_FLAG_NO_BLOB_TABLE |
 			       WIMLIB_WRITE_FLAG_CHECKPOINT_AFTER_XML;
 	} else if (wim->hdr.integrity_table_reshdr.offset_in_wim != 0) {
-		/* Old WIM has an integrity table; begin writing new streams
-		 * after it. */
+		/* Old WIM has an integrity table; begin writing new blobs after
+		 * it. */
 		old_wim_end = wim->hdr.integrity_table_reshdr.offset_in_wim +
 			      wim->hdr.integrity_table_reshdr.size_in_wim;
 	} else {
-		/* No existing integrity table; begin writing new streams after
+		/* No existing integrity table; begin writing new blobs after
 		 * the old XML data. */
 		old_wim_end = old_xml_end;
 	}
@@ -3317,7 +3290,7 @@ overwrite_wim_inplace(WIMStruct *wim, int write_flags, unsigned num_threads)
 	return 0;
 
 out_truncate:
-	if (!(write_flags & WIMLIB_WRITE_FLAG_NO_LOOKUP_TABLE)) {
+	if (!(write_flags & WIMLIB_WRITE_FLAG_NO_BLOB_TABLE)) {
 		WARNING("Truncating `%"TS"' to its original size (%"PRIu64" bytes)",
 			wim->filename, old_wim_end);
 		/* Return value of ftruncate() is ignored because this is
