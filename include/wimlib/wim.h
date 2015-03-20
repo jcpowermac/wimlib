@@ -58,9 +58,9 @@ struct WIMStruct {
 	struct wim_info *wim_info;
 
 	/* The blob table for this WIMStruct.  If this WIMStruct has a backing
-	 * file, then this table will index the streams contained in that file.
-	 * In addition, this table may index streams that were added by updates
-	 * or referenced from other WIMStructs.  */
+	 * file, then this table will index the blobs contained in that file.
+	 * In addition, this table may index blobs that were added by updates or
+	 * referenced from other WIMStructs.  */
 	struct blob_table *blob_table;
 
 	/*

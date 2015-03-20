@@ -16,7 +16,7 @@
 /* Default WIM version number.  Streams are always compressed independently.  */
 #define WIM_VERSION_DEFAULT 0x10d00
 
-/* Version number used for WIMs that allow multiple streams combined into one
+/* Version number used for WIMs that allow multiple blobs combined into one
  * resource ("solid resources", marked by WIM_RESHDR_FLAG_SOLID) and also a new
  * compression format (LZMS).  This version is new as of Windows 8 WIMGAPI.
  * Although it is used by Windows 8 web downloader, it is not yet documented by
@@ -158,7 +158,7 @@ struct wim_header {
  * WIM files it writes.  */
 #define WIM_HDR_FLAG_RESOURCE_ONLY      0x00000010
 
-/* All streams included in the WIM's blob table are metadata (have
+/* All blobs included in the WIM's blob table are metadata (have
  * WIM_RESHDR_FLAG_METADATA set).  wimlib ignores this flag and clears it on new
  * WIM files it writes.  */
 #define WIM_HDR_FLAG_METADATA_ONLY      0x00000020

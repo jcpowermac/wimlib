@@ -1096,7 +1096,7 @@ wimboot_set_pointer(HANDLE h,
 		in.wim_info.version = WIM_PROVIDER_CURRENT_VERSION;
 		in.wim_info.flags = 0;
 		in.wim_info.data_source_id = data_source_id;
-		copy_hash(in.wim_info.resource_hash, blob->hash);
+		copy_hash(in.wim_info.unnamed_data_stream_hash, blob->hash);
 
 		/* blob_table_hash is not necessary  */
 
@@ -1148,11 +1148,11 @@ wimboot_set_pointer(HANDLE h,
 		in.wim_info.version = 2;
 		in.wim_info.flags = 0;
 		in.wim_info.data_source_id = data_source_id;
-		copy_hash(in.wim_info.resource_hash, blob->hash);
+		copy_hash(in.wim_info.unnamed_data_stream_hash, blob->hash);
 		copy_hash(in.wim_info.blob_table_hash, blob_table_hash);
-		in.wim_info.stream_uncompressed_size = blob->size;
-		in.wim_info.stream_compressed_size = blob->rspec->size_in_wim;
-		in.wim_info.stream_offset_in_wim = blob->rspec->offset_in_wim;
+		in.wim_info.unamed_data_stream_uncompressed_size = blob->size;
+		in.wim_info.unamed_data_stream_compressed_size = blob->rspec->size_in_wim;
+		in.wim_info.unamed_data_stream_offset_in_wim = blob->rspec->offset_in_wim;
 
 		if (!DeviceIoControl(h, FSCTL_SET_REPARSE_POINT,
 				     &in, sizeof(in), NULL, 0, &bytes_returned, NULL))
