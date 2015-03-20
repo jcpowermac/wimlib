@@ -26,18 +26,32 @@ enum {
 static const utf16lechar NO_NAME[] = { 0 };
 
 /*
- * 'struct wim_inode_attribute' represents an NTFS-style attribute, which is a blob of
- * data associated with an inode.  Each attribute has a type and optionally a
- * name.
+ * 'struct wim_inode_attribute' represents an NTFS-style attribute, which is a
+ * blob of data associated with an inode.  Each attribute has a type and
+ * optionally a name.
  */
 struct wim_inode_attribute {
+	/* The name of the attribute, or NO_NAME if the attribute is unnamed.
+	 */
 	utf16lechar *attr_name;
+
+	/* If attr_resolved = 0, the SHA-1 message digest of the uncompressed
+	 * data of this attribute, or all zeroes if this attribute is empty;
+	 * If attr_resolved = 1, a pointer directly to the blob descriptor for
+	 * this blob, or NULL if this attribute is empty.  */
 	union {
 		u8 attr_hash[SHA1_HASH_SIZE];
 		struct blob_descriptor *attr_blob;
 	};
+	/* attr_resolved determines whether attr_hash or attr_blob is valid as
+	 * described above.  */
 	u32 attr_resolved : 1;
+
+	/* TODO: a unique identifier for this attribute within the context of
+	 * its inode   */
 	u32 attr_id : 27;
+
+	/* The type of this attribute as one of the ATTR_* values  */
 	u32 attr_type : 4;
 };
 

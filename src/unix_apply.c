@@ -590,7 +590,7 @@ static int
 unix_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
-	const struct blob_target *targets = blob_targets(blob);
+	const struct blob_extraction_target *targets = blob_extraction_targets(blob);
 	int ret;
 
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
@@ -632,7 +632,7 @@ unix_end_extract_blob(struct blob_descriptor *blob, int status, void *_ctx)
 	struct unix_apply_ctx *ctx = _ctx;
 	int ret;
 	unsigned j;
-	const struct blob_target *targets = blob_targets(blob);
+	const struct blob_extraction_target *targets = blob_extraction_targets(blob);
 
 	ctx->reparse_ptr = NULL;
 

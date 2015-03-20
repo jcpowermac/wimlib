@@ -57,7 +57,7 @@ enum blob_location {
  * belongs, to which a blob needs to be extracted as part of an extraction
  * operation.  Since blobs are single-instanced, a blob may have multiple
  * targets.  */
-struct blob_target {
+struct blob_extraction_target {
 	struct wim_inode *inode;
 	struct wim_inode_attribute *attr;
 };
@@ -130,8 +130,8 @@ struct blob_descriptor {
 	/* When a WIM file is written, this is set to the number of references
 	 * (by dentries) to this blob in the output WIM file.
 	 *
-	 * During extraction, this is the number of slots in blob_targets (or
-	 * inline_blob_targets) that have been filled.
+	 * During extraction, this is the number of slots in blob_extraction_targets (or
+	 * inline_blob_extraction_targets) that have been filled.
 	 *
 	 * During image export, this is set to the number of references of this
 	 * blob that originated from the source WIM.
@@ -217,10 +217,10 @@ struct blob_descriptor {
 		 * references to the attributes being extracted that use this
 		 * blob.  out_refcnt tracks the number of slots filled.  */
 		union {
-			struct blob_target inline_blob_targets[3];
+			struct blob_extraction_target inline_blob_extraction_targets[3];
 			struct {
-				struct blob_target *blob_targets;
-				u32 alloc_blob_targets;
+				struct blob_extraction_target *blob_extraction_targets;
+				u32 alloc_blob_extraction_targets;
 			};
 		};
 	};
@@ -352,13 +352,13 @@ blob_is_in_file(const struct blob_descriptor *blob)
 	   ;
 }
 
-static inline const struct blob_target *
-blob_targets(struct blob_descriptor *blob)
+static inline const struct blob_extraction_target *
+blob_extraction_targets(struct blob_descriptor *blob)
 {
-	if (blob->out_refcnt <= ARRAY_LEN(blob->inline_blob_targets))
-		return blob->inline_blob_targets;
+	if (blob->out_refcnt <= ARRAY_LEN(blob->inline_blob_extraction_targets))
+		return blob->inline_blob_extraction_targets;
 	else
-		return blob->blob_targets;
+		return blob->blob_extraction_targets;
 }
 
 static inline void

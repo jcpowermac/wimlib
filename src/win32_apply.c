@@ -2023,7 +2023,7 @@ static int
 begin_extract_blob(struct blob_descriptor *stream, void *_ctx)
 {
 	struct win32_apply_ctx *ctx = _ctx;
-	const struct blob_target *targets = blob_targets(stream);
+	const struct blob_extraction_target *targets = blob_extraction_targets(stream);
 	int ret;
 
 	ctx->num_open_handles = 0;

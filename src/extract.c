@@ -386,7 +386,8 @@ extract_chunk_wrapper(const void *chunk, size_t size, void *_ctx)
 		if (ctx->cur_blob_offset == ctx->cur_blob->size)
 			progress->extract.completed_streams += ctx->cur_blob->out_refcnt;
 	} else {
-		const struct blob_target *targets = blob_targets(ctx->cur_blob);
+		const struct blob_extraction_target *targets =
+			blob_extraction_targets(ctx->cur_blob);
 		for (u32 i = 0; i < ctx->cur_blob->out_refcnt; i++) {
 			const struct wim_inode *inode = targets[i].inode;
 			const struct wim_dentry *dentry;
@@ -457,9 +458,10 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 	int ret;
 	const u32 orig_refcnt = orig_blob->out_refcnt;
 
-	BUILD_BUG_ON(MAX_OPEN_FILES < ARRAY_LEN(orig_blob->inline_blob_targets));
+	BUILD_BUG_ON(MAX_OPEN_FILES <
+		     ARRAY_LEN(orig_blob->inline_blob_extraction_targets));
 
-	struct blob_target *targets = orig_blob->blob_targets;
+	struct blob_extraction_target *targets = orig_blob->blob_extraction_targets;
 
 	/* Copy the blob's data from the temporary file to each of its
 	 * destinations.
@@ -483,7 +485,7 @@ extract_from_tmpfile(const tchar *tmpfile_name, struct apply_ctx *ctx)
 		 * create the external backing reference.  */
 
 		orig_blob->out_refcnt = 1;
-		orig_blob->inline_blob_targets[0] = targets[i];
+		orig_blob->inline_blob_extraction_targets[0] = targets[i];
 
 		ret = (*cbs->begin_blob)(orig_blob, cbs->begin_blob_ctx);
 		if (ret)
@@ -755,8 +757,8 @@ destroy_blob_list(struct list_head *blob_list)
 	struct blob_descriptor *blob;
 
 	list_for_each_entry(blob, blob_list, extraction_list)
-		if (blob->out_refcnt > ARRAY_LEN(blob->inline_blob_targets))
-			FREE(blob->blob_targets);
+		if (blob->out_refcnt > ARRAY_LEN(blob->inline_blob_extraction_targets))
+			FREE(blob->blob_extraction_targets);
 }
 
 #ifdef __WIN32__
@@ -1018,15 +1020,15 @@ ref_attribute(struct wim_inode_attribute *attr,
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct blob_descriptor *blob = attr->attr_blob;
-	struct blob_target *blob_targets;
+	struct blob_extraction_target *targets;
 
 	if (!blob)
 		return 0;
 
 	/* Tally the size only for each actual extraction of the attribute (not
-	 * additional hard links).  */
+	 * additional hard links to the inode).  */
 	if (inode->i_visited && ctx->supported_features.hard_links)
-		return 0;
+		 return 0;
 
 	ctx->progress.extract.total_bytes += blob->size;
 	ctx->progress.extract.total_streams++;
@@ -1034,48 +1036,48 @@ ref_attribute(struct wim_inode_attribute *attr,
 	if (inode->i_visited)
 		return 0;
 
-	/* Add blob to the blob_list only one time, even if it's going to be
-	 * extracted to multiple attributes (usually for different inodes, but
-	 * not necessarily).  */
+	/* Add each blob to 'ctx->blob_list' only one time, regardless of how
+	 * many extraction targets it will have.  */
 	if (blob->out_refcnt == 0) {
 		list_add_tail(&blob->extraction_list, &ctx->blob_list);
 		ctx->num_blobs_remaining++;
 	}
 
-	/* If inode not yet been visited, append it to the blob_targets array.  */
-	if (blob->out_refcnt < ARRAY_LEN(blob->inline_blob_targets)) {
-		blob_targets = blob->inline_blob_targets;
+	/* Set this attribute as an extraction target of 'blob'.  */
+
+	if (blob->out_refcnt < ARRAY_LEN(blob->inline_blob_extraction_targets)) {
+		targets = blob->inline_blob_extraction_targets;
 	} else {
-		struct blob_target *prev_blob_targets;
-		size_t alloc_blob_targets;
+		struct blob_extraction_target *prev_targets;
+		size_t alloc_blob_extraction_targets;
 
-		if (blob->out_refcnt == ARRAY_LEN(blob->inline_blob_targets)) {
-			prev_blob_targets = NULL;
-			alloc_blob_targets = ARRAY_LEN(blob->inline_blob_targets);
+		if (blob->out_refcnt == ARRAY_LEN(blob->inline_blob_extraction_targets)) {
+			prev_targets = NULL;
+			alloc_blob_extraction_targets = ARRAY_LEN(blob->inline_blob_extraction_targets);
 		} else {
-			prev_blob_targets = blob->blob_targets;
-			alloc_blob_targets = blob->alloc_blob_targets;
+			prev_targets = blob->blob_extraction_targets;
+			alloc_blob_extraction_targets = blob->alloc_blob_extraction_targets;
 		}
 
-		if (blob->out_refcnt == alloc_blob_targets) {
-			alloc_blob_targets *= 2;
-			blob_targets = REALLOC(prev_blob_targets,
-					       alloc_blob_targets *
-						sizeof(blob_targets[0]));
-			if (!blob_targets)
+		if (blob->out_refcnt == alloc_blob_extraction_targets) {
+			alloc_blob_extraction_targets *= 2;
+			targets = REALLOC(prev_targets,
+					  alloc_blob_extraction_targets *
+					  sizeof(targets[0]));
+			if (!targets)
 				return WIMLIB_ERR_NOMEM;
-			if (!prev_blob_targets) {
-				memcpy(blob_targets,
-				       blob->inline_blob_targets,
-				       sizeof(blob->inline_blob_targets));
+			if (!prev_targets) {
+				memcpy(targets,
+				       blob->inline_blob_extraction_targets,
+				       sizeof(blob->inline_blob_extraction_targets));
 			}
-			blob->blob_targets = blob_targets;
-			blob->alloc_blob_targets = alloc_blob_targets;
+			blob->blob_extraction_targets = targets;
+			blob->alloc_blob_extraction_targets = alloc_blob_extraction_targets;
 		}
-		blob_targets = blob->blob_targets;
+		targets = blob->blob_extraction_targets;
 	}
-	blob_targets[blob->out_refcnt].inode = inode;
-	blob_targets[blob->out_refcnt].attr = attr;
+	targets[blob->out_refcnt].inode = inode;
+	targets[blob->out_refcnt].attr = attr;
 	blob->out_refcnt++;
 	return 0;
 }

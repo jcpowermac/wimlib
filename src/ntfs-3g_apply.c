@@ -791,7 +791,7 @@ static int
 ntfs_3g_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 {
 	struct ntfs_3g_apply_ctx *ctx = _ctx;
-	const struct blob_target *targets = blob_targets(blob);
+	const struct blob_extraction_target *targets = blob_extraction_targets(blob);
 	int ret;
 	ntfs_inode *ni;
 
