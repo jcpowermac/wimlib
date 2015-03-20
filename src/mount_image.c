@@ -703,7 +703,7 @@ extract_blob_to_staging_dir(struct wim_inode *inode, struct wim_inode_attribute 
 		 * are from the  we're trying to extract, so
 		 * the blob descriptor can be re-used.  */
 		blob_table_unlink(ctx->wim->blob_table, old_blob);
-		blob_put_resource(old_blob);
+		blob_release_location(old_blob);
 		new_blob = old_blob;
 	} else {
 		/* We need to split the old blob descriptor because it also has

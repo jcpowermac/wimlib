@@ -179,7 +179,7 @@ out_free:
 }
 
 void
-blob_put_resource(struct blob_descriptor *blob)
+blob_release_location(struct blob_descriptor *blob)
 {
 	switch (blob->blob_location) {
 	case BLOB_IN_WIM:
@@ -220,7 +220,7 @@ void
 free_blob_descriptor(struct blob_descriptor *blob)
 {
 	if (blob) {
-		blob_put_resource(blob);
+		blob_release_location(blob);
 		FREE(blob);
 	}
 }

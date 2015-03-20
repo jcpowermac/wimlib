@@ -377,7 +377,7 @@ blob_unbind_wim_resource_spec(struct blob_descriptor *blob)
 }
 
 extern void
-blob_put_resource(struct blob_descriptor *blob);
+blob_release_location(struct blob_descriptor *blob);
 
 extern struct blob_descriptor *
 new_blob_from_data_buffer(const void *buffer, size_t size,
