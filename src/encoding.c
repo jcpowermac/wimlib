@@ -558,14 +558,28 @@ cmp_utf16le_strings(const utf16lechar *s1, size_t n1,
 	return (n1 < n2) ? -1 : 1;
 }
 
+/* Like cmp_utf16le_strings(), but assumes the strings are null terminated.  */
 int
-cmp_utf16le_strings_z(const utf16lechar *s1, const utf16lechar *s2)
+cmp_utf16le_strings_z(const utf16lechar *s1, const utf16lechar *s2,
+		      bool ignore_case)
 {
-	while (*s1 && *s1 == *s2)
-		s1++, s2++;
-	if (*s1 == *s2)
-		return 0;
-	return (le16_to_cpu(*s1) < le16_to_cpu(*s2)) ? -1 : 1;
+	if (ignore_case) {
+		for (;;) {
+			u16 c1 = upcase[le16_to_cpu(*s1)];
+			u16 c2 = upcase[le16_to_cpu(*s2)];
+			if (c1 != c2)
+				return (c1 < c2) ? -1 : 1;
+			if (c1 == 0)
+				return 0;
+			s1++, s2++;
+		}
+	} else {
+		while (*s1 && *s1 == *s2)
+			s1++, s2++;
+		if (*s1 == *s2)
+			return 0;
+		return (le16_to_cpu(*s1) < le16_to_cpu(*s2)) ? -1 : 1;
+	}
 }
 
 /* Duplicate a UTF16-LE string.  The input string might not be null terminated

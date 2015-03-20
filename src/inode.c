@@ -72,7 +72,8 @@ static void
 free_inode(struct wim_inode *inode)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		FREE(inode->i_attrs[i].attr_name);
+		if (inode->i_attrs[i].attr_name != NO_NAME)
+			FREE(inode->i_attrs[i].attr_name);
 	if (inode->i_attrs != inode->i_embedded_attrs)
 		FREE(inode->i_attrs);
 	if (unlikely(inode->i_extra))
@@ -149,7 +150,8 @@ inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
 		if (inode->i_attrs[i].attr_type == attr_type &&
-		    !cmp_utf16le_strings_z(inode->i_attrs[i].attr_name, attr_name))
+		    !cmp_utf16le_strings_z(inode->i_attrs[i].attr_name, attr_name,
+					   default_ignore_case))
 			return &inode->i_attrs[i];
 	return NULL;
 }
@@ -216,9 +218,13 @@ inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
 	memset(new_attr, 0, sizeof(*new_attr));
 
 	new_attr->attr_type = attr_type;
-	new_attr->attr_name = utf16le_dup(attr_name);
-	if (!new_attr->attr_name)
-		return NULL;
+	if (attr_name == NO_NAME) {
+		new_attr->attr_name = NO_NAME;
+	} else {
+		new_attr->attr_name = utf16le_dup(attr_name);
+		if (!new_attr->attr_name)
+			return NULL;
+	}
 	new_attr->attr_id = inode->i_next_attr_id++;
 
 	inode->i_attrs = attrs;

@@ -24,9 +24,9 @@
 #endif
 
 #include "wimlib.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/error.h"
 #include "wimlib/inode.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/xml.h"
 
@@ -275,6 +275,6 @@ out_rollback:
 					--dest_wim->hdr.image_count], NULL);
 	}
 	for_blob_in_table(dest_wim->blob_table, blob_rollback_export,
-		 dest_wim->blob_table);
+			  dest_wim->blob_table);
 	return ret;
 }

@@ -46,11 +46,11 @@
 
 #include "wimlib/apply.h"
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/pathlist.h"
 #include "wimlib/paths.h"

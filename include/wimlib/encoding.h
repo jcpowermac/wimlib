@@ -75,7 +75,8 @@ cmp_utf16le_strings(const utf16lechar *s1, size_t n1,
 		    bool ignore_case);
 
 extern int
-cmp_utf16le_strings_z(const utf16lechar *s1, const utf16lechar *s2);
+cmp_utf16le_strings_z(const utf16lechar *s1, const utf16lechar *s2,
+		      bool ignore_case);
 
 /* Convert a string in the platform-dependent encoding to UTF-16LE, but if both
  * encodings are UTF-16LE, simply re-use the string.  Release with

@@ -42,7 +42,7 @@ add_empty_image_metadata(WIMStruct *wim)
 	struct wim_security_data *sd;
 	struct wim_image_metadata *imd;
 
-	/* Create a blob descriptor for this metadata resource.  */
+	/* Create a blob descriptor for the new metadata resource.  */
 	ret = WIMLIB_ERR_NOMEM;
 	metadata_blob = new_blob_descriptor();
 	if (!metadata_blob)
