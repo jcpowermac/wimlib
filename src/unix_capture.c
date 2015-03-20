@@ -104,7 +104,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		       struct list_head *unhashed_blobs)
 {
 	struct blob_descriptor *blob;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 
 	inode->i_file_flags = FILE_ATTRIBUTE_NORMAL;
 

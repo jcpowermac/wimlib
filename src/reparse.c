@@ -175,7 +175,7 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	wimlib_assert(inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT);
 
 	if (!blob_override) {
-		struct wim_attribute *attr;
+		struct wim_inode_attribute *attr;
 
 		attr = inode_get_attribute_utf16le(inode, ATTR_REPARSE_POINT,
 						   NO_NAME);

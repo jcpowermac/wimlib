@@ -26,11 +26,11 @@ enum {
 static const utf16lechar NO_NAME[] = { 0 };
 
 /*
- * 'struct wim_attribute' represents an NTFS-style attribute, which is a blob of
+ * 'struct wim_inode_attribute' represents an NTFS-style attribute, which is a blob of
  * data associated with an inode.  Each attribute has a type and optionally a
  * name.
  */
-struct wim_attribute {
+struct wim_inode_attribute {
 	utf16lechar *attr_name;
 	union {
 		u8 attr_hash[SHA1_HASH_SIZE];
@@ -56,9 +56,9 @@ struct wim_inode {
 	 * i_num_attrs == 1, then i_attrs points to i_embedded_attr.  Otherwise,
 	 * i_attrs points to an allocated array.
 	 */
-	struct wim_attribute *i_attrs;
+	struct wim_inode_attribute *i_attrs;
 #define INODE_NUM_EMBEDDED_ATTRS 1
-	struct wim_attribute i_embedded_attrs[INODE_NUM_EMBEDDED_ATTRS];
+	struct wim_inode_attribute i_embedded_attrs[INODE_NUM_EMBEDDED_ATTRS];
 	u32 i_num_attrs;
 
 	/* Windows file attribute flags (FILE_ATTRIBUTE_*).  Not to be confused
@@ -323,30 +323,30 @@ inode_has_children(const struct wim_inode *inode)
 	return inode->i_children != NULL;
 }
 
-extern struct wim_attribute *
+extern struct wim_inode_attribute *
 inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
 			    const utf16lechar *attr_name);
 
-extern struct wim_attribute *
+extern struct wim_inode_attribute *
 inode_get_attribute(const struct wim_inode *inode, int attr_type,
 		    const tchar *attr_name);
 
-extern struct wim_attribute *
+extern struct wim_inode_attribute *
 inode_get_unnamed_data_attribute(const struct wim_inode *inode);
 
-extern struct wim_attribute *
+extern struct wim_inode_attribute *
 inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
 			    const utf16lechar *attr_name);
 
-extern struct wim_attribute *
+extern struct wim_inode_attribute *
 inode_add_attribute(struct wim_inode *inode, int attr_type,
 		    const tchar *attr_name);
 
 extern void
-inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
+inode_remove_attribute(struct wim_inode *inode, struct wim_inode_attribute *attr,
 		       struct blob_table *blob_table);
 
-extern struct wim_attribute *
+extern struct wim_inode_attribute *
 inode_add_attribute_with_data(struct wim_inode *inode, int attr_type,
 			      const tchar *attr_name,
 			      const void *data, size_t size,
@@ -366,7 +366,7 @@ extern int
 blob_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
 extern struct blob_descriptor *
-attribute_blob(const struct wim_attribute *attr,
+attribute_blob(const struct wim_inode_attribute *attr,
 	       const struct blob_table *table);
 
 extern struct blob_descriptor *
@@ -374,7 +374,7 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 				       const struct blob_table *table);
 
 extern const u8 *
-attribute_hash(const struct wim_attribute *attr);
+attribute_hash(const struct wim_inode_attribute *attr);
 
 extern const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode);

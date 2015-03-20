@@ -143,7 +143,7 @@ inode_dec_num_opened_fds(struct wim_inode *inode)
 }
 #endif
 
-struct wim_attribute *
+struct wim_inode_attribute *
 inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
 			    const utf16lechar *attr_name)
 {
@@ -154,7 +154,7 @@ inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
 	return NULL;
 }
 
-struct wim_attribute *
+struct wim_inode_attribute *
 inode_get_unnamed_data_attribute(const struct wim_inode *inode)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
@@ -164,12 +164,12 @@ inode_get_unnamed_data_attribute(const struct wim_inode *inode)
 	return NULL;
 }
 
-struct wim_attribute *
+struct wim_inode_attribute *
 inode_get_attribute(const struct wim_inode *inode, int attr_type,
 		    const tchar *attr_name)
 {
 	const utf16lechar *ustr;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 
 	if (tstr_get_utf16le(attr_name, &ustr))
 		return NULL;
@@ -181,12 +181,12 @@ inode_get_attribute(const struct wim_inode *inode, int attr_type,
 	return attr;
 }
 
-struct wim_attribute *
+struct wim_inode_attribute *
 inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
 			    const utf16lechar *attr_name)
 {
-	struct wim_attribute *attrs;
-	struct wim_attribute *new_attr;
+	struct wim_inode_attribute *attrs;
+	struct wim_inode_attribute *new_attr;
 
 	if (inode_get_attribute_utf16le(inode, attr_type, attr_name)) {
 		errno = EEXIST;
@@ -227,12 +227,12 @@ inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
 	return new_attr;
 }
 
-struct wim_attribute *
+struct wim_inode_attribute *
 inode_add_attribute(struct wim_inode *inode, int attr_type,
 		    const tchar *attr_name)
 {
 	const utf16lechar *ustr;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 
 	if (tstr_get_utf16le(attr_name, &ustr))
 		return NULL;
@@ -245,7 +245,7 @@ inode_add_attribute(struct wim_inode *inode, int attr_type,
 }
 
 void
-inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
+inode_remove_attribute(struct wim_inode *inode, struct wim_inode_attribute *attr,
 		       struct blob_table *blob_table)
 {
 	struct blob_descriptor *blob;
@@ -266,13 +266,13 @@ inode_remove_attribute(struct wim_inode *inode, struct wim_attribute *attr,
 	inode->i_num_attrs--;
 }
 
-struct wim_attribute *
+struct wim_inode_attribute *
 inode_add_attribute_with_data(struct wim_inode *inode,
 			      int attr_type, const tchar *attr_name,
 			      const void *data, size_t size,
 			      struct blob_table *blob_table)
 {
-	struct wim_attribute *new_attr;
+	struct wim_inode_attribute *new_attr;
 
 	wimlib_assert(inode->i_resolved);
 
@@ -396,7 +396,7 @@ blob_not_found_error(const struct wim_inode *inode, const u8 *hash)
 }
 
 struct blob_descriptor *
-attribute_blob(const struct wim_attribute *attr, const struct blob_table *table)
+attribute_blob(const struct wim_inode_attribute *attr, const struct blob_table *table)
 {
 	if (attr->attr_resolved)
 		return attr->attr_blob;
@@ -407,7 +407,7 @@ attribute_blob(const struct wim_attribute *attr, const struct blob_table *table)
 /* Return the SHA-1 message digest of the data of the specified attribute, or a
  * void SHA-1 of all zeroes if the specified attribute is empty.   */
 const u8 *
-attribute_hash(const struct wim_attribute *attr)
+attribute_hash(const struct wim_inode_attribute *attr)
 {
 	if (attr->attr_resolved)
 		return attr->attr_blob ? attr->attr_blob->hash : zero_hash;
@@ -423,7 +423,7 @@ struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 				       const struct blob_table *table)
 {
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 
 	attr = inode_get_unnamed_data_attribute(inode);
 	if (!attr)
@@ -440,7 +440,7 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 {
-	const struct wim_attribute *attr;
+	const struct wim_inode_attribute *attr;
 	
 	attr = inode_get_unnamed_data_attribute(inode);
 	if (!attr)

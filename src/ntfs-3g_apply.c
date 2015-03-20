@@ -326,7 +326,7 @@ ntfs_3g_create_any_empty_ads(ntfs_inode *ni, const struct wim_inode *inode,
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 
-		const struct wim_attribute *attr = &inode->i_attrs[i];
+		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
 
 		if (attr->attr_type != ATTR_DATA || !*attr->attr_name ||
 		    attr->attr_blob)
@@ -684,7 +684,7 @@ static int
 ntfs_3g_begin_extract_blob_to_attr(struct blob_descriptor *blob,
 				   ntfs_inode *ni,
 				   struct wim_inode *inode,
-				   const struct wim_attribute *attr,
+				   const struct wim_inode_attribute *attr,
 				   struct ntfs_3g_apply_ctx *ctx)
 {
 	struct wim_dentry *one_dentry = inode_first_extraction_dentry(inode);

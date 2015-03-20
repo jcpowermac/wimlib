@@ -195,7 +195,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 	{
 		u64 data_size = ntfs_get_attribute_value_length(actx->attr);
 		u64 name_length = actx->attr->name_length;
-		struct wim_attribute *attr;
+		struct wim_inode_attribute *attr;
 
 		if (data_size == 0) {
 			/* Empty attribute.  No blob is needed. */

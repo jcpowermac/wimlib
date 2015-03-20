@@ -40,7 +40,7 @@
 
 static int
 attr_to_wimlib_stream_entry(const struct wim_inode *inode,
-			    const struct wim_attribute *attr,
+			    const struct wim_inode_attribute *attr,
 			    struct wimlib_stream_entry *stream,
 			    const struct blob_table *blob_table,
 			    int flags)
@@ -83,7 +83,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	int ret;
 	size_t dummy;
 	const struct wim_inode *inode = dentry->d_inode;
-	const struct wim_attribute *attr;
+	const struct wim_inode_attribute *attr;
 	struct wimlib_unix_data unix_data;
 
 	ret = utf16le_get_tstr(dentry->file_name, dentry->file_name_nbytes,

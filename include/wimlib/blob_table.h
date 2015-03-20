@@ -59,7 +59,7 @@ enum blob_location {
  * targets.  */
 struct blob_target {
 	struct wim_inode *inode;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 };
 
 /*

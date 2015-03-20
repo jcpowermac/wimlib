@@ -230,7 +230,7 @@ fuse_mask_mode(mode_t mode, const struct fuse_context *fuse_ctx)
  */
 static int
 alloc_wimfs_fd(struct wim_inode *inode,
-	       struct wim_attribute *attr,
+	       struct wim_inode_attribute *attr,
 	       struct wimfs_fd **fd_ret)
 {
 	static const u16 min_fds_per_alloc = 8;
@@ -359,12 +359,12 @@ wim_pathname_to_attribute(const struct wimfs_context *ctx,
 			  const char *path,
 			  int lookup_flags,
 			  struct wim_dentry **dentry_ret,
-			  struct wim_attribute **attr_ret)
+			  struct wim_inode_attribute **attr_ret)
 {
 	WIMStruct *wim = ctx->wim;
 	struct wim_dentry *dentry;
 	struct wim_inode *inode;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 	const char *stream_name = NULL;
 	char *p = NULL;
 
@@ -645,7 +645,7 @@ retry:
  * Returns 0 or a -errno code.
  */
 static int
-extract_blob_to_staging_dir(struct wim_inode *inode, struct wim_attribute *attr,
+extract_blob_to_staging_dir(struct wim_inode *inode, struct wim_inode_attribute *attr,
 			    off_t size, const struct wimfs_context *ctx)
 {
 	struct blob_descriptor *old_blob;
@@ -1258,7 +1258,7 @@ wimfs_getattr(const char *path, struct stat *stbuf)
 {
 	const struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_dentry *dentry;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 	int ret;
 
 	ret = wim_pathname_to_attribute(ctx, path, LOOKUP_FLAG_DIRECTORY_OK,
@@ -1285,7 +1285,7 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 {
 	const struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_inode *inode;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 	struct blob_descriptor *blob;
 
 	if (!strncmp(name, "wimfs.", 6)) {
@@ -1421,7 +1421,7 @@ wimfs_listxattr(const char *path, char *list, size_t size)
 		return -errno;
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		const struct wim_attribute *attr;
+		const struct wim_inode_attribute *attr;
 		char *stream_name_mbs;
 		size_t stream_name_mbs_nbytes;
 
@@ -1482,7 +1482,7 @@ wimfs_mknod(const char *path, mode_t mode, dev_t rdev)
 	     && (stream_name = path_stream_name(path)))
 	{
 		struct wim_inode *inode;
-		struct wim_attribute *new_attr;
+		struct wim_inode_attribute *new_attr;
 		char *p;
 
 		/* Create a named data stream.  */
@@ -1530,7 +1530,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 	struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_dentry *dentry;
 	struct wim_inode *inode;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 	struct blob_descriptor *blob;
 	struct wimfs_fd *fd;
 	int ret;
@@ -1584,7 +1584,7 @@ wimfs_opendir(const char *path, struct fuse_file_info *fi)
 {
 	WIMStruct *wim = wimfs_get_WIMStruct();
 	struct wim_inode *inode;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 	struct wimfs_fd *fd;
 	int ret;
 
@@ -1721,7 +1721,7 @@ wimfs_removexattr(const char *path, const char *name)
 {
 	struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_inode *inode;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 
 	if (!(ctx->mount_flags & WIMLIB_MOUNT_FLAG_STREAM_INTERFACE_XATTR))
 		return -ENOTSUP;
@@ -1781,7 +1781,7 @@ wimfs_setxattr(const char *path, const char *name,
 {
 	struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_inode *inode;
-	struct wim_attribute *existing_attr;
+	struct wim_inode_attribute *existing_attr;
 
 	if (!strncmp(name, "wimfs.", 6)) {
 		/* Handle some magical extended attributes.  These really should
@@ -1869,7 +1869,7 @@ wimfs_truncate(const char *path, off_t size)
 {
 	const struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_dentry *dentry;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 	struct blob_descriptor *blob;
 	int ret;
 	int fd;
@@ -1905,7 +1905,7 @@ wimfs_unlink(const char *path)
 {
 	const struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_dentry *dentry;
-	struct wim_attribute *attr;
+	struct wim_inode_attribute *attr;
 	int ret;
 
 	ret = wim_pathname_to_attribute(ctx, path, 0, &dentry, &attr);

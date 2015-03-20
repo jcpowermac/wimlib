@@ -222,7 +222,7 @@ struct wim_dentry_on_disk {
 	 * are not counted in the 'length' field of the dentry.  */
 
 /* TODO  */
-struct wim_attribute_on_disk {
+struct wim_inode_attribute_on_disk {
 
 	/* Length of this structure, in bytes.  This includes all fixed-length
 	 * fields, plus the name and null terminator if present, and any needed
@@ -350,9 +350,9 @@ dentry_min_len_with_names(u16 file_name_nbytes, u16 short_name_nbytes)
  * the next attribute or dentry on an 8-byte boundary in the uncompressed
  * metadata resource buffer.  */
 static size_t
-attribute_out_total_length(const struct wim_attribute *attr)
+attribute_out_total_length(const struct wim_inode_attribute *attr)
 {
-	size_t len = sizeof(struct wim_attribute_on_disk);
+	size_t len = sizeof(struct wim_inode_attribute_on_disk);
 	if (*attr->attr_name)
 		len += utf16le_strlen(attr->attr_name) + 2;
 	return (len + 7) & ~7;
@@ -388,7 +388,7 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 	bool need_extra_attr_for_unnamed_data_stream = false;
 	bool have_unnamed_data_stream = false;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		const struct wim_attribute *attr = &inode->i_attrs[i];
+		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
 		switch (attr->attr_type) {
 		case ATTR_REPARSE_POINT:
 			need_extra_attr_for_unnamed_data_stream = true;
@@ -406,7 +406,7 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 		}
 	}
 	if (need_extra_attr_for_unnamed_data_stream && have_unnamed_data_stream) {
-		len += sizeof(struct wim_attribute_on_disk);
+		len += sizeof(struct wim_inode_attribute_on_disk);
 		len = (len + 7) & ~7;
 	}
 
@@ -1263,7 +1263,7 @@ read_extra_attributes(const u8 * restrict p, struct wim_inode * restrict inode,
 {
 	size_t nbytes_remaining = *nbytes_remaining_p;
 	unsigned num_ads;
-	struct wim_attribute *attributes;
+	struct wim_inode_attribute *attributes;
 	int ret;
 
 	/* Allocate an array for our in-memory representation of the alternate
@@ -1277,15 +1277,15 @@ read_extra_attributes(const u8 * restrict p, struct wim_inode * restrict inode,
 	for (unsigned i = 0; i < num_ads; i++) {
 		u64 length;
 		struct wim_ads_entry *cur_entry;
-		const struct wim_attribute_on_disk *disk_entry =
-			(const struct wim_attribute_on_disk*)p;
+		const struct wim_inode_attribute_on_disk *disk_entry =
+			(const struct wim_inode_attribute_on_disk*)p;
 
 		cur_entry = &ads_entries[i];
 		ads_entries[i].stream_id = i + 1;
 
 		/* Do we have at least the size of the fixed-length data we know
 		 * need? */
-		if (nbytes_remaining < sizeof(struct wim_attribute_on_disk))
+		if (nbytes_remaining < sizeof(struct wim_inode_attribute_on_disk))
 			goto out_invalid;
 
 		/* Read the length field */
@@ -1294,7 +1294,7 @@ read_extra_attributes(const u8 * restrict p, struct wim_inode * restrict inode,
 		/* Make sure the length field is neither so small it doesn't
 		 * include all the fixed-length data nor so large it overflows
 		 * the metadata resource buffer. */
-		if (length < sizeof(struct wim_attribute_on_disk) ||
+		if (length < sizeof(struct wim_inode_attribute_on_disk) ||
 		    length > nbytes_remaining)
 			goto out_invalid;
 
@@ -1320,7 +1320,7 @@ read_extra_attributes(const u8 * restrict p, struct wim_inode * restrict inode,
 			/* Add the length of the stream name to get the length
 			 * we actually need to read.  Make sure this isn't more
 			 * than the specified length of the entry. */
-			if (sizeof(struct wim_attribute_on_disk) +
+			if (sizeof(struct wim_inode_attribute_on_disk) +
 			    cur_entry->stream_name_nbytes > length)
 				goto out_invalid;
 
@@ -1750,14 +1750,14 @@ static u8 *
 write_ads_entry(const struct wim_ads_entry *ads_entry,
 		const u8 *hash, u8 * restrict p)
 {
-	struct wim_attribute_on_disk *disk_ads_entry =
-			(struct wim_attribute_on_disk*)p;
+	struct wim_inode_attribute_on_disk *disk_ads_entry =
+			(struct wim_inode_attribute_on_disk*)p;
 	u8 *orig_p = p;
 
 	disk_ads_entry->reserved = cpu_to_le64(ads_entry->reserved);
 	copy_hash(disk_ads_entry->hash, hash);
 	disk_ads_entry->stream_name_nbytes = cpu_to_le16(ads_entry->stream_name_nbytes);
-	p += sizeof(struct wim_attribute_on_disk);
+	p += sizeof(struct wim_inode_attribute_on_disk);
 	if (ads_entry->stream_name_nbytes) {
 		p = mempcpy(p, ads_entry->stream_name,
 			    (u32)ads_entry->stream_name_nbytes + 2);

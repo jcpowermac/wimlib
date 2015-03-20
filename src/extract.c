@@ -1013,7 +1013,7 @@ dentry_list_resolve_attributes(struct list_head *dentry_list,
 }
 
 static int
-ref_attribute(struct wim_attribute *attr,
+ref_attribute(struct wim_inode_attribute *attr,
 	      struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
@@ -1081,7 +1081,7 @@ ref_attribute(struct wim_attribute *attr,
 }
 
 static int
-dentry_ref_data_attribute(struct wim_attribute *attr,
+dentry_ref_data_attribute(struct wim_inode_attribute *attr,
 			  struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	if (*attr->attr_name) {
@@ -1112,7 +1112,7 @@ dentry_ref_attributes(struct wim_dentry *dentry, struct apply_ctx *ctx)
 	int ret;
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		struct wim_attribute *attr = &inode->i_attrs[i];
+		struct wim_inode_attribute *attr = &inode->i_attrs[i];
 		ret = 0;
 		switch (attr->attr_type) {
 		case ATTR_DATA:
