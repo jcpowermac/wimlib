@@ -78,8 +78,8 @@ struct apply_ctx {
 };
 
 /* Maximum number of UNIX file descriptors, NTFS attributes, or Windows file
- * handles that can be opened simultaneously to extract a single-instance
- * stream to multiple destinations.  */
+ * handles that can be opened simultaneously to extract a blob to multiple
+ * destinations.  */
 #define MAX_OPEN_FILES 512
 
 static inline int
@@ -108,14 +108,14 @@ start_file_structure_phase(struct apply_ctx *ctx, uint64_t end_file_count);
 extern int
 start_file_metadata_phase(struct apply_ctx *ctx, uint64_t end_file_count);
 
-/* Report that a file was created, prior to stream extraction.  */
+/* Report that a file was created, prior to blob extraction.  */
 static inline int
 report_file_created(struct apply_ctx *ctx)
 {
 	return maybe_do_file_progress(ctx, WIMLIB_PROGRESS_MSG_EXTRACT_FILE_STRUCTURE);
 }
 
-/* Report that file metadata was applied, after stream extraction.  */
+/* Report that file metadata was applied, after blob extraction.  */
 static inline int
 report_file_metadata_applied(struct apply_ctx *ctx)
 {
@@ -205,9 +205,9 @@ struct apply_operations {
 	 * dentries of that inode being extracted.  This will be a (possibly
 	 * nonproper) subset of the 'd_inode->i_dentry' list.
 	 *
-	 * The streams required to be extracted will already be prepared in
-	 * 'apply_ctx'.  The extraction backend should call
-	 * extract_blob_list() to extract them.
+	 * The blobs required to be extracted will already be prepared in
+	 * 'apply_ctx'.  The extraction backend should call extract_blob_list()
+	 * to extract them.
 	 *
 	 * The will_extract_dentry() utility function, given an arbitrary dentry
 	 * in the WIM image (which may not be in the extraction list), can be
@@ -221,7 +221,7 @@ struct apply_operations {
 	 * Query whether the unnamed data stream of the specified file will be
 	 * extracted as "externally backed".  If so, the extraction backend is
 	 * assumed to handle this separately, and the common extraction code
-	 * will not register a usage of that stream.
+	 * will not register a usage of the unnamed data stream's blob.
 	 *
 	 * This routine is optional.
 	 *

@@ -58,7 +58,6 @@
 #  include "config.h"
 #endif
 
-#if 0
 #include <errno.h>
 
 #include "wimlib/assert.h"
@@ -141,7 +140,7 @@ struct wim_dentry_on_disk {
 	 * Windows PE contain a bug where they only look in the alternate data
 	 * stream entries for the unnamed data stream, not here.
 	 */
-	u8 hash[SHA1_HASH_SIZE];
+	u8 default_hash[SHA1_HASH_SIZE];
 
 	/* The format of the following data is not yet completely known and they
 	 * do not correspond to Microsoft's documentation.
@@ -224,21 +223,20 @@ struct wim_dentry_on_disk {
 
 /* TODO  */
 struct wim_attribute_on_disk {
-	/* Length of the entry, in bytes.  This includes all fixed-length
-	 * fields, plus the name and null terminator if present, and the padding
-	 * up to an 8 byte boundary.  wimlib is a little less strict when
-	 * reading the entries, and only requires that the number of bytes from
-	 * this field is at least as large as the size of the fixed length
-	 * fields and name without null terminator.  */
+
+	/* Length of this structure, in bytes.  This includes all fixed-length
+	 * fields, plus the name and null terminator if present, and any needed
+	 * padding such that the length is a multiple of 8.  */
 	le64 length;
 
 	le64 reserved;
 
-	/* SHA1 message digest of the uncompressed stream; or, alternatively,
-	 * can be all zeroes if the stream has zero length.  */
+	/* SHA-1 message digest of this attribute's data, or all zeroes if this
+	 * attribute's data is of zero length.  */
 	u8 hash[SHA1_HASH_SIZE];
 
-	/* Length of the attribute name, in bytes.  0 if the attribute is unnamed.  */
+	/* Length of this attributes's name, in bytes and excluding the null
+	 * terminator; or 0 if this attributes is unnamed.  */
 	le16 name_nbytes;
 
 	/* Attribute name in UTF-16LE.  It is @name_nbytes bytes long, excluding
@@ -246,25 +244,6 @@ struct wim_attribute_on_disk {
 	 * @name_nbytes != 0; i.e., if this attribute is named.  */
 	utf16lechar name[];
 } _packed_attribute;
-
-#define WIM_ADS_ENTRY_DISK_SIZE 38
-
-
-/* Calculate the minimum unaligned length, in bytes, of an on-disk WIM dentry
- * that has names of the specified lengths.  (Zero length means the
- * corresponding name actually does not exist.)  The returned value excludes
- * tagged metadata items as well as any alternate data stream entries that may
- * need to follow the dentry.  */
-static u64
-dentry_min_len_with_names(u16 file_name_nbytes, u16 short_name_nbytes)
-{
-	u64 length = sizeof(struct wim_dentry_on_disk);
-	if (file_name_nbytes)
-		length += (u32)file_name_nbytes + 2;
-	if (short_name_nbytes)
-		length += (u32)short_name_nbytes + 2;
-	return length;
-}
 
 static void
 do_dentry_set_name(struct wim_dentry *dentry, utf16lechar *file_name,
@@ -348,68 +327,48 @@ dentry_set_name(struct wim_dentry *dentry, const tchar *name)
 	return 0;
 }
 
-/* Return the length, in bytes, required for the specified alternate data stream
- * (ADS) entry on-disk.  This accounts for the fixed-length portion of the ADS
- * entry, the {stream name and its null terminator} if present, and the padding
- * after the entry to align the next ADS entry or dentry on an 8-byte boundary
- * in the uncompressed metadata resource buffer.  */
-static u64
-ads_entry_out_total_length(const struct wim_ads_entry *entry)
+/* Calculate the minimum unaligned length, in bytes, of an on-disk WIM dentry
+ * that has names of the specified lengths.  (Zero length means the
+ * corresponding name actually does not exist.)  The returned value excludes
+ * tagged metadata items as well as any extra attribute entries that may need to
+ * follow the dentry.  */
+static size_t
+dentry_min_len_with_names(u16 file_name_nbytes, u16 short_name_nbytes)
 {
-	u64 len = sizeof(struct wim_attribute_on_disk);
-	if (entry->stream_name_nbytes)
-		len += (u32)entry->stream_name_nbytes + 2;
+	size_t length = sizeof(struct wim_dentry_on_disk);
+	if (file_name_nbytes)
+		length += (u32)file_name_nbytes + 2;
+	if (short_name_nbytes)
+		length += (u32)short_name_nbytes + 2;
+	return length;
+}
+
+
+/* Return the length, in bytes, required for the specified attribute on-disk.
+ * This accounts for the fixed-length portion of the attribute the stream name
+ * and its null terminator if present, and the padding after the entry to align
+ * the next attribute or dentry on an 8-byte boundary in the uncompressed
+ * metadata resource buffer.  */
+static size_t
+attribute_out_total_length(const struct wim_attribute *attr)
+{
+	size_t len = sizeof(struct wim_attribute_on_disk);
+	if (*attr->attr_name)
+		len += utf16le_strlen(attr->attr_name) + 2;
 	return (len + 7) & ~7;
 }
 
 /*
- * Determine whether to include a "dummy" stream when writing a WIM dentry.
- *
- * Some versions of Microsoft's WIM software (the boot driver(s) in WinPE 3.0,
- * for example) contain a bug where they assume the first alternate data stream
- * (ADS) entry of a dentry with a nonzero ADS count specifies the unnamed
- * stream, even if it has a name and the unnamed stream is already specified in
- * the hash field of the dentry itself.
- *
- * wimlib has to work around this behavior by carefully emulating the behavior
- * of (most versions of) ImageX/WIMGAPI, which move the unnamed stream reference
- * into the alternate stream entries whenever there are named data streams, even
- * though there is already a field in the dentry itself for the unnamed stream
- * reference, which then goes to waste.
- */
-static bool
-inode_needs_dummy_stream(const struct wim_inode *inode)
-{
-	/* Normal case  */
-	if (likely(inode->i_num_ads <= 0))
-		return false;
-
-	/* Overflow check  */
-	if (inode->i_num_ads >= 0xFFFF)
-		return false;
-
-	/* Assume the dentry is okay if it already had an unnamed ADS entry when
-	 * it was read in.  */
-	if (!inode->i_canonical_streams)
-		return false;
-
-	/* We can't use use this workaround on encrypted files because WIMGAPI
-	 * reports that the WIM is in an incorrect format.  */
-	if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)
-		return false;
-
-	return true;
-}
-
-/* Calculate the total number of bytes that will be consumed when a dentry is
+ * Calculate the total number of bytes that will be consumed when a dentry is
  * written.  This includes the fixed-length portion of the dentry, the name
- * fields, any tagged metadata items, and any alternate data stream entries.
- * Also includes all alignment bytes.  */
-u64
+ * fields, any tagged metadata items, and any extra attributes.  This also
+ * includes all alignment bytes.
+ */
+size_t
 dentry_out_total_length(const struct wim_dentry *dentry)
 {
 	const struct wim_inode *inode = dentry->d_inode;
-	u64 len;
+	size_t len;
 
 	len = dentry_min_len_with_names(dentry->file_name_nbytes,
 					dentry->short_name_nbytes);
@@ -420,12 +379,35 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 		len = (len + 7) & ~7;
 	}
 
-	if (unlikely(inode->i_num_ads)) {
-		if (inode_needs_dummy_stream(inode))
-			len += ads_entry_out_total_length(&(struct wim_ads_entry){});
-
-		for (u16 i = 0; i < inode->i_num_ads; i++)
-			len += ads_entry_out_total_length(&inode->i_ads_entries[i]);
+	/*
+	 * - One extra attribute for each named data stream
+	 * - One extra attribute for the unnamed data stream, if either there is
+	 *   a reparse point attribute, or if there are any named data streams
+	 *   (for Windows PE bug workaronud)
+	 */
+	bool need_extra_attr_for_unnamed_data_stream = false;
+	bool have_unnamed_data_stream = false;
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		const struct wim_attribute *attr = &inode->i_attrs[i];
+		switch (attr->attr_type) {
+		case ATTR_REPARSE_POINT:
+			need_extra_attr_for_unnamed_data_stream = true;
+			break;
+		case ATTR_DATA:
+			if (*attr->attr_name) {
+				len += attribute_out_total_length(attr);
+				if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
+					need_extra_attr_for_unnamed_data_stream = true;
+			} else {
+				have_unnamed_data_stream = true;
+			}
+		default:
+			break;
+		}
+	}
+	if (need_extra_attr_for_unnamed_data_stream && have_unnamed_data_stream) {
+		len += sizeof(struct wim_attribute_on_disk);
+		len = (len + 7) & ~7;
 	}
 
 	return len;
@@ -1065,9 +1047,9 @@ do_free_dentry(struct wim_dentry *dentry, void *_ignore)
 }
 
 static int
-do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *blob_table)
+do_free_dentry_and_unref_attributes(struct wim_dentry *dentry, void *blob_table)
 {
-	inode_unref_streams(dentry->d_inode, blob_table);
+	inode_unref_attributes(dentry->d_inode, blob_table);
 	free_dentry(dentry);
 	return 0;
 }
@@ -1096,7 +1078,7 @@ free_dentry_tree(struct wim_dentry *root, struct blob_table *blob_table)
 	int (*f)(struct wim_dentry *, void *);
 
 	if (blob_table)
-		f = do_free_dentry_and_unref_streams;
+		f = do_free_dentry_and_unref_attributes;
 	else
 		f = do_free_dentry;
 
@@ -1276,15 +1258,13 @@ read_extra_data(const u8 *p, const u8 *end, struct wim_inode *inode)
  *	WIMLIB_ERR_NOMEM
  */
 static int
-read_ads_entries(const u8 * restrict p, struct wim_inode * restrict inode,
-		 size_t *nbytes_remaining_p)
+read_extra_attributes(const u8 * restrict p, struct wim_inode * restrict inode,
+		      size_t *nbytes_remaining_p)
 {
 	size_t nbytes_remaining = *nbytes_remaining_p;
 	unsigned num_ads;
-	struct wim_ads_entry *ads_entries;
+	struct wim_attribute *attributes;
 	int ret;
-
-	BUILD_BUG_ON(sizeof(struct wim_attribute_on_disk) != WIM_ADS_ENTRY_DISK_SIZE);
 
 	/* Allocate an array for our in-memory representation of the alternate
 	 * data stream entries. */
@@ -1485,7 +1465,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 		inode->i_rp_unknown_1 = le32_to_cpu(disk_dentry->nonreparse.rp_unknown_1);
 		inode->i_ino = le64_to_cpu(disk_dentry->nonreparse.hard_link_group_id);
 	}
-	inode->i_num_ads = le16_to_cpu(disk_dentry->num_alternate_data_streams);
+	inode->i_num_attrs = le16_to_cpu(disk_dentry->num_alternate_data_streams);
 
 	/* Now onto reading the names.  There are two of them: the (long) file
 	 * name, and the short name.  */
@@ -1571,7 +1551,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 		}
 		bytes_remaining = buf_len - offset;
 		orig_bytes_remaining = bytes_remaining;
-		ret = read_ads_entries(&buf[offset], inode, &bytes_remaining);
+		ret = read_extra_attributes(&buf[offset], inode, &bytes_remaining);
 		if (ret)
 			goto err_free_dentry;
 		offset += (orig_bytes_remaining - bytes_remaining);
