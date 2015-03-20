@@ -1137,7 +1137,7 @@ dentry_ref_attributes(struct wim_dentry *dentry, struct apply_ctx *ctx)
  * to be extracted, and for each blob determine the attributes to which that
  * blob will be extracted.
  *
- * This also initializes the extract progress info with byte and stream
+ * This also initializes the extract progress info with byte and blob
  * information.
  *
  * ctx->supported_features must be filled in.
