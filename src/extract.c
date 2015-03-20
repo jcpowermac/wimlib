@@ -169,7 +169,7 @@ dentry_is_supported(struct wim_dentry *dentry,
 /* Read the header from a blob in a pipable WIM.  */
 static int
 read_pwm_blob_header(WIMStruct *pwm, struct blob_descriptor *blob,
-		     struct wim_resource_spec *rspec,
+		     struct wim_resource_descriptor *rdesc,
 		     int flags, struct wim_header_disk *hdr_ret)
 {
 	union {
@@ -208,10 +208,10 @@ read_pwm_blob_header(WIMStruct *pwm, struct blob_descriptor *blob,
 	reshdr.flags = le32_to_cpu(buf.blob_hdr.flags);
 	reshdr.offset_in_wim = pwm->in_fd.offset;
 	reshdr.uncompressed_size = le64_to_cpu(buf.blob_hdr.uncompressed_size);
-	wim_res_hdr_to_spec(&reshdr, pwm, rspec);
-	blob_set_is_located_in_wim_resource(blob, rspec);
-	blob->flags = rspec->flags;
-	blob->size = rspec->uncompressed_size;
+	wim_res_hdr_to_spec(&reshdr, pwm, rdesc);
+	blob_set_is_located_in_wim_resource(blob, rdesc);
+	blob->flags = rdesc->flags;
+	blob->size = rdesc->uncompressed_size;
 	blob->offset_in_res = 0;
 	return 0;
 
@@ -225,7 +225,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 		     const struct read_blob_list_callbacks *cbs)
 {
 	struct blob_descriptor *found_blob = NULL;
-	struct wim_resource_spec *rspec = NULL;
+	struct wim_resource_descriptor *rdesc = NULL;
 	struct blob_table *blob_table;
 	int ret;
 
@@ -234,8 +234,8 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 	if (!found_blob)
 		goto out;
 
-	rspec = MALLOC(sizeof(struct wim_resource_spec));
-	if (!rspec)
+	rdesc = MALLOC(sizeof(struct wim_resource_descriptor));
+	if (!rdesc)
 		goto out;
 
 	blob_table = ctx->wim->blob_table;
@@ -252,7 +252,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 
 		if (found_blob->blob_location != BLOB_NONEXISTENT)
 			blob_unset_is_located_in_wim_resource(found_blob);
-		ret = read_pwm_blob_header(ctx->wim, found_blob, rspec,
+		ret = read_pwm_blob_header(ctx->wim, found_blob, rdesc,
 					   PWM_ALLOW_WIM_HDR, &pwm_hdr);
 		if (ret)
 			goto out;
@@ -267,7 +267,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 			needed_blob->size = found_blob->size;
 
 			blob_unset_is_located_in_wim_resource(found_blob);
-			blob_set_is_located_in_wim_resource(needed_blob, rspec);
+			blob_set_is_located_in_wim_resource(needed_blob, rdesc);
 
 			ret = (*cbs->begin_blob)(needed_blob,
 						 cbs->begin_blob_ctx);
@@ -313,7 +313,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 	ret = 0;
 out:
 	if (found_blob && found_blob->blob_location != BLOB_IN_WIM)
-		FREE(rspec);
+		FREE(rdesc);
 	free_blob_descriptor(found_blob);
 	return ret;
 }
@@ -1934,8 +1934,8 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 	 * WIMs.)  */
 	{
 		struct blob_descriptor xml_blob;
-		struct wim_resource_spec xml_rspec;
-		ret = read_pwm_blob_header(pwm, &xml_blob, &xml_rspec, 0, NULL);
+		struct wim_resource_descriptor xml_rdesc;
+		ret = read_pwm_blob_header(pwm, &xml_blob, &xml_rdesc, 0, NULL);
 		if (ret)
 			goto out_wimlib_free;
 
@@ -1946,7 +1946,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 			goto out_wimlib_free;
 		}
 
-		wim_res_spec_to_hdr(&xml_rspec, &pwm->hdr.xml_data_reshdr);
+		wim_res_spec_to_hdr(&xml_rdesc, &pwm->hdr.xml_data_reshdr);
 
 		ret = read_wim_xml_data(pwm);
 		if (ret)
@@ -1987,25 +1987,25 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 	for (i = 1; i <= pwm->hdr.image_count; i++) {
 		struct blob_descriptor *metadata_blob;
 		struct wim_image_metadata *imd;
-		struct wim_resource_spec *metadata_rspec;
+		struct wim_resource_descriptor *metadata_rdesc;
 
 		metadata_blob = new_blob_descriptor();
 		if (metadata_blob == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_wimlib_free;
 		}
-		metadata_rspec = MALLOC(sizeof(struct wim_resource_spec));
-		if (metadata_rspec == NULL) {
+		metadata_rdesc = MALLOC(sizeof(struct wim_resource_descriptor));
+		if (metadata_rdesc == NULL) {
 			ret = WIMLIB_ERR_NOMEM;
 			free_blob_descriptor(metadata_blob);
 			goto out_wimlib_free;
 		}
 
-		ret = read_pwm_blob_header(pwm, metadata_blob, metadata_rspec, 0, NULL);
+		ret = read_pwm_blob_header(pwm, metadata_blob, metadata_rdesc, 0, NULL);
 		imd = pwm->image_metadata[i - 1];
 		imd->metadata_blob = metadata_blob;
 		if (ret) {
-			FREE(metadata_rspec);
+			FREE(metadata_rdesc);
 			goto out_wimlib_free;
 		}
 

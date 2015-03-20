@@ -14,14 +14,14 @@ struct wim_image_metadata;
  * Specification of a resource in a WIM file.
  *
  * If a `struct blob_descriptor' blob has (blob->blob_location == BLOB_IN_WIM),
- * then blob->rspec points to an instance of this structure.
+ * then blob->rdesc points to an instance of this structure.
  *
  * Normally, there is a one-to-one correspondence between "blobs" (each of which
  * may be the contents of a file, for example) and resources.  However, a
  * resource with the WIM_RESHDR_FLAG_SOLID flag set is a "solid" resource that
  * may contain multiple blobs compressed together.
  */
-struct wim_resource_spec {
+struct wim_resource_descriptor {
 	/* The WIM containing this resource.  @wim->in_fd is expected to be a
 	 * file descriptor to the underlying WIM file, opened for reading.  */
 	WIMStruct *wim;
@@ -116,9 +116,9 @@ struct wim_reshdr {
 /* Returns true if the specified WIM resource is compressed (may be either solid
  * or non-solid)  */
 static inline bool
-resource_is_compressed(const struct wim_resource_spec *rspec)
+resource_is_compressed(const struct wim_resource_descriptor *rdesc)
 {
-	return (rspec->flags & (WIM_RESHDR_FLAG_COMPRESSED |
+	return (rdesc->flags & (WIM_RESHDR_FLAG_COMPRESSED |
 				WIM_RESHDR_FLAG_SOLID));
 }
 
@@ -136,10 +136,10 @@ zero_reshdr(struct wim_reshdr *reshdr)
 
 extern void
 wim_res_hdr_to_spec(const struct wim_reshdr *reshdr, WIMStruct *wim,
-		    struct wim_resource_spec *rspec);
+		    struct wim_resource_descriptor *rdesc);
 
 extern void
-wim_res_spec_to_hdr(const struct wim_resource_spec *rspec,
+wim_res_spec_to_hdr(const struct wim_resource_descriptor *rdesc,
 		    struct wim_reshdr *reshdr);
 
 extern void

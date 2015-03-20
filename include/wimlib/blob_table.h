@@ -13,7 +13,7 @@ enum blob_location {
 	BLOB_NONEXISTENT = 0,
 
 	/* The blob is located in a resource in a WIM file identified by the
-	 * `struct wim_resource_spec' pointed to by @rspec.  @offset_in_res
+	 * `struct wim_resource_descriptor' pointed to by @rdesc.  @offset_in_res
 	 * identifies the offset at which this particular blob begins in the
 	 * uncompressed data of the resource; this is normally 0, but a WIM
 	 * resource can be "solid" and contain multiple blobs.  */
@@ -152,7 +152,7 @@ struct blob_descriptor {
 	 * is valid is determined by the @blob_location field.  */
 	union {
 		struct {
-			struct wim_resource_spec *rspec;
+			struct wim_resource_descriptor *rdesc;
 			u64 offset_in_res;
 		};
 		struct {
@@ -172,9 +172,9 @@ struct blob_descriptor {
 	};
 
 	/* Links together blobs that share the same underlying WIM resource.
-	 * The head is the `blob_list' member of `struct wim_resource_spec'.
+	 * The head is the `blob_list' member of `struct wim_resource_descriptor'.
 	 */
-	struct list_head rspec_node;
+	struct list_head rdesc_node;
 
 	/* Temporary fields  */
 	union {
@@ -338,7 +338,7 @@ static inline bool
 blob_is_in_solid_wim_resource(const struct blob_descriptor * blob)
 {
 	return blob->blob_location == BLOB_IN_WIM &&
-	       blob->size != blob->rspec->uncompressed_size;
+	       blob->size != blob->rdesc->uncompressed_size;
 }
 
 static inline bool
@@ -362,17 +362,17 @@ blob_extraction_targets(struct blob_descriptor *blob)
 }
 
 static inline void
-blob_set_is_located_in_wim_resource(struct blob_descriptor *blob, struct wim_resource_spec *rspec)
+blob_set_is_located_in_wim_resource(struct blob_descriptor *blob, struct wim_resource_descriptor *rdesc)
 {
 	blob->blob_location = BLOB_IN_WIM;
-	blob->rspec = rspec;
-	list_add_tail(&blob->rspec_node, &rspec->blob_list);
+	blob->rdesc = rdesc;
+	list_add_tail(&blob->rdesc_node, &rdesc->blob_list);
 }
 
 static inline void
 blob_unset_is_located_in_wim_resource(struct blob_descriptor *blob)
 {
-	list_del(&blob->rspec_node);
+	list_del(&blob->rdesc_node);
 	blob->blob_location = BLOB_NONEXISTENT;
 }
 

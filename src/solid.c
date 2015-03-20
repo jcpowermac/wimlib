@@ -193,14 +193,14 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 		blob->solid_sort_name_nbytes = 0;
 		switch (blob->blob_location) {
 		case BLOB_IN_WIM:
-			if (blob->size != blob->rspec->uncompressed_size)
+			if (blob->size != blob->rdesc->uncompressed_size)
 				continue;
 			for (int i = 0; i < num_wims; i++)
-				if (blob->rspec->wim == wims[i])
+				if (blob->rdesc->wim == wims[i])
 					goto found_wim;
 			if (num_wims >= ARRAY_LEN(wims))
 				continue;
-			wims[num_wims++] = blob->rspec->wim;
+			wims[num_wims++] = blob->rdesc->wim;
 		found_wim:
 			hlist_add_head(&blob->hash_list_2,
 				       &blob_table.table[load_size_t_unaligned(blob->hash) %

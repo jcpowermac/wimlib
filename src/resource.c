@@ -99,7 +99,7 @@ struct data_range {
  *
  * Read data from a compressed WIM resource.
  *
- * @rspec
+ * @rdesc
  *	Specification of the compressed WIM resource to read from.
  * @ranges
  *	Nonoverlapping, nonempty ranges of the uncompressed resource data to
@@ -125,7 +125,7 @@ struct data_range {
  *	or other error code returned by the @cb function.
  */
 static int
-read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
+read_compressed_wim_resource(const struct wim_resource_descriptor * const rdesc,
 			     const struct data_range * const ranges,
 			     const size_t num_ranges,
 			     const consume_data_callback_t cb,
@@ -143,17 +143,17 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 	struct wimlib_decompressor *decompressor = NULL;
 
 	/* Sanity checks  */
-	wimlib_assert(rspec != NULL);
-	wimlib_assert(resource_is_compressed(rspec));
+	wimlib_assert(rdesc != NULL);
+	wimlib_assert(resource_is_compressed(rdesc));
 	wimlib_assert(cb != NULL);
 	wimlib_assert(num_ranges != 0);
 	for (size_t i = 0; i < num_ranges; i++) {
 		DEBUG("Range %zu/%zu: %"PRIu64"@+%"PRIu64" / %"PRIu64,
 		      i + 1, num_ranges, ranges[i].size, ranges[i].offset,
-		      rspec->uncompressed_size);
+		      rdesc->uncompressed_size);
 		wimlib_assert(ranges[i].size != 0);
 		wimlib_assert(ranges[i].offset + ranges[i].size >= ranges[i].size);
-		wimlib_assert(ranges[i].offset + ranges[i].size <= rspec->uncompressed_size);
+		wimlib_assert(ranges[i].offset + ranges[i].size <= rdesc->uncompressed_size);
 	}
 	for (size_t i = 0; i < num_ranges - 1; i++)
 		wimlib_assert(ranges[i].offset + ranges[i].size <= ranges[i + 1].offset);
@@ -163,24 +163,24 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 	const u64 last_offset = ranges[num_ranges - 1].offset + ranges[num_ranges - 1].size - 1;
 
 	/* Get the file descriptor for the WIM.  */
-	struct filedes * const in_fd = &rspec->wim->in_fd;
+	struct filedes * const in_fd = &rdesc->wim->in_fd;
 
 	/* Determine if we're reading a pipable resource from a pipe or not.  */
-	const bool is_pipe_read = (rspec->is_pipable && !filedes_is_seekable(in_fd));
+	const bool is_pipe_read = (rdesc->is_pipable && !filedes_is_seekable(in_fd));
 
 	/* Determine if the chunk table is in an alternate format.  */
-	const bool alt_chunk_table = (rspec->flags & WIM_RESHDR_FLAG_SOLID)
+	const bool alt_chunk_table = (rdesc->flags & WIM_RESHDR_FLAG_SOLID)
 					&& !is_pipe_read;
 
 	/* Get the maximum size of uncompressed chunks in this resource, which
 	 * we require be a power of 2.  */
-	u64 cur_read_offset = rspec->offset_in_wim;
-	int ctype = rspec->compression_type;
-	u32 chunk_size = rspec->chunk_size;
+	u64 cur_read_offset = rdesc->offset_in_wim;
+	int ctype = rdesc->compression_type;
+	u32 chunk_size = rdesc->chunk_size;
 	if (alt_chunk_table) {
 		/* Alternate chunk table format.  Its header specifies the chunk
 		 * size and compression format.  Note: it could be read here;
-		 * however, the relevant data was already loaded into @rspec by
+		 * however, the relevant data was already loaded into @rdesc by
 		 * read_blob_table().  */
 		cur_read_offset += sizeof(struct alt_chunk_table_header_disk);
 	}
@@ -195,13 +195,13 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 	}
 
 	/* Get valid decompressor.  */
-	if (ctype == rspec->wim->decompressor_ctype &&
-	    chunk_size == rspec->wim->decompressor_max_block_size)
+	if (ctype == rdesc->wim->decompressor_ctype &&
+	    chunk_size == rdesc->wim->decompressor_max_block_size)
 	{
 		/* Cached decompressor.  */
-		decompressor = rspec->wim->decompressor;
-		rspec->wim->decompressor_ctype = WIMLIB_COMPRESSION_TYPE_NONE;
-		rspec->wim->decompressor = NULL;
+		decompressor = rdesc->wim->decompressor;
+		rdesc->wim->decompressor_ctype = WIMLIB_COMPRESSION_TYPE_NONE;
+		rdesc->wim->decompressor = NULL;
 	} else {
 		ret = wimlib_create_decompressor(ctype, chunk_size,
 						 &decompressor);
@@ -215,7 +215,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 	const u32 chunk_order = fls32(chunk_size);
 
 	/* Calculate the total number of chunks the resource is divided into.  */
-	const u64 num_chunks = (rspec->uncompressed_size + chunk_size - 1) >> chunk_order;
+	const u64 num_chunks = (rdesc->uncompressed_size + chunk_size - 1) >> chunk_order;
 
 	/* Calculate the 0-based indices of the first and last chunks containing
 	 * data that needs to be passed to the callback.  */
@@ -241,7 +241,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 
 	/* Set the size of each chunk table entry based on the resource's
 	 * uncompressed size.  */
-	const u64 chunk_entry_size = get_chunk_entry_size(rspec->uncompressed_size,
+	const u64 chunk_entry_size = get_chunk_entry_size(rdesc->uncompressed_size,
 							  alt_chunk_table);
 
 	/* Calculate the size of the chunk table in bytes.  */
@@ -309,7 +309,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 		const u64 file_offset_of_needed_chunk_entries =
 			cur_read_offset
 			+ (first_chunk_entry_to_read * chunk_entry_size)
-			+ (rspec->is_pipable ? (rspec->size_in_wim - chunk_table_size) : 0);
+			+ (rdesc->is_pipable ? (rdesc->size_in_wim - chunk_table_size) : 0);
 
 		void * const chunk_table_data =
 			(u8*)chunk_offsets +
@@ -357,7 +357,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 
 		/* Set offset to beginning of first chunk to read.  */
 		cur_read_offset += chunk_offsets[0];
-		if (rspec->is_pipable)
+		if (rdesc->is_pipable)
 			cur_read_offset += read_start_chunk * sizeof(struct pwm_chunk_hdr);
 		else
 			cur_read_offset += chunk_table_size;
@@ -397,8 +397,8 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 
 		/* Calculate uncompressed size of next chunk.  */
 		u32 chunk_usize;
-		if ((i == num_chunks - 1) && (rspec->uncompressed_size & (chunk_size - 1)))
-			chunk_usize = (rspec->uncompressed_size & (chunk_size - 1));
+		if ((i == num_chunks - 1) && (rdesc->uncompressed_size & (chunk_size - 1)))
+			chunk_usize = (rdesc->uncompressed_size & (chunk_size - 1));
 		else
 			chunk_usize = chunk_size;
 
@@ -414,10 +414,10 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 			chunk_csize = le32_to_cpu(chunk_hdr.compressed_size);
 		} else {
 			if (i == num_chunks - 1) {
-				chunk_csize = rspec->size_in_wim -
+				chunk_csize = rdesc->size_in_wim -
 					      chunk_table_full_size -
 					      chunk_offsets[i - read_start_chunk];
-				if (rspec->is_pipable)
+				if (rdesc->is_pipable)
 					chunk_csize -= num_chunks * sizeof(struct pwm_chunk_hdr);
 			} else {
 				chunk_csize = chunk_offsets[i + 1 - read_start_chunk] -
@@ -430,7 +430,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 			ret = WIMLIB_ERR_DECOMPRESSION;
 			goto out_free_memory;
 		}
-		if (rspec->is_pipable)
+		if (rdesc->is_pipable)
 			cur_read_offset += sizeof(struct pwm_chunk_hdr);
 
 		/* Offsets in the uncompressed resource at which this chunk
@@ -519,7 +519,7 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 	}
 
 	if (is_pipe_read &&
-	    last_offset == rspec->uncompressed_size - 1 &&
+	    last_offset == rdesc->uncompressed_size - 1 &&
 	    chunk_table_size)
 	{
 		u8 dummy;
@@ -537,10 +537,10 @@ read_compressed_wim_resource(const struct wim_resource_spec * const rspec,
 out_free_memory:
 	errno_save = errno;
 	if (decompressor) {
-		wimlib_free_decompressor(rspec->wim->decompressor);
-		rspec->wim->decompressor = decompressor;
-		rspec->wim->decompressor_ctype = ctype;
-		rspec->wim->decompressor_max_block_size = chunk_size;
+		wimlib_free_decompressor(rdesc->wim->decompressor);
+		rdesc->wim->decompressor = decompressor;
+		rdesc->wim->decompressor_ctype = ctype;
+		rdesc->wim->decompressor_max_block_size = chunk_size;
 	}
 	if (chunk_offsets_malloced)
 		FREE(chunk_offsets);
@@ -628,7 +628,7 @@ bufferer_cb(const void *chunk, size_t size, void *_ctx)
  * Read a range of data from an uncompressed or compressed resource in a WIM
  * file.
  *
- * @rspec
+ * @rdesc
  *	Specification of the WIM resource to read from.
  * @offset
  *	Offset within the uncompressed resource at which to start reading.
@@ -652,29 +652,29 @@ bufferer_cb(const void *chunk, size_t size, void *_ctx)
  *	or other error code returned by the @cb function.
  */
 static int
-read_partial_wim_resource(const struct wim_resource_spec *rspec,
+read_partial_wim_resource(const struct wim_resource_descriptor *rdesc,
 			  u64 offset, u64 size,
 			  consume_data_callback_t cb, void *cb_ctx)
 {
 	/* Sanity checks.  */
 	wimlib_assert(offset + size >= offset);
-	wimlib_assert(offset + size <= rspec->uncompressed_size);
+	wimlib_assert(offset + size <= rdesc->uncompressed_size);
 
 	DEBUG("Reading %"PRIu64" @ %"PRIu64" from WIM resource  "
 	      "%"PRIu64" => %"PRIu64" @ %"PRIu64,
-	      size, offset, rspec->uncompressed_size,
-	      rspec->size_in_wim, rspec->offset_in_wim);
+	      size, offset, rdesc->uncompressed_size,
+	      rdesc->size_in_wim, rdesc->offset_in_wim);
 
 	/* Trivial case.  */
 	if (size == 0)
 		return 0;
 
-	if (resource_is_compressed(rspec)) {
+	if (resource_is_compressed(rdesc)) {
 		struct data_range range = {
 			.offset = offset,
 			.size = size,
 		};
-		return read_compressed_wim_resource(rspec, &range, 1,
+		return read_compressed_wim_resource(rdesc, &range, 1,
 						    cb, cb_ctx);
 	} else {
 		/* Reading uncompressed resource.  For completeness, handle the
@@ -684,23 +684,23 @@ read_partial_wim_resource(const struct wim_resource_spec *rspec,
 		u64 zeroes_size;
 		int ret;
 
-		if (likely(offset + size <= rspec->size_in_wim) ||
-		    rspec->is_pipable)
+		if (likely(offset + size <= rdesc->size_in_wim) ||
+		    rdesc->is_pipable)
 		{
 			read_size = size;
 			zeroes_size = 0;
 		} else {
-			if (offset >= rspec->size_in_wim) {
+			if (offset >= rdesc->size_in_wim) {
 				read_size = 0;
 				zeroes_size = size;
 			} else {
-				read_size = rspec->size_in_wim - offset;
-				zeroes_size = offset + size - rspec->size_in_wim;
+				read_size = rdesc->size_in_wim - offset;
+				zeroes_size = offset + size - rdesc->size_in_wim;
 			}
 		}
 
-		ret = read_raw_file_data(&rspec->wim->in_fd,
-					 rspec->offset_in_wim + offset,
+		ret = read_raw_file_data(&rdesc->wim->in_fd,
+					 rdesc->offset_in_wim + offset,
 					 read_size,
 					 cb,
 					 cb_ctx);
@@ -721,7 +721,7 @@ read_partial_wim_blob_into_buf(const struct blob_descriptor *blob,
 
 	wimlib_assert(blob->blob_location == BLOB_IN_WIM);
 
-	return read_partial_wim_resource(blob->rspec,
+	return read_partial_wim_resource(blob->rdesc,
 					 blob->offset_in_res + offset,
 					 size,
 					 bufferer_cb,
@@ -744,9 +744,9 @@ skip_wim_blob(struct blob_descriptor *blob)
 	wimlib_assert(blob->blob_location == BLOB_IN_WIM);
 	wimlib_assert(!(blob->flags & WIM_RESHDR_FLAG_SOLID));
 	DEBUG("Skipping blob (size=%"PRIu64")", blob->size);
-	return read_partial_wim_resource(blob->rspec,
+	return read_partial_wim_resource(blob->rdesc,
 					 0,
-					 blob->rspec->uncompressed_size,
+					 blob->rdesc->uncompressed_size,
 					 skip_chunk_cb,
 					 NULL);
 }
@@ -755,7 +755,7 @@ static int
 read_wim_blob_prefix(const struct blob_descriptor *blob, u64 size,
 		     consume_data_callback_t cb, void *cb_ctx)
 {
-	return read_partial_wim_resource(blob->rspec, blob->offset_in_res, size,
+	return read_partial_wim_resource(blob->rdesc, blob->offset_in_res, size,
 					 cb, cb_ctx);
 }
 
@@ -911,7 +911,7 @@ read_full_blob_into_alloc_buf(const struct blob_descriptor *blob, void **buf_ret
 /* Retrieve the full uncompressed data of the specified WIM resource.  A buffer
  * large enough hold the data is allocated and returned in @buf_ret.  */
 static int
-wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
+wim_resource_descriptor_to_data(struct wim_resource_descriptor *rdesc, void **buf_ret)
 {
 	int ret;
 	struct blob_descriptor *blob;
@@ -920,9 +920,9 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	blob_set_is_located_in_wim_resource(blob, rspec);
-	blob->flags = rspec->flags;
-	blob->size = rspec->uncompressed_size;
+	blob_set_is_located_in_wim_resource(blob, rdesc);
+	blob->flags = rdesc->flags;
+	blob->size = rdesc->uncompressed_size;
 	blob->offset_in_res = 0;
 
 	ret = read_full_blob_into_alloc_buf(blob, buf_ret);
@@ -943,28 +943,28 @@ wim_reshdr_to_data(const struct wim_reshdr *reshdr, WIMStruct *wim, void **buf_r
 	      reshdr->offset_in_wim, reshdr->size_in_wim,
 	      reshdr->uncompressed_size);
 
-	struct wim_resource_spec rspec;
-	wim_res_hdr_to_spec(reshdr, wim, &rspec);
-	return wim_resource_spec_to_data(&rspec, buf_ret);
+	struct wim_resource_descriptor rdesc;
+	wim_res_hdr_to_spec(reshdr, wim, &rdesc);
+	return wim_resource_descriptor_to_data(&rdesc, buf_ret);
 }
 
 int
 wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 		   u8 hash[SHA1_HASH_SIZE])
 {
-	struct wim_resource_spec rspec;
+	struct wim_resource_descriptor rdesc;
 	int ret;
 	struct blob_descriptor *blob;
 
-	wim_res_hdr_to_spec(reshdr, wim, &rspec);
+	wim_res_hdr_to_spec(reshdr, wim, &rdesc);
 
 	blob = new_blob_descriptor();
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	blob_set_is_located_in_wim_resource(blob, &rspec);
-	blob->flags = rspec.flags;
-	blob->size = rspec.uncompressed_size;
+	blob_set_is_located_in_wim_resource(blob, &rdesc);
+	blob->flags = rdesc.flags;
+	blob->size = rdesc.uncompressed_size;
 	blob->offset_in_res = 0;
 	blob->unhashed = 1;
 
@@ -1240,7 +1240,7 @@ read_blobs_in_solid_resource(struct blob_descriptor *first_blob,
 		.list_head_offset	= list_head_offset,
 	};
 
-	ret = read_compressed_wim_resource(first_blob->rspec,
+	ret = read_compressed_wim_resource(first_blob->rdesc,
 					   ranges,
 					   blob_count,
 					   blobifier_cb,
@@ -1342,7 +1342,7 @@ read_blob_list(struct list_head *blob_list,
 		blob = (struct blob_descriptor*)((u8*)cur - list_head_offset);
 
 		if (blob->flags & WIM_RESHDR_FLAG_SOLID &&
-		    blob->size != blob->rspec->uncompressed_size)
+		    blob->size != blob->rdesc->uncompressed_size)
 		{
 
 			struct blob_descriptor *blob_next, *blob_last;
@@ -1363,7 +1363,7 @@ read_blob_list(struct list_head *blob_list,
 			     && (blob_next = (struct blob_descriptor*)
 						((u8*)next2 - list_head_offset),
 				 blob_next->blob_location == BLOB_IN_WIM
-				 && blob_next->rspec == blob->rspec);
+				 && blob_next->rdesc == blob->rdesc);
 			     next2 = next2->next)
 			{
 				blob_last = blob_next;
@@ -1470,33 +1470,33 @@ sha1_blob(struct blob_descriptor *blob)
  */
 void
 wim_res_hdr_to_spec(const struct wim_reshdr *reshdr, WIMStruct *wim,
-		    struct wim_resource_spec *rspec)
+		    struct wim_resource_descriptor *rdesc)
 {
-	rspec->wim = wim;
-	rspec->offset_in_wim = reshdr->offset_in_wim;
-	rspec->size_in_wim = reshdr->size_in_wim;
-	rspec->uncompressed_size = reshdr->uncompressed_size;
-	INIT_LIST_HEAD(&rspec->blob_list);
-	rspec->flags = reshdr->flags;
-	rspec->is_pipable = wim_is_pipable(wim);
-	if (rspec->flags & WIM_RESHDR_FLAG_COMPRESSED) {
-		rspec->compression_type = wim->compression_type;
-		rspec->chunk_size = wim->chunk_size;
+	rdesc->wim = wim;
+	rdesc->offset_in_wim = reshdr->offset_in_wim;
+	rdesc->size_in_wim = reshdr->size_in_wim;
+	rdesc->uncompressed_size = reshdr->uncompressed_size;
+	INIT_LIST_HEAD(&rdesc->blob_list);
+	rdesc->flags = reshdr->flags;
+	rdesc->is_pipable = wim_is_pipable(wim);
+	if (rdesc->flags & WIM_RESHDR_FLAG_COMPRESSED) {
+		rdesc->compression_type = wim->compression_type;
+		rdesc->chunk_size = wim->chunk_size;
 	} else {
-		rspec->compression_type = WIMLIB_COMPRESSION_TYPE_NONE;
-		rspec->chunk_size = 0;
+		rdesc->compression_type = WIMLIB_COMPRESSION_TYPE_NONE;
+		rdesc->chunk_size = 0;
 	}
 }
 
 /* Convert a stand-alone resource specification to a WIM resource header.  */
 void
-wim_res_spec_to_hdr(const struct wim_resource_spec *rspec,
+wim_res_spec_to_hdr(const struct wim_resource_descriptor *rdesc,
 		    struct wim_reshdr *reshdr)
 {
-	reshdr->offset_in_wim     = rspec->offset_in_wim;
-	reshdr->size_in_wim       = rspec->size_in_wim;
-	reshdr->flags             = rspec->flags;
-	reshdr->uncompressed_size = rspec->uncompressed_size;
+	reshdr->offset_in_wim     = rdesc->offset_in_wim;
+	reshdr->size_in_wim       = rdesc->size_in_wim;
+	reshdr->flags             = rdesc->flags;
+	reshdr->uncompressed_size = rdesc->uncompressed_size;
 }
 
 /* Translates a WIM resource header from the on-disk format into an in-memory

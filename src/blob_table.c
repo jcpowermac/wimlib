@@ -124,7 +124,7 @@ clone_blob_descriptor(const struct blob_descriptor *old)
 
 	switch (new->blob_location) {
 	case BLOB_IN_WIM:
-		list_add(&new->rspec_node, &new->rspec->blob_list);
+		list_add(&new->rdesc_node, &new->rdesc->blob_list);
 		break;
 
 	case BLOB_IN_FILE_ON_DISK:
@@ -183,9 +183,9 @@ blob_release_location(struct blob_descriptor *blob)
 {
 	switch (blob->blob_location) {
 	case BLOB_IN_WIM:
-		list_del(&blob->rspec_node);
-		if (list_empty(&blob->rspec->blob_list))
-			FREE(blob->rspec);
+		list_del(&blob->rdesc_node);
+		if (list_empty(&blob->rdesc->blob_list))
+			FREE(blob->rdesc);
 		break;
 	case BLOB_IN_FILE_ON_DISK:
 #ifdef __WIN32__
@@ -423,8 +423,8 @@ cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 
 	switch (blob1->blob_location) {
 	case BLOB_IN_WIM:
-		wim1 = blob1->rspec->wim;
-		wim2 = blob2->rspec->wim;
+		wim1 = blob1->rdesc->wim;
+		wim2 = blob2->rdesc->wim;
 
 		/* Different (possibly split) WIMs?  */
 		if (wim1 != wim2) {
@@ -438,9 +438,9 @@ cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 		if (v)
 			return v;
 
-		if (blob1->rspec->offset_in_wim != blob2->rspec->offset_in_wim)
-			return cmp_u64(blob1->rspec->offset_in_wim,
-				       blob2->rspec->offset_in_wim);
+		if (blob1->rdesc->offset_in_wim != blob2->rdesc->offset_in_wim)
+			return cmp_u64(blob1->rdesc->offset_in_wim,
+				       blob2->rdesc->offset_in_wim);
 
 		return cmp_u64(blob1->offset_in_res, blob2->offset_in_res);
 
@@ -603,20 +603,20 @@ count_solid_resources(const struct blob_descriptor_disk *entries, size_t max)
 
 /*
  * Given a run of consecutive blob descriptors with the SOLID flag set and
- * having @num_rspecs resource entries, load resource information from them into
- * the resource specifications in the @rspecs array.
+ * having @num_rdescs resource entries, load resource information from them into
+ * the resource specifications in the @rdescs array.
  *
  * Returns 0 on success, or a nonzero error code on failure.
  */
 static int
-do_load_solid_info(WIMStruct *wim, struct wim_resource_spec **rspecs,
-		   size_t num_rspecs,
+do_load_solid_info(WIMStruct *wim, struct wim_resource_descriptor **rdescs,
+		   size_t num_rdescs,
 		   const struct blob_descriptor_disk *entries)
 {
-	for (size_t i = 0; i < num_rspecs; i++) {
+	for (size_t i = 0; i < num_rdescs; i++) {
 		struct wim_reshdr reshdr;
 		struct alt_chunk_table_header_disk hdr;
-		struct wim_resource_spec *rspec;
+		struct wim_resource_descriptor *rdesc;
 		int ret;
 
 		/* Advance to next resource entry.  */
@@ -625,9 +625,9 @@ do_load_solid_info(WIMStruct *wim, struct wim_resource_spec **rspecs,
 			get_wim_reshdr(&(entries++)->reshdr, &reshdr);
 		} while (reshdr.uncompressed_size != SOLID_RESOURCE_MAGIC_NUMBER);
 
-		rspec = rspecs[i];
+		rdesc = rdescs[i];
 
-		wim_res_hdr_to_spec(&reshdr, wim, rspec);
+		wim_res_hdr_to_spec(&reshdr, wim, rdesc);
 
 		/* For solid resources, the uncompressed size, compression type,
 		 * and chunk size are stored in the resource itself, not in the
@@ -642,7 +642,7 @@ do_load_solid_info(WIMStruct *wim, struct wim_resource_spec **rspecs,
 			return ret;
 		}
 
-		rspec->uncompressed_size = le64_to_cpu(hdr.res_usize);
+		rdesc->uncompressed_size = le64_to_cpu(hdr.res_usize);
 
 		/* Compression format numbers must be the same as in
 		 * WIMGAPI to be compatible here.  */
@@ -650,18 +650,18 @@ do_load_solid_info(WIMStruct *wim, struct wim_resource_spec **rspecs,
 		BUILD_BUG_ON(WIMLIB_COMPRESSION_TYPE_XPRESS != 1);
 		BUILD_BUG_ON(WIMLIB_COMPRESSION_TYPE_LZX != 2);
 		BUILD_BUG_ON(WIMLIB_COMPRESSION_TYPE_LZMS != 3);
-		rspec->compression_type = le32_to_cpu(hdr.compression_format);
+		rdesc->compression_type = le32_to_cpu(hdr.compression_format);
 
-		rspec->chunk_size = le32_to_cpu(hdr.chunk_size);
+		rdesc->chunk_size = le32_to_cpu(hdr.chunk_size);
 
 		DEBUG("Solid resource %zu/%zu: %"PRIu64" => %"PRIu64" "
 		      "(%"TS"/%"PRIu32") @ +%"PRIu64"",
-		      i + 1, num_rspecs,
-		      rspec->uncompressed_size,
-		      rspec->size_in_wim,
-		      wimlib_get_compression_type_string(rspec->compression_type),
-		      rspec->chunk_size,
-		      rspec->offset_in_wim);
+		      i + 1, num_rdescs,
+		      rdesc->uncompressed_size,
+		      rdesc->size_in_wim,
+		      wimlib_get_compression_type_string(rdesc->compression_type),
+		      rdesc->chunk_size,
+		      rdesc->offset_in_wim);
 
 	}
 	return 0;
@@ -669,48 +669,48 @@ do_load_solid_info(WIMStruct *wim, struct wim_resource_spec **rspecs,
 
 /*
  * Given a nonempty run of consecutive blob descriptors with the SOLID flag set,
- * allocate a 'struct wim_resource_spec' for each resource within that run.
+ * allocate a 'struct wim_resource_descriptor' for each resource within that run.
  *
  * Returns 0 on success, or a nonzero error code on failure.
- * Returns the pointers and count in *rspecs_ret and *num_rspecs_ret.
+ * Returns the pointers and count in *rdescs_ret and *num_rdescs_ret.
  */
 static int
 load_solid_info(WIMStruct *wim,
 		const struct blob_descriptor_disk *entries,
 		size_t num_remaining_entries,
-		struct wim_resource_spec ***rspecs_ret,
-		size_t *num_rspecs_ret)
+		struct wim_resource_descriptor ***rdescs_ret,
+		size_t *num_rdescs_ret)
 {
-	size_t num_rspecs;
-	struct wim_resource_spec **rspecs;
+	size_t num_rdescs;
+	struct wim_resource_descriptor **rdescs;
 	size_t i;
 	int ret;
 
-	num_rspecs = count_solid_resources(entries, num_remaining_entries);
-	rspecs = CALLOC(num_rspecs, sizeof(rspecs[0]));
-	if (!rspecs)
+	num_rdescs = count_solid_resources(entries, num_remaining_entries);
+	rdescs = CALLOC(num_rdescs, sizeof(rdescs[0]));
+	if (!rdescs)
 		return WIMLIB_ERR_NOMEM;
 
-	for (i = 0; i < num_rspecs; i++) {
-		rspecs[i] = MALLOC(sizeof(struct wim_resource_spec));
-		if (!rspecs[i]) {
+	for (i = 0; i < num_rdescs; i++) {
+		rdescs[i] = MALLOC(sizeof(struct wim_resource_descriptor));
+		if (!rdescs[i]) {
 			ret = WIMLIB_ERR_NOMEM;
-			goto out_free_rspecs;
+			goto out_free_rdescs;
 		}
 	}
 
-	ret = do_load_solid_info(wim, rspecs, num_rspecs, entries);
+	ret = do_load_solid_info(wim, rdescs, num_rdescs, entries);
 	if (ret)
-		goto out_free_rspecs;
+		goto out_free_rdescs;
 
-	*rspecs_ret = rspecs;
-	*num_rspecs_ret = num_rspecs;
+	*rdescs_ret = rdescs;
+	*num_rdescs_ret = num_rdescs;
 	return 0;
 
-out_free_rspecs:
-	for (i = 0; i < num_rspecs; i++)
-		FREE(rspecs[i]);
-	FREE(rspecs);
+out_free_rdescs:
+	for (i = 0; i < num_rdescs; i++)
+		FREE(rdescs[i]);
+	FREE(rdescs);
 	return ret;
 }
 
@@ -720,8 +720,8 @@ out_free_rspecs:
 static int
 bind_blob_to_solid_resource(const struct wim_reshdr *reshdr,
 			    struct blob_descriptor *blob,
-			    struct wim_resource_spec **rspecs,
-			    size_t num_rspecs)
+			    struct wim_resource_descriptor **rdescs,
+			    size_t num_rdescs)
 {
 	u64 offset = reshdr->offset_in_wim;
 
@@ -729,26 +729,26 @@ bind_blob_to_solid_resource(const struct wim_reshdr *reshdr,
 	 * number of solid resources in the run is huge.  */
 	blob->size = reshdr->size_in_wim;
 	blob->flags = reshdr->flags;
-	for (size_t i = 0; i < num_rspecs; i++) {
-		if (offset + blob->size <= rspecs[i]->uncompressed_size) {
+	for (size_t i = 0; i < num_rdescs; i++) {
+		if (offset + blob->size <= rdescs[i]->uncompressed_size) {
 			blob->offset_in_res = offset;
-			blob_set_is_located_in_wim_resource(blob, rspecs[i]);
+			blob_set_is_located_in_wim_resource(blob, rdescs[i]);
 			return 0;
 		}
-		offset -= rspecs[i]->uncompressed_size;
+		offset -= rdescs[i]->uncompressed_size;
 	}
 	ERROR("blob could not be assigned to a solid resource");
 	return WIMLIB_ERR_INVALID_LOOKUP_TABLE_ENTRY;
 }
 
 static void
-free_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
+free_solid_rdescs(struct wim_resource_descriptor **rdescs, size_t num_rdescs)
 {
-	if (rspecs) {
-		for (size_t i = 0; i < num_rspecs; i++)
-			if (list_empty(&rspecs[i]->blob_list))
-				FREE(rspecs[i]);
-		FREE(rspecs);
+	if (rdescs) {
+		for (size_t i = 0; i < num_rdescs; i++)
+			if (list_empty(&rdescs[i]->blob_list))
+				FREE(rdescs[i]);
+		FREE(rdescs);
 	}
 }
 
@@ -765,7 +765,7 @@ cmp_blobs_by_offset_in_res(const void *p1, const void *p2)
 
 /* Validate the size and location of a WIM resource.  */
 static int
-validate_resource(struct wim_resource_spec *rspec)
+validate_resource(struct wim_resource_descriptor *rdesc)
 {
 	struct blob_descriptor *blob;
 	bool out_of_order;
@@ -773,16 +773,16 @@ validate_resource(struct wim_resource_spec *rspec)
 	int ret;
 
 	/* Verify that the resource itself has a valid offset and size.  */
-	if (rspec->offset_in_wim + rspec->size_in_wim < rspec->size_in_wim)
+	if (rdesc->offset_in_wim + rdesc->size_in_wim < rdesc->size_in_wim)
 		goto invalid_due_to_overflow;
 
 	/* Verify that each blob in the resource has a valid offset and size.
 	 */
 	expected_next_offset = 0;
 	out_of_order = false;
-	list_for_each_entry(blob, &rspec->blob_list, rspec_node) {
+	list_for_each_entry(blob, &rdesc->blob_list, rdesc_node) {
 		if (blob->offset_in_res + blob->size < blob->size ||
-		    blob->offset_in_res + blob->size > rspec->uncompressed_size)
+		    blob->offset_in_res + blob->size > rdesc->uncompressed_size)
 			goto invalid_due_to_overflow;
 
 		if (blob->offset_in_res >= expected_next_offset)
@@ -795,15 +795,15 @@ validate_resource(struct wim_resource_spec *rspec)
 	 * allowing for overlap), sort them.  Then make sure that none overlap.
 	 */
 	if (out_of_order) {
-		ret = sort_blob_list(&rspec->blob_list,
+		ret = sort_blob_list(&rdesc->blob_list,
 				       offsetof(struct blob_descriptor,
-						rspec_node),
+						rdesc_node),
 				       cmp_blobs_by_offset_in_res);
 		if (ret)
 			return ret;
 
 		expected_next_offset = 0;
-		list_for_each_entry(blob, &rspec->blob_list, rspec_node) {
+		list_for_each_entry(blob, &rdesc->blob_list, rdesc_node) {
 			if (blob->offset_in_res >= expected_next_offset)
 				expected_next_offset = blob->offset_in_res + blob->size;
 			else
@@ -823,15 +823,15 @@ invalid_due_to_overlap:
 }
 
 static int
-finish_solid_rspecs(struct wim_resource_spec **rspecs, size_t num_rspecs)
+finish_solid_rdescs(struct wim_resource_descriptor **rdescs, size_t num_rdescs)
 {
 	int ret = 0;
-	for (size_t i = 0; i < num_rspecs; i++) {
-		ret = validate_resource(rspecs[i]);
+	for (size_t i = 0; i < num_rdescs; i++) {
+		ret = validate_resource(rdescs[i]);
 		if (ret)
 			break;
 	}
-	free_solid_rspecs(rspecs, num_rspecs);
+	free_solid_rdescs(rdescs, num_rdescs);
 	return ret;
 }
 
@@ -875,8 +875,8 @@ read_blob_table(WIMStruct *wim)
 	size_t num_duplicate_blobs = 0;
 	size_t num_wrong_part_blobs = 0;
 	u32 image_index = 0;
-	struct wim_resource_spec **cur_solid_rspecs = NULL;
-	size_t cur_num_solid_rspecs = 0;
+	struct wim_resource_descriptor **cur_solid_rdescs = NULL;
+	size_t cur_num_solid_rdescs = 0;
 
 	DEBUG("Reading blob table.");
 
@@ -936,12 +936,12 @@ read_blob_table(WIMStruct *wim)
 
 			/* SOLID entry  */
 
-			if (!cur_solid_rspecs) {
+			if (!cur_solid_rdescs) {
 				/* Starting new run  */
 				ret = load_solid_info(wim, disk_entry,
 						      num_entries - i,
-						      &cur_solid_rspecs,
-						      &cur_num_solid_rspecs);
+						      &cur_solid_rdescs,
+						      &cur_num_solid_rdescs);
 				if (ret)
 					goto out;
 			}
@@ -955,21 +955,21 @@ read_blob_table(WIMStruct *wim)
 
 			ret = bind_blob_to_solid_resource(&reshdr,
 							  cur_entry,
-							  cur_solid_rspecs,
-							  cur_num_solid_rspecs);
+							  cur_solid_rdescs,
+							  cur_num_solid_rdescs);
 			if (ret)
 				goto out;
 
 		} else {
 			/* Normal blob/resource entry; SOLID not set.  */
 
-			struct wim_resource_spec *rspec;
+			struct wim_resource_descriptor *rdesc;
 
-			if (unlikely(cur_solid_rspecs)) {
+			if (unlikely(cur_solid_rdescs)) {
 				/* This entry terminated a solid run.  */
-				ret = finish_solid_rspecs(cur_solid_rspecs,
-							  cur_num_solid_rspecs);
-				cur_solid_rspecs = NULL;
+				ret = finish_solid_rdescs(cur_solid_rdescs,
+							  cur_num_solid_rdescs);
+				cur_solid_rdescs = NULL;
 				if (ret)
 					goto out;
 			}
@@ -999,17 +999,17 @@ read_blob_table(WIMStruct *wim)
 
 			/* Set up a resource specification for this blob.  */
 
-			rspec = MALLOC(sizeof(struct wim_resource_spec));
-			if (!rspec)
+			rdesc = MALLOC(sizeof(struct wim_resource_descriptor));
+			if (!rdesc)
 				goto oom;
 
-			wim_res_hdr_to_spec(&reshdr, wim, rspec);
+			wim_res_hdr_to_spec(&reshdr, wim, rdesc);
 
 			cur_entry->offset_in_res = 0;
 			cur_entry->size = reshdr.uncompressed_size;
 			cur_entry->flags = reshdr.flags;
 
-			blob_set_is_located_in_wim_resource(cur_entry, rspec);
+			blob_set_is_located_in_wim_resource(cur_entry, rdesc);
 		}
 
 		/* cur_entry is now a blob bound to a resource.  */
@@ -1089,17 +1089,17 @@ read_blob_table(WIMStruct *wim)
 		continue;
 
 	free_cur_entry_and_continue:
-		if (cur_solid_rspecs &&
+		if (cur_solid_rdescs &&
 		    cur_entry->blob_location == BLOB_IN_WIM)
 			blob_unset_is_located_in_wim_resource(cur_entry);
 		free_blob_descriptor(cur_entry);
 	}
 	cur_entry = NULL;
 
-	if (cur_solid_rspecs) {
+	if (cur_solid_rdescs) {
 		/* End of blob table terminated a solid run.  */
-		ret = finish_solid_rspecs(cur_solid_rspecs, cur_num_solid_rspecs);
-		cur_solid_rspecs = NULL;
+		ret = finish_solid_rdescs(cur_solid_rdescs, cur_num_solid_rdescs);
+		cur_solid_rdescs = NULL;
 		if (ret)
 			goto out;
 	}
@@ -1128,7 +1128,7 @@ oom:
 	ERROR("Not enough memory to read blob table!");
 	ret = WIMLIB_ERR_NOMEM;
 out:
-	free_solid_rspecs(cur_solid_rspecs, cur_num_solid_rspecs);
+	free_solid_rdescs(cur_solid_rdescs, cur_num_solid_rdescs);
 	free_blob_descriptor(cur_entry);
 	free_blob_table(table);
 out_free_buf:
@@ -1345,17 +1345,17 @@ blob_to_wimlib_resource_entry(const struct blob_descriptor *blob,
 
 	wentry->uncompressed_size = blob->size;
 	if (blob->blob_location == BLOB_IN_WIM) {
-		wentry->part_number = blob->rspec->wim->hdr.part_number;
+		wentry->part_number = blob->rdesc->wim->hdr.part_number;
 		if (blob->flags & WIM_RESHDR_FLAG_SOLID) {
 			wentry->compressed_size = 0;
 			wentry->offset = blob->offset_in_res;
 		} else {
-			wentry->compressed_size = blob->rspec->size_in_wim;
-			wentry->offset = blob->rspec->offset_in_wim;
+			wentry->compressed_size = blob->rdesc->size_in_wim;
+			wentry->offset = blob->rdesc->offset_in_wim;
 		}
-		wentry->raw_resource_offset_in_wim = blob->rspec->offset_in_wim;
-		/*wentry->raw_resource_uncompressed_size = blob->rspec->uncompressed_size;*/
-		wentry->raw_resource_compressed_size = blob->rspec->size_in_wim;
+		wentry->raw_resource_offset_in_wim = blob->rdesc->offset_in_wim;
+		/*wentry->raw_resource_uncompressed_size = blob->rdesc->uncompressed_size;*/
+		wentry->raw_resource_compressed_size = blob->rdesc->size_in_wim;
 	}
 	copy_hash(wentry->sha1_hash, blob->hash);
 	wentry->reference_count = blob->refcnt;

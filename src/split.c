@@ -156,7 +156,7 @@ add_blob_to_swm(struct blob_descriptor *blob, void *_swm_info)
 		return WIMLIB_ERR_UNSUPPORTED;
 	}
 	if (blob->blob_location == BLOB_IN_WIM)
-		blob_size = blob->rspec->size_in_wim;
+		blob_size = blob->rdesc->size_in_wim;
 	else
 		blob_size = blob->size;
 
