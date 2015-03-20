@@ -86,10 +86,10 @@ struct wim_dentry_on_disk {
 	 * included only the length field, but that takes up 8 bytes.  */
 	le64 length;
 
-	/* Attributes of the file or directory.  This is a bitwise OR of the
+	/* Flags for the file or directory.  This is a bitwise OR of the
 	 * FILE_ATTRIBUTE_* constants and should correspond to the value
 	 * retrieved by GetFileAttributes() on Windows. */
-	le32 attributes;
+	le32 file_flags;
 
 	/* A value that specifies the security descriptor for this file or
 	 * directory.  If -1, the file or directory has no security descriptor.
@@ -146,7 +146,7 @@ struct wim_dentry_on_disk {
 	 * do not correspond to Microsoft's documentation.
 	 *
 	 * If this directory entry is for a reparse point (has
-	 * FILE_ATTRIBUTE_REPARSE_POINT set in the attributes field), then the
+	 * FILE_ATTRIBUTE_REPARSE_POINT set in the file_flags field), then the
 	 * version of the following fields containing the reparse tag is valid.
 	 * Furthermore, the field notated as not_rpfixed, as far as I can tell,
 	 * is supposed to be set to 1 if reparse point fixups (a.k.a. fixing the
@@ -396,7 +396,7 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 		case ATTR_DATA:
 			if (*attr->attr_name) {
 				len += attribute_out_total_length(attr);
-				if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
+				if (!(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED))
 					need_extra_attr_for_unnamed_data_stream = true;
 			} else {
 				have_unnamed_data_stream = true;
@@ -1003,7 +1003,7 @@ new_filler_directory(struct wim_dentry **dentry_ret)
 	/* Leave the inode number as 0; this is allowed for non
 	 * hard-linked files. */
 	dentry->d_inode->i_resolved = 1;
-	dentry->d_inode->i_attributes = FILE_ATTRIBUTE_DIRECTORY;
+	dentry->d_inode->i_file_flags = FILE_ATTRIBUTE_DIRECTORY;
 	*dentry_ret = dentry;
 	return 0;
 }
@@ -1440,7 +1440,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	inode = dentry->d_inode;
 
 	/* Read more fields: some into the dentry, and some into the inode.  */
-	inode->i_attributes = le32_to_cpu(disk_dentry->attributes);
+	inode->i_file_flags = le32_to_cpu(disk_dentry->file_flags);
 	inode->i_security_id = le32_to_cpu(disk_dentry->security_id);
 	dentry->subdir_offset = le64_to_cpu(disk_dentry->subdir_offset);
 	inode->i_creation_time = le64_to_cpu(disk_dentry->creation_time);
@@ -1452,7 +1452,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	 * reparse points, then put the fields in the same place and didn't
 	 * document it.  So we have some fields we read for reparse points, and
 	 * some fields in the same place for non-reparse-points.  */
-	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
 		inode->i_rp_unknown_1 = le32_to_cpu(disk_dentry->reparse.rp_unknown_1);
 		inode->i_reparse_tag = le32_to_cpu(disk_dentry->reparse.reparse_tag);
 		inode->i_rp_unknown_2 = le16_to_cpu(disk_dentry->reparse.rp_unknown_2);
@@ -1800,7 +1800,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	use_dummy_stream = inode_needs_dummy_stream(inode);
 	disk_dentry = (struct wim_dentry_on_disk*)p;
 
-	disk_dentry->attributes = cpu_to_le32(inode->i_attributes);
+	disk_dentry->file_flags = cpu_to_le32(inode->i_file_flags);
 	disk_dentry->security_id = cpu_to_le32(inode->i_security_id);
 	disk_dentry->subdir_offset = cpu_to_le64(dentry->subdir_offset);
 
@@ -1815,7 +1815,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	else
 		hash = inode_stream_hash(inode, 0);
 	copy_hash(disk_dentry->unnamed_stream_hash, hash);
-	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
 		disk_dentry->reparse.rp_unknown_1 = cpu_to_le32(inode->i_rp_unknown_1);
 		disk_dentry->reparse.reparse_tag = cpu_to_le32(inode->i_reparse_tag);
 		disk_dentry->reparse.rp_unknown_2 = cpu_to_le16(inode->i_rp_unknown_2);

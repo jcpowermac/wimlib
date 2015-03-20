@@ -106,7 +106,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 	struct blob_descriptor *blob;
 	struct wim_attribute *attr;
 
-	inode->i_attributes = FILE_ATTRIBUTE_NORMAL;
+	inode->i_file_flags = FILE_ATTRIBUTE_NORMAL;
 
 	if (size) {
 		char *file_on_disk = STRDUP(path);
@@ -158,7 +158,7 @@ unix_scan_directory(struct wim_dentry *dir_dentry,
 		return WIMLIB_ERR_OPENDIR;
 	}
 
-	dir_dentry->d_inode->i_attributes = FILE_ATTRIBUTE_DIRECTORY;
+	dir_dentry->d_inode->i_file_flags = FILE_ATTRIBUTE_DIRECTORY;
 	dir = my_fdopendir(&dirfd);
 	if (!dir) {
 		ERROR_WITH_ERRNO("\"%s\": Can't open directory", full_path);
@@ -264,7 +264,7 @@ unix_scan_symlink(const char *full_path, int dirfd, const char *relpath,
 	char *dest;
 	int ret;
 
-	inode->i_attributes = FILE_ATTRIBUTE_REPARSE_POINT;
+	inode->i_file_flags = FILE_ATTRIBUTE_REPARSE_POINT;
 	inode->i_reparse_tag = WIM_IO_REPARSE_TAG_SYMLINK;
 
 	/* The idea here is to call readlink() to get the UNIX target of the
@@ -324,7 +324,7 @@ unix_scan_symlink(const char *full_path, int dirfd, const char *relpath,
 	struct stat stbuf;
 	if (my_fstatat(full_path, dirfd, relpath, &stbuf, 0) == 0 &&
 	    S_ISDIR(stbuf.st_mode))
-		inode->i_attributes |= FILE_ATTRIBUTE_DIRECTORY;
+		inode->i_file_flags |= FILE_ATTRIBUTE_DIRECTORY;
 	return 0;
 }
 

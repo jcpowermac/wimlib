@@ -558,7 +558,7 @@ build_dentry_tree_ntfs_recursive(struct wim_dentry **root_ret,
 	inode->i_creation_time    = le64_to_cpu(ni->creation_time);
 	inode->i_last_write_time  = le64_to_cpu(ni->last_data_change_time);
 	inode->i_last_access_time = le64_to_cpu(ni->last_access_time);
-	inode->i_attributes       = attributes;
+	inode->i_file_flags       = attributes;
 	inode->i_resolved         = 1;
 
 	if (attributes & FILE_ATTR_REPARSE_POINT) {

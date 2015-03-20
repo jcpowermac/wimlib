@@ -79,7 +79,7 @@ do_capture_progress(struct capture_params *params, int status,
 		}
 
 		/* Tally the file itself.  */
-		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
+		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
 			params->progress.scan.num_dirs_scanned++;
 		else
 			params->progress.scan.num_nondirs_scanned++;

@@ -61,13 +61,9 @@ struct wim_inode {
 	struct wim_attribute i_embedded_attrs[INODE_NUM_EMBEDDED_ATTRS];
 	u32 i_num_attrs;
 
-	/* Corresponds to the 'attributes' field of `struct wim_dentry_on_disk';
-	 * bitwise OR of the FILE_ATTRIBUTE_* flags that give the attributes of
-	 * this inode. 
-	 *
-	 * TODO: rename this to i_flags to distinguish this from the NTFS-style
-	 * attributes?  */
-	u32 i_attributes;
+	/* Windows file attribute flags (FILE_ATTRIBUTE_*).  Not to be confused
+	 * with i_attrs, which are the NTFS-style attributes.  */
+	u32 i_file_flags;
 
 	/* Root of a balanced binary search tree storing the child directory
 	 * entries of this inode, if any.  Keyed by wim_dentry->file_name, case
@@ -290,7 +286,7 @@ inode_dec_num_opened_fds(struct wim_inode *inode);
 static inline bool
 inode_is_directory(const struct wim_inode *inode)
 {
-	return (inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+	return (inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
 				       FILE_ATTRIBUTE_REPARSE_POINT))
 			== FILE_ATTRIBUTE_DIRECTORY;
 }
@@ -301,7 +297,7 @@ inode_is_directory(const struct wim_inode *inode)
 static inline bool
 inode_is_encrypted_directory(const struct wim_inode *inode)
 {
-	return ((inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+	return ((inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
 					FILE_ATTRIBUTE_ENCRYPTED))
 		== (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_ENCRYPTED));
 }
@@ -312,7 +308,7 @@ inode_is_encrypted_directory(const struct wim_inode *inode)
 static inline bool
 inode_is_symlink(const struct wim_inode *inode)
 {
-	return (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+	return (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT)
 		&& (inode->i_reparse_tag == WIM_IO_REPARSE_TAG_SYMLINK ||
 		    inode->i_reparse_tag == WIM_IO_REPARSE_TAG_MOUNT_POINT);
 }

@@ -458,7 +458,7 @@ create_dentry(struct fuse_context *fuse_ctx, const char *path,
 
 	new_inode->i_resolved = 1;
 	new_inode->i_ino = wimfs_ctx->next_ino++;
-	new_inode->i_attributes = attributes;
+	new_inode->i_file_flags = attributes;
 
 	if (wimfs_ctx->mount_flags & WIMLIB_MOUNT_FLAG_UNIX_DATA) {
 		struct wimlib_unix_data unix_data;
@@ -1375,7 +1375,7 @@ wimfs_link(const char *existing_path, const char *new_path)
 	if (!inode)
 		return -errno;
 
-	if (inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+	if (inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
 				   FILE_ATTRIBUTE_REPARSE_POINT))
 		return -EPERM;
 

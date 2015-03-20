@@ -287,7 +287,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 
 	dentry = get_dentry(ctx->common.wim, path, WIMLIB_CASE_INSENSITIVE);
 	if (!dentry ||
-	    (dentry->d_inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+	    (dentry->d_inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
 					      FILE_ATTRIBUTE_REPARSE_POINT |
 					      FILE_ATTRIBUTE_ENCRYPTED)) ||
 	    !(blob = inode_unnamed_lte(dentry->d_inode, ctx->common.wim->blob_table)))
@@ -385,7 +385,7 @@ will_externally_back_inode(struct wim_inode *inode, struct win32_apply_ctx *ctx,
 	 * unknown/no/yes).  But most files can be externally backed, so this
 	 * way is fine.  */
 
-	if (inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+	if (inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
 				   FILE_ATTRIBUTE_REPARSE_POINT |
 				   FILE_ATTRIBUTE_ENCRYPTED))
 		return WIM_BACKING_NOT_POSSIBLE;
@@ -875,7 +875,7 @@ static int
 adjust_compression_attribute(HANDLE h, const struct wim_dentry *dentry,
 			     struct win32_apply_ctx *ctx)
 {
-	const bool compressed = (dentry->d_inode->i_attributes &
+	const bool compressed = (dentry->d_inode->i_file_flags &
 				 FILE_ATTRIBUTE_COMPRESSED);
 
 	if (ctx->common.extract_flags & WIMLIB_EXTRACT_FLAG_NO_ATTRIBUTES)
@@ -1415,7 +1415,7 @@ create_directories(struct list_head *dentry_list,
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 
-		if (!(dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY))
+		if (!(dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY))
 			continue;
 
 		/* Note: Here we include files with
@@ -1597,7 +1597,7 @@ create_nondirectories(struct list_head *dentry_list, struct win32_apply_ctx *ctx
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 		inode = dentry->d_inode;
-		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
+		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
 			continue;
 		/* Call create_nondirectory() only once per inode  */
 		if (dentry == inode_first_extraction_dentry(inode)) {
@@ -1667,7 +1667,7 @@ begin_extract_blob_instance(const struct blob_descriptor *stream,
 
 
 	/* Encrypted file?  */
-	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)
+	if (unlikely(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED)
 	    && (stream_name_nchars == 0))
 	{
 		if (!ctx->common.supported_features.encrypted_files)
@@ -1696,7 +1696,7 @@ begin_extract_blob_instance(const struct blob_descriptor *stream,
 	 * FILE_ATTRIBUTE_ENCRYPTED since the WIM format does not store both EFS
 	 * data and reparse data for the same file, and the EFS data takes
 	 * precedence.  */
-	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+	if (unlikely(inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT)
 	    && (stream_name_nchars == 0))
 	{
 		if (!ctx->common.supported_features.reparse_points)
@@ -1980,7 +1980,7 @@ extract_encrypted_file(const struct wim_dentry *dentry,
 	build_win32_extraction_path(dentry, ctx);
 
 	flags = CREATE_FOR_IMPORT | OVERWRITE_HIDDEN;
-	if (dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
+	if (dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
 		flags |= CREATE_FOR_DIR;
 
 	retried = false;
@@ -2352,7 +2352,7 @@ do_apply_metadata_to_file(HANDLE h, const struct wim_inode *inode,
 	if (ctx->common.extract_flags & WIMLIB_EXTRACT_FLAG_NO_ATTRIBUTES) {
 		info.FileAttributes = FILE_ATTRIBUTE_NORMAL;
 	} else {
-		info.FileAttributes = inode->i_attributes & ~SPECIAL_ATTRIBUTES;
+		info.FileAttributes = inode->i_file_flags & ~SPECIAL_ATTRIBUTES;
 		if (info.FileAttributes == 0)
 			info.FileAttributes = FILE_ATTRIBUTE_NORMAL;
 	}

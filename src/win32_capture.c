@@ -194,7 +194,7 @@ read_win32_encrypted_file_prefix(const struct blob_descriptor *blob,
 	int ret;
 	DWORD flags = 0;
 
-	if (blob->file_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
+	if (blob->file_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
 		flags |= CREATE_FOR_DIR;
 
 	export_ctx.read_prefix_cb = cb;
@@ -845,7 +845,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	blob->file_on_disk[1] = L'\\';
 
 	ret = win32_get_encrypted_file_size(blob->file_on_disk,
-					    (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY),
+					    (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY),
 					    &blob->size);
 	if (unlikely(ret)) {
 		free_blob_descriptor(blob);
@@ -942,7 +942,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 							sizeof(wchar_t));
 		if (!ads_entry)
 			return WIMLIB_ERR_NOMEM;
-	} else if (inode->i_attributes & (FILE_ATTRIBUTE_REPARSE_POINT |
+	} else if (inode->i_file_flags & (FILE_ATTRIBUTE_REPARSE_POINT |
 					  FILE_ATTRIBUTE_ENCRYPTED))
 	{
 		/* Ignore unnamed data stream of reparse point or encrypted file
@@ -1088,7 +1088,7 @@ winnt_scan_streams(HANDLE h, const wchar_t *path, size_t path_nchars,
 unnamed_only:
 	/* The volume does not support named streams.  Only capture the unnamed
 	 * data stream.  */
-	if (inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+	if (inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
 				   FILE_ATTRIBUTE_REPARSE_POINT))
 	{
 		ret = 0;
@@ -1310,7 +1310,7 @@ retry_open:
 		goto out_progress;
 	}
 
-	inode->i_attributes = file_info.BasicInformation.FileAttributes;
+	inode->i_file_flags = file_info.BasicInformation.FileAttributes;
 	inode->i_creation_time = file_info.BasicInformation.CreationTime.QuadPart;
 	inode->i_last_write_time = file_info.BasicInformation.LastWriteTime.QuadPart;
 	inode->i_last_access_time = file_info.BasicInformation.LastAccessTime.QuadPart;
@@ -1345,7 +1345,7 @@ retry_open:
 	if (ret)
 		goto out;
 
-	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)) {
+	if (unlikely(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED)) {
 		/* Load information about the raw encrypted data.  This is
 		 * needed for any directory or non-directory that has
 		 * FILE_ATTRIBUTE_ENCRYPTED set.
@@ -1362,8 +1362,8 @@ retry_open:
 			goto out;
 	}
 
-	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
-		if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)) {
+	if (unlikely(inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT)) {
+		if (unlikely(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED)) {
 			WARNING("Ignoring reparse data of encrypted reparse point file \"%ls\"",
 				printable_path(full_path));
 		} else {
@@ -1376,7 +1376,7 @@ retry_open:
 			if (ret)
 				goto out;
 		}
-	} else if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) {
+	} else if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY) {
 
 		/* Directory: recurse to children.  */
 

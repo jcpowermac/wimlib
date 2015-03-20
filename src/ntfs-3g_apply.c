@@ -363,7 +363,7 @@ ntfs_3g_set_metadata(ntfs_inode *ni, const struct wim_inode *inode,
 
 	/* Attributes  */
 	if (!(extract_flags & WIMLIB_EXTRACT_FLAG_NO_ATTRIBUTES)) {
-		u32 attrib = inode->i_attributes;
+		u32 attrib = inode->i_file_flags;
 
 		attrib &= ~(FILE_ATTRIBUTE_SPARSE_FILE |
 			    FILE_ATTRIBUTE_ENCRYPTED);
@@ -426,7 +426,7 @@ ntfs_3g_create_dirs_recursive(ntfs_inode *dir_ni, struct wim_dentry *dir,
 		ntfs_inode *ni;
 		int ret;
 
-		if (!(child->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY))
+		if (!(child->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY))
 			continue;
 		if (!will_extract_dentry(child))
 			continue;
@@ -492,7 +492,7 @@ ntfs_3g_create_directories(struct wim_dentry *root,
 
 	/* Set the DOS name of any directory that has one.  */
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
-		if (!(dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY))
+		if (!(dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY))
 			continue;
 		if (!dentry_has_short_name(dentry))
 			continue;
@@ -666,7 +666,7 @@ ntfs_3g_create_nondirectories(struct list_head *dentry_list,
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 		inode = dentry->d_inode;
-		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
+		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
 			continue;
 		if (dentry == inode_first_extraction_dentry(inode)) {
 			ret = ntfs_3g_create_nondirectory(inode, ctx);
@@ -884,7 +884,7 @@ ntfs_3g_count_dentries(const struct list_head *dentry_list)
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 		count++;
-		if ((dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+		if ((dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY) &&
 		    dentry_has_short_name(dentry))
 		{
 			count++;

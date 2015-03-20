@@ -143,15 +143,15 @@ dentry_is_supported(struct wim_dentry *dentry,
 {
 	struct wim_inode *inode = dentry->d_inode;
 
-	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
 		if (!(supported_features->reparse_points ||
 		      (inode_is_symlink(inode) &&
 		       supported_features->symlink_reparse_points)))
 			return false;
 	}
 
-	if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) {
-		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) {
+	if (inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED) {
+		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY) {
 			if (!supported_features->encrypted_directories)
 				return false;
 		} else {
@@ -577,7 +577,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 	struct blob_descriptor *blob;
 	struct filedes _stdout;
 
-	if (inode->i_attributes & (FILE_ATTRIBUTE_REPARSE_POINT |
+	if (inode->i_file_flags & (FILE_ATTRIBUTE_REPARSE_POINT |
 				   FILE_ATTRIBUTE_DIRECTORY))
 	{
 		ERROR("\"%"TS"\" is not a regular file and therefore cannot be "
@@ -1182,27 +1182,27 @@ static void
 inode_tally_features(const struct wim_inode *inode,
 		     struct wim_features *features)
 {
-	if (inode->i_attributes & FILE_ATTRIBUTE_ARCHIVE)
+	if (inode->i_file_flags & FILE_ATTRIBUTE_ARCHIVE)
 		features->archive_files++;
-	if (inode->i_attributes & FILE_ATTRIBUTE_HIDDEN)
+	if (inode->i_file_flags & FILE_ATTRIBUTE_HIDDEN)
 		features->hidden_files++;
-	if (inode->i_attributes & FILE_ATTRIBUTE_SYSTEM)
+	if (inode->i_file_flags & FILE_ATTRIBUTE_SYSTEM)
 		features->system_files++;
-	if (inode->i_attributes & FILE_ATTRIBUTE_COMPRESSED)
+	if (inode->i_file_flags & FILE_ATTRIBUTE_COMPRESSED)
 		features->compressed_files++;
-	if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) {
-		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
+	if (inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED) {
+		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
 			features->encrypted_directories++;
 		else
 			features->encrypted_files++;
 	}
-	if (inode->i_attributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
+	if (inode->i_file_flags & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
 		features->not_context_indexed_files++;
-	if (inode->i_attributes & FILE_ATTRIBUTE_SPARSE_FILE)
+	if (inode->i_file_flags & FILE_ATTRIBUTE_SPARSE_FILE)
 		features->sparse_files++;
 	if (inode_has_named_data_stream(inode))
 		features->named_data_streams++;
-	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
 		features->reparse_points++;
 		if (inode_is_symlink(inode))
 			features->symlink_reparse_points++;

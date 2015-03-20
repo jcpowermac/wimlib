@@ -1211,7 +1211,7 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 	 * link bytes", and this size is multiplied by the link count (NOT one
 	 * less than the link count).
 	 */
-	if (!(inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+	if (!(inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
 				     FILE_ATTRIBUTE_REPARSE_POINT)))
 	{
 		struct blob_descriptor *blob;

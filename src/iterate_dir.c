@@ -113,7 +113,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	}
 	wdentry->reparse_tag = inode->i_reparse_tag;
 	wdentry->num_links = inode->i_nlink;
-	wdentry->attributes = inode->i_attributes;
+	wdentry->attributes = inode->i_file_flags;
 	wdentry->hard_link_group_id = inode->i_ino;
 	wdentry->creation_time = wim_timestamp_to_timespec(inode->i_creation_time);
 	wdentry->last_write_time = wim_timestamp_to_timespec(inode->i_last_write_time);
@@ -126,7 +126,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	}
 
 	attr = inode_get_attribute_utf16le(inode,
-					   (inode->i_attributes &
+					   (inode->i_file_flags &
 					    FILE_ATTRIBUTE_REPARSE_POINT) ?
 					   	ATTR_REPARSE_POINT : ATTR_DATA,
 					   NO_NAME);

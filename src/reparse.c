@@ -172,7 +172,7 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	struct reparse_buffer_disk *rpbuf_disk;
 	u16 rpdatalen;
 
-	wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
+	wimlib_assert(inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT);
 
 	if (!blob_override) {
 		struct wim_attribute *attr;
