@@ -920,14 +920,14 @@ wim_resource_spec_to_data(struct wim_resource_spec *rspec, void **buf_ret)
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	blob_bind_wim_resource_spec(blob, rspec);
+	blob_set_is_located_in_wim_resource(blob, rspec);
 	blob->flags = rspec->flags;
 	blob->size = rspec->uncompressed_size;
 	blob->offset_in_res = 0;
 
 	ret = read_full_blob_into_alloc_buf(blob, buf_ret);
 
-	blob_unbind_wim_resource_spec(blob);
+	blob_unset_is_located_in_wim_resource(blob);
 	free_blob_descriptor(blob);
 	return ret;
 }
@@ -962,7 +962,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 	if (blob == NULL)
 		return WIMLIB_ERR_NOMEM;
 
-	blob_bind_wim_resource_spec(blob, &rspec);
+	blob_set_is_located_in_wim_resource(blob, &rspec);
 	blob->flags = rspec.flags;
 	blob->size = rspec.uncompressed_size;
 	blob->offset_in_res = 0;
@@ -970,7 +970,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 
 	ret = sha1_blob(blob);
 
-	blob_unbind_wim_resource_spec(blob);
+	blob_unset_is_located_in_wim_resource(blob);
 	copy_hash(hash, blob->hash);
 	free_blob_descriptor(blob);
 	return ret;

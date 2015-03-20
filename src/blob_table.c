@@ -732,7 +732,7 @@ bind_blob_to_solid_resource(const struct wim_reshdr *reshdr,
 	for (size_t i = 0; i < num_rspecs; i++) {
 		if (offset + blob->size <= rspecs[i]->uncompressed_size) {
 			blob->offset_in_res = offset;
-			blob_bind_wim_resource_spec(blob, rspecs[i]);
+			blob_set_is_located_in_wim_resource(blob, rspecs[i]);
 			return 0;
 		}
 		offset -= rspecs[i]->uncompressed_size;
@@ -1009,7 +1009,7 @@ read_blob_table(WIMStruct *wim)
 			cur_entry->size = reshdr.uncompressed_size;
 			cur_entry->flags = reshdr.flags;
 
-			blob_bind_wim_resource_spec(cur_entry, rspec);
+			blob_set_is_located_in_wim_resource(cur_entry, rspec);
 		}
 
 		/* cur_entry is now a blob bound to a resource.  */
@@ -1091,7 +1091,7 @@ read_blob_table(WIMStruct *wim)
 	free_cur_entry_and_continue:
 		if (cur_solid_rspecs &&
 		    cur_entry->blob_location == BLOB_IN_WIM)
-			blob_unbind_wim_resource_spec(cur_entry);
+			blob_unset_is_located_in_wim_resource(cur_entry);
 		free_blob_descriptor(cur_entry);
 	}
 	cur_entry = NULL;

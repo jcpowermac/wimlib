@@ -362,7 +362,7 @@ blob_targets(struct blob_descriptor *blob)
 }
 
 static inline void
-blob_bind_wim_resource_spec(struct blob_descriptor *blob, struct wim_resource_spec *rspec)
+blob_set_is_located_in_wim_resource(struct blob_descriptor *blob, struct wim_resource_spec *rspec)
 {
 	blob->blob_location = BLOB_IN_WIM;
 	blob->rspec = rspec;
@@ -370,7 +370,7 @@ blob_bind_wim_resource_spec(struct blob_descriptor *blob, struct wim_resource_sp
 }
 
 static inline void
-blob_unbind_wim_resource_spec(struct blob_descriptor *blob)
+blob_unset_is_located_in_wim_resource(struct blob_descriptor *blob)
 {
 	list_del(&blob->rspec_node);
 	blob->blob_location = BLOB_NONEXISTENT;

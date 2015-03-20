@@ -209,7 +209,7 @@ read_pwm_blob_header(WIMStruct *pwm, struct blob_descriptor *blob,
 	reshdr.offset_in_wim = pwm->in_fd.offset;
 	reshdr.uncompressed_size = le64_to_cpu(buf.blob_hdr.uncompressed_size);
 	wim_res_hdr_to_spec(&reshdr, pwm, rspec);
-	blob_bind_wim_resource_spec(blob, rspec);
+	blob_set_is_located_in_wim_resource(blob, rspec);
 	blob->flags = rspec->flags;
 	blob->size = rspec->uncompressed_size;
 	blob->offset_in_res = 0;
@@ -251,7 +251,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 		struct blob_descriptor *needed_blob;
 
 		if (found_blob->blob_location != BLOB_NONEXISTENT)
-			blob_unbind_wim_resource_spec(found_blob);
+			blob_unset_is_located_in_wim_resource(found_blob);
 		ret = read_pwm_blob_header(ctx->wim, found_blob, rspec,
 					   PWM_ALLOW_WIM_HDR, &pwm_hdr);
 		if (ret)
@@ -266,13 +266,13 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 			needed_blob->flags = found_blob->flags;
 			needed_blob->size = found_blob->size;
 
-			blob_unbind_wim_resource_spec(found_blob);
-			blob_bind_wim_resource_spec(needed_blob, rspec);
+			blob_unset_is_located_in_wim_resource(found_blob);
+			blob_set_is_located_in_wim_resource(needed_blob, rspec);
 
 			ret = (*cbs->begin_blob)(needed_blob,
 						 cbs->begin_blob_ctx);
 			if (ret) {
-				blob_unbind_wim_resource_spec(needed_blob);
+				blob_unset_is_located_in_wim_resource(needed_blob);
 				goto out;
 			}
 
@@ -282,7 +282,7 @@ read_blobs_from_pipe(struct apply_ctx *ctx,
 
 			ret = (*cbs->end_blob)(needed_blob, ret,
 					       cbs->end_blob_ctx);
-			blob_unbind_wim_resource_spec(needed_blob);
+			blob_unset_is_located_in_wim_resource(needed_blob);
 			if (ret)
 				goto out;
 			ctx->num_blobs_remaining--;
