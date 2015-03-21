@@ -1058,7 +1058,7 @@ out:
  * @h
  *	Open handle to the file, with GENERIC_WRITE access.
  * @blob
- *	Unnamed data stream of the file.
+ *	The blob for the unnamed data stream of the file.
  * @data_source_id
  *	Allocated identifier for the WIM data source on the destination volume.
  * @blob_table_hash

@@ -41,7 +41,7 @@
 #include "wimlib/wim.h"
 
 #ifdef __WIN32__
-/* for read_winnt_file_prefix(), read_win32_encrypted_file_prefix() */
+/* for read_winnt_stream_prefix(), read_win32_encrypted_file_prefix() */
 #  include "wimlib/win32.h"
 #endif
 
@@ -863,7 +863,7 @@ read_blob_prefix(const struct blob_descriptor *blob, u64 size,
 		[BLOB_IN_NTFS_VOLUME] = read_ntfs_attribute_prefix,
 	#endif
 	#ifdef __WIN32__
-		[BLOB_IN_WINNT_FILE_ON_DISK] = read_winnt_file_prefix,
+		[BLOB_IN_WINNT_FILE_ON_DISK] = read_winnt_stream_prefix,
 		[BLOB_WIN32_ENCRYPTED] = read_win32_encrypted_file_prefix,
 	#endif
 	};

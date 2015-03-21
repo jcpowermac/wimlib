@@ -517,7 +517,7 @@ start_wimboot_extraction(struct win32_apply_ctx *ctx)
 		WARNING("Image is not marked as WIMBoot compatible!");
 
 	ret = hash_blob_table(ctx->common.wim,
-				ctx->wimboot.blob_table_hash);
+			      ctx->wimboot.blob_table_hash);
 	if (ret)
 		return ret;
 
@@ -632,10 +632,10 @@ inode_longest_named_data_stream_spec(const struct wim_inode *inode)
 {
 	size_t max = 0;
 	for (size_t i = 0; i < inode->i_num_streams; i++) {
-		const struct wim_inode_stream *stream = &inode->i_streams[i];
-		if (!stream_is_named_data_stream(stream))
+		const struct wim_inode_stream *strm = &inode->i_streams[i];
+		if (!stream_is_named_data_stream(strm))
 			continue;
-		size_t len = utf16le_len_bytes(stream->stream_name);
+		size_t len = utf16le_len_bytes(strm->stream_name);
 		if (len > max)
 			max = len;
 	}
@@ -1322,7 +1322,6 @@ create_empty_named_data_streams(const struct wim_dentry *dentry,
 		const struct wim_inode_stream *strm = &inode->i_streams[i];
 		HANDLE h;
 
-		/* Not named?  */
 		if (!stream_is_named_data_stream(strm) ||
 		    stream_blob_resolved(strm) != NULL)
 			continue;
@@ -2537,12 +2536,12 @@ win32_extract(struct list_head *dentry_list, struct apply_ctx *_ctx)
 		goto out;
 
 	struct read_blob_list_callbacks cbs = {
-		.begin_blob      = begin_extract_blob,
-		.begin_blob_ctx  = ctx,
+		.begin_blob        = begin_extract_blob,
+		.begin_blob_ctx    = ctx,
 		.consume_chunk     = extract_chunk,
 		.consume_chunk_ctx = ctx,
-		.end_blob        = end_extract_blob,
-		.end_blob_ctx    = ctx,
+		.end_blob          = end_extract_blob,
+		.end_blob_ctx      = ctx,
 	};
 	ret = extract_blob_list(&ctx->common, &cbs);
 	if (ret)

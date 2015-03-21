@@ -216,7 +216,7 @@ inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
  *	The name of the stream being added as a null-terminated UTF-16LE string,
  *	or NO_STREAM_NAME if the stream is unnamed
  * @blob
- *	The blob that the new stream will initially reference, or NULL.
+ *	The blob that the new stream will initially reference, or NULL
  *
  * Returns a pointer to the new stream, or NULL if it could not be added.
  */

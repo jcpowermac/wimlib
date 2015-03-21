@@ -105,8 +105,8 @@ retry:
 /* Read the first @size bytes from the file, or named data stream of a file,
  * from which the stream entry @blob was created.  */
 int
-read_winnt_file_prefix(const struct blob_descriptor *blob, u64 size,
-		       consume_data_callback_t cb, void *cb_ctx)
+read_winnt_stream_prefix(const struct blob_descriptor *blob, u64 size,
+			 consume_data_callback_t cb, void *cb_ctx)
 {
 	const wchar_t *path;
 	HANDLE h;
@@ -828,7 +828,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 				 struct list_head *unhashed_blobs)
 {
 	struct blob_descriptor *blob;
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 	int ret;
 
 	blob = new_blob_descriptor();
@@ -852,11 +852,11 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	if (ret)
 		goto err;
 
-	stream = inode_add_stream(inode, STREAM_TYPE_DATA, NO_STREAM_NAME, blob);
-	if (!stream)
+	strm = inode_add_stream(inode, STREAM_TYPE_DATA, NO_STREAM_NAME, blob);
+	if (!strm)
 		goto err_nomem;
 
-	prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, strm->stream_id, unhashed_blobs);
 	return 0;
 
 err_nomem:
@@ -899,6 +899,9 @@ get_data_stream_name(wchar_t *raw_stream_name, size_t raw_stream_name_nchars,
 	return true;
 }
 
+/* Build the path to the stream.  For unnamed streams, this is simply the path
+ * to the file.  For named streams, this is the path to the file, followed by a
+ * colon, followed by the stream name.  */
 static wchar_t *
 build_stream_path(const wchar_t *path, size_t path_nchars,
 		  const wchar_t *stream_name, size_t stream_name_nchars)
@@ -931,9 +934,8 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 {
 	wchar_t *stream_name;
 	size_t stream_name_nchars;
-	struct wim_inode_stream *stream;
-	wchar_t *stream_path;
 	struct blob_descriptor *blob;
+	struct wim_inode_stream *strm;
 
 	/* Given the raw stream name (which is something like
 	 * :streamname:$DATA), extract just the stream name part (streamname).
@@ -951,37 +953,34 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 		return 0;
 	}
 
-	/* Build the path to the stream.  For unnamed streams, this is simply
-	 * the path to the file.  For named streams, this is the path to the
-	 * file, followed by a colon, followed by the stream name.  */
-	stream_path = build_stream_path(path, path_nchars,
-					stream_name, stream_name_nchars);
-	if (!stream_path)
-		return WIMLIB_ERR_NOMEM;
-
-	/* Set up the blob descriptor for the stream.
-	 * (If the stream is empty, no blob descriptor is needed.) */
-	blob = NULL;
+	/* If the stream is non-empty, set up a blob descriptor for it.  */
 	if (stream_size != 0) {
 		blob = new_blob_descriptor();
-		if (!blob) {
-			FREE(stream_path);
-			return WIMLIB_ERR_NOMEM;
-		}
-		blob->file_on_disk = stream_path;
+		if (!blob)
+			goto err_nomem;
+		blob->file_on_disk = build_stream_path(path,
+						       path_nchars,
+						       stream_name,
+						       stream_name_nchars);
+		if (!blob->file_on_disk)
+			goto err_nomem;
 		blob->blob_location = BLOB_IN_WINNT_FILE_ON_DISK;
 		blob->size = stream_size;
 		blob->file_inode = inode;
+	} else {
+		blob = NULL;
 	}
 
-	stream = inode_add_stream(inode, STREAM_TYPE_DATA, stream_name, blob);
-	if (!stream) {
-		free_blob_descriptor(blob);
-		return WIMLIB_ERR_NOMEM;
-	}
+	strm = inode_add_stream(inode, STREAM_TYPE_DATA, stream_name, blob);
+	if (!strm)
+		goto err_nomem;
 
-	prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, strm->stream_id, unhashed_blobs);
 	return 0;
+
+err_nomem:
+	free_blob_descriptor(blob);
+	return WIMLIB_ERR_NOMEM;
 }
 
 /*
@@ -1065,11 +1064,11 @@ winnt_scan_data_streams(HANDLE h, const wchar_t *path, size_t path_nchars,
 	info = (FILE_STREAM_INFORMATION *)buf;
 	for (;;) {
 		/* Load the stream information.  */
-		ret = winnt_scan_stream(path, path_nchars,
-					info->StreamName,
-					info->StreamNameLength / 2,
-					info->StreamSize.QuadPart,
-					inode, unhashed_blobs);
+		ret = winnt_scan_data_stream(path, path_nchars,
+					     info->StreamName,
+					     info->StreamNameLength / 2,
+					     info->StreamSize.QuadPart,
+					     inode, unhashed_blobs);
 		if (ret)
 			goto out_free_buf;
 
