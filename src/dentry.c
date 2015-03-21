@@ -1692,14 +1692,13 @@ err_free_dentry_tree:
 }
 
 static u8 *
-write_extra_attribute_entry(u8 * restrict p,
-			    const utf16lechar * restrict name,
+write_extra_attribute_entry(u8 * restrict p, const utf16lechar * restrict name,
 			    const u8 * restrict hash)
 {
 	struct wim_inode_attribute_on_disk *disk_attr =
 			(struct wim_inode_attribute_on_disk *)p;
 	u8 *orig_p = p;
-	u16 name_nbytes;
+	size_t name_nbytes;
 
 	if (name == NO_NAME)
 		name_nbytes = 0;
@@ -1807,7 +1806,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	bool need_extra_attr_for_unnamed_data_stream = false;
 	u16 num_extra_attrs = 0;
 	const u8 *unnamed_data_stream_hash = zero_hash;
-	const u8 *reparse_point_hash = NULL;
+	const u8 *reparse_point_hash = zero_hash;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
 		switch (attr->attr_type) {
@@ -1827,15 +1826,11 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	}
 
 	if (need_extra_attr_for_unnamed_data_stream) {
-		copy_hash(disk_dentry->default_hash, zero_hash);
+		copy_hash(disk_dentry->default_hash, reparse_point_hash);
 		p = write_extra_attribute_entry(p, NO_NAME, unnamed_data_stream_hash);
 		num_extra_attrs++;
 	} else {
 		copy_hash(disk_dentry->default_hash, unnamed_data_stream_hash);
-	}
-	if (reparse_point_hash != NULL) {
-		p = write_extra_attribute_entry(p, NO_NAME, reparse_point_hash);
-		num_extra_attrs++;
 	}
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		const struct wim_inode_attribute *attr = &inode->i_attrs[i];

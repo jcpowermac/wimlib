@@ -2541,7 +2541,10 @@ print_dentry_detailed(const struct wimlib_dir_entry *dentry)
 			tprintf(T("\tData stream \"%"TS"\":\n"),
 				dentry->streams[i].stream_name);
 		} else {
-			tprintf(T("\tUnnamed data stream:\n"));
+			if (dentry->attributes & WIMLIB_FILE_ATTRIBUTE_REPARSE_POINT)
+				tprintf(T("\tReparse point stream:\n"));
+			else
+				tprintf(T("\tUnnamed data stream:\n"));
 		}
 		print_resource(&dentry->streams[i].resource, NULL);
 	}
