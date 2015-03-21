@@ -1301,14 +1301,15 @@ retry:
 	return WIMLIB_ERR_OPEN;
 }
 
-/* Create empty alternate (named) data streams.
+/*
+ * Create empty named data streams.
  *
  * Since these won't have 'struct blob_descriptor's, they won't show up in the
  * call to extract_blob_list().  Hence the need for the special case.
  */
 static int
-create_any_empty_ads(const struct wim_dentry *dentry,
-		     struct win32_apply_ctx *ctx)
+create_empty_named_data_streams(const struct wim_dentry *dentry,
+				struct win32_apply_ctx *ctx)
 {
 	const struct wim_inode *inode = dentry->d_inode;
 	bool path_modified = false;
@@ -1424,7 +1425,7 @@ create_directories(struct list_head *dentry_list,
 		ret = create_directory(dentry, ctx);
 
 		if (!ret)
-			ret = create_any_empty_ads(dentry, ctx);
+			ret = create_empty_named_data_streams(dentry, ctx);
 
 		ret = check_apply_error(dentry, ctx, ret);
 		if (ret)

@@ -34,6 +34,7 @@
 #include <unistd.h> /* for unlink()  */
 
 #include "wimlib/assert.h"
+#include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
 #include "wimlib/blob_table.h"

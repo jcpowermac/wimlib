@@ -315,21 +315,23 @@ out_close:
 	return ret;
 }
 
-/* Create empty alternate (named) data streams.
+/*
+ * Create empty named data streams.
  *
- * Since these won't have 'struct blob_descriptor's, they won't show up in the call to
- * extract_blob_list().  Hence the need for the special case.
+ * Since these won't have 'struct blob_descriptor's, they won't show up in the
+ * call to extract_blob_list().  Hence the need for the special case.
  */
 static int
-ntfs_3g_create_any_empty_ads(ntfs_inode *ni, const struct wim_inode *inode,
-			     const struct ntfs_3g_apply_ctx *ctx)
+ntfs_3g_create_empty_named_data_streams(ntfs_inode *ni,
+					const struct wim_inode *inode,
+					const struct ntfs_3g_apply_ctx *ctx)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 
 		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
 
 		if (!attribute_is_named_data_stream(attr) ||
-		    attribute_blob_resolved(attr))
+		    attribute_blob_resolved(attr) != NULL)
 			continue;
 
 		if (ntfs_attr_add(ni, AT_DATA, attr->attr_name,
@@ -444,7 +446,7 @@ ntfs_3g_create_dirs_recursive(ntfs_inode *dir_ni, struct wim_dentry *dir,
 		if (!ret)
 			ret = ntfs_3g_set_metadata(ni, child->d_inode, ctx);
 		if (!ret)
-			ret = ntfs_3g_create_any_empty_ads(ni, child->d_inode, ctx);
+			ret = ntfs_3g_create_empty_named_data_streams(ni, child->d_inode, ctx);
 		if (!ret)
 			ret = ntfs_3g_create_dirs_recursive(ni, child, ctx);
 

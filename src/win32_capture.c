@@ -925,10 +925,10 @@ build_stream_path(const wchar_t *path, size_t path_nchars,
 }
 
 static int
-winnt_scan_stream(const wchar_t *path, size_t path_nchars,
-		  wchar_t *raw_stream_name, size_t raw_stream_name_nchars,
-		  u64 stream_size,
-		  struct wim_inode *inode, struct list_head *unhashed_blobs)
+winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
+		       wchar_t *raw_stream_name, size_t raw_stream_name_nchars,
+		       u64 stream_size,
+		       struct wim_inode *inode, struct list_head *unhashed_blobs)
 {
 	wchar_t *stream_name;
 	size_t stream_name_nchars;
