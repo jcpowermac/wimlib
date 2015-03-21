@@ -30,12 +30,12 @@
 #include "wimlib/win32_common.h"
 
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/capture.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/paths.h"
 #include "wimlib/reparse.h"
 
@@ -853,8 +853,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	}
 
 	blob->file_inode = inode;
-	add_unhashed_blob(blob, inode, 0, unhashed_blobs);
-	inode->i_lte = blob;
+	prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
 	return 0;
 }
 
@@ -981,7 +980,7 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		inode->i_lte = blob;
 	}
 	blob->file_inode = inode;
-	add_unhashed_blob(blob, inode, stream_id, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
 	return 0;
 }
 

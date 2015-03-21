@@ -38,6 +38,8 @@
 #include "wimlib/blob_table.h"
 #include "wimlib/timestamp.h"
 
+const utf16lechar NO_NAME[1];
+
 /* Allocate a new inode.  Set the timestamps to the current time.  */
 struct wim_inode *
 new_inode(void)

@@ -11,15 +11,12 @@ struct filedes;
 struct wim_image_metadata;
 
 /*
- * Specification of a resource in a WIM file.
- *
- * If a `struct blob_descriptor' blob has (blob->blob_location == BLOB_IN_WIM),
- * then blob->rdesc points to an instance of this structure.
- *
- * Normally, there is a one-to-one correspondence between "blobs" (each of which
- * may be the contents of a file, for example) and resources.  However, a
- * resource with the WIM_RESHDR_FLAG_SOLID flag set is a "solid" resource that
- * may contain multiple blobs compressed together.
+ * Description of a "resource" in a WIM file.  A "resource" is a standalone,
+ * possibly compressed region of data.  Normally, there is a one-to-one
+ * correspondence between "blobs" (each of which may be the contents of a file,
+ * for example) and resources.  However, a resource with the
+ * WIM_RESHDR_FLAG_SOLID flag set is a "solid" resource that contains multiple
+ * blobs compressed together.
  */
 struct wim_resource_descriptor {
 	/* The WIM containing this resource.  @wim->in_fd is expected to be a

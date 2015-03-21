@@ -32,11 +32,11 @@
 #include <string.h>
 
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/error.h"
 #include "wimlib/file_io.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/resource.h"
 #include "wimlib/timestamp.h"
@@ -1226,9 +1226,7 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 
 		if (inode->i_nlink >= 2 && dentry_is_first_in_inode(dentry)) {
 			for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-				if (inode->i_attrs[i].attr_type == ATTR_DATA &&
-				    *inode->i_attrs[i].attr_name)
-				{
+				if (attribute_is_named_data_stream(&inode->i_attrs[i])) {
 					blob = attribute_blob(&inode->i_attrs[i],
 							      info->blob_table);
 					if (blob) {

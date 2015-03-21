@@ -32,10 +32,10 @@
 #include "wimlib/alloca.h"
 #include "wimlib/assert.h"
 #include "wimlib/bitops.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
 #include "wimlib/file_io.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/resource.h"
 #include "wimlib/sha1.h"
 #include "wimlib/wim.h"
@@ -629,7 +629,7 @@ bufferer_cb(const void *chunk, size_t size, void *_ctx)
  * file.
  *
  * @rdesc
- *	Specification of the WIM resource to read from.
+ *	Description of the WIM resource to read from.
  * @offset
  *	Offset within the uncompressed resource at which to start reading.
  * @size
@@ -829,9 +829,9 @@ read_buffer_prefix(const struct blob_descriptor *blob,
 }
 
 typedef int (*read_blob_prefix_handler_t)(const struct blob_descriptor *blob,
-					    u64 size,
-					    consume_data_callback_t cb,
-					    void *cb_ctx);
+					  u64 size,
+					  consume_data_callback_t cb,
+					  void *cb_ctx);
 
 /*
  * read_blob_prefix()-
@@ -850,21 +850,21 @@ typedef int (*read_blob_prefix_handler_t)(const struct blob_descriptor *blob,
  */
 static int
 read_blob_prefix(const struct blob_descriptor *blob, u64 size,
-		   consume_data_callback_t cb, void *cb_ctx)
+		 consume_data_callback_t cb, void *cb_ctx)
 {
 	static const read_blob_prefix_handler_t handlers[] = {
-		[BLOB_IN_WIM]             = read_wim_blob_prefix,
-		[BLOB_IN_FILE_ON_DISK]    = read_file_on_disk_prefix,
+		[BLOB_IN_WIM] = read_wim_blob_prefix,
+		[BLOB_IN_FILE_ON_DISK] = read_file_on_disk_prefix,
 		[BLOB_IN_ATTACHED_BUFFER] = read_buffer_prefix,
 	#ifdef WITH_FUSE
-		[BLOB_IN_STAGING_FILE]    = read_staging_file_prefix,
+		[BLOB_IN_STAGING_FILE] = read_staging_file_prefix,
 	#endif
 	#ifdef WITH_NTFS_3G
-		[BLOB_IN_NTFS_VOLUME]     = read_ntfs_file_prefix,
+		[BLOB_IN_NTFS_VOLUME] = read_ntfs_file_prefix,
 	#endif
 	#ifdef __WIN32__
 		[BLOB_IN_WINNT_FILE_ON_DISK] = read_winnt_file_prefix,
-		[BLOB_WIN32_ENCRYPTED]    = read_win32_encrypted_file_prefix,
+		[BLOB_WIN32_ENCRYPTED] = read_win32_encrypted_file_prefix,
 	#endif
 	};
 	wimlib_assert(blob->blob_location < ARRAY_LEN(handlers)
@@ -908,21 +908,25 @@ read_full_blob_into_alloc_buf(const struct blob_descriptor *blob, void **buf_ret
 	return 0;
 }
 
-/* Retrieve the full uncompressed data of the specified WIM resource.  A buffer
- * large enough hold the data is allocated and returned in @buf_ret.  */
-static int
-wim_resource_descriptor_to_data(struct wim_resource_descriptor *rdesc, void **buf_ret)
+/* Retrieve the full uncompressed data of a WIM resource specified as a raw
+ * `wim_reshdr' and the corresponding WIM file.  A buffer large enough hold the
+ * data is allocated and returned in @buf_ret.  */
+int
+wim_reshdr_to_data(const struct wim_reshdr *reshdr, WIMStruct *wim, void **buf_ret)
 {
-	int ret;
+	struct wim_resource_descriptor rdesc;
 	struct blob_descriptor *blob;
+	int ret;
+
+	wim_res_hdr_to_spec(reshdr, wim, &rdesc);
 
 	blob = new_blob_descriptor();
-	if (blob == NULL)
+	if (!blob)
 		return WIMLIB_ERR_NOMEM;
 
-	blob_set_is_located_in_wim_resource(blob, rdesc);
-	blob->flags = rdesc->flags;
-	blob->size = rdesc->uncompressed_size;
+	blob_set_is_located_in_wim_resource(blob, &rdesc);
+	blob->flags = rdesc.flags;
+	blob->size = rdesc.uncompressed_size;
 	blob->offset_in_res = 0;
 
 	ret = read_full_blob_into_alloc_buf(blob, buf_ret);
@@ -930,22 +934,6 @@ wim_resource_descriptor_to_data(struct wim_resource_descriptor *rdesc, void **bu
 	blob_unset_is_located_in_wim_resource(blob);
 	free_blob_descriptor(blob);
 	return ret;
-}
-
-/* Retrieve the full uncompressed data of a WIM resource specified as a raw
- * `wim_reshdr' and the corresponding WIM file.  A large enough hold the data is
- * allocated and returned in @buf_ret.  */
-int
-wim_reshdr_to_data(const struct wim_reshdr *reshdr, WIMStruct *wim, void **buf_ret)
-{
-	DEBUG("offset_in_wim=%"PRIu64", size_in_wim=%"PRIu64", "
-	      "uncompressed_size=%"PRIu64,
-	      reshdr->offset_in_wim, reshdr->size_in_wim,
-	      reshdr->uncompressed_size);
-
-	struct wim_resource_descriptor rdesc;
-	wim_res_hdr_to_spec(reshdr, wim, &rdesc);
-	return wim_resource_descriptor_to_data(&rdesc, buf_ret);
 }
 
 int
@@ -1015,7 +1003,7 @@ blobifier_cb(const void *chunk, size_t size, void *_ctx)
 		DEBUG("Begin new blob (size=%"PRIu64").", ctx->cur_blob->size);
 
 		ret = (*ctx->cbs.begin_blob)(ctx->cur_blob,
-					       ctx->cbs.begin_blob_ctx);
+					     ctx->cbs.begin_blob_ctx);
 		if (ret)
 			return ret;
 	}
@@ -1157,7 +1145,7 @@ read_full_blob_with_cbs(struct blob_descriptor *blob,
 		return ret;
 
 	ret = read_blob_prefix(blob, blob->size, cbs->consume_chunk,
-				 cbs->consume_chunk_ctx);
+			       cbs->consume_chunk_ctx);
 
 	return (*cbs->end_blob)(blob, ret, cbs->end_blob_ctx);
 }
@@ -1175,7 +1163,7 @@ read_full_blob_with_sha1(struct blob_descriptor *blob,
 	};
 	struct read_blob_list_callbacks hasher_cbs = {
 		.begin_blob		= hasher_begin_blob,
-		.begin_blob_ctx	= &hasher_ctx,
+		.begin_blob_ctx		= &hasher_ctx,
 		.consume_chunk		= hasher_consume_chunk,
 		.consume_chunk_ctx	= &hasher_ctx,
 		.end_blob		= hasher_end_blob,
@@ -1262,10 +1250,10 @@ read_blobs_in_solid_resource(struct blob_descriptor *first_blob,
 
 /*
  * Read a list of blobs, each of which may be in any supported location (e.g.
- * in a WIM or in an external file).  Unlike read_blob_prefix() or the functions
- * which call it, this function optimizes the case where multiple blobs are
- * combined into a single solid compressed WIM resource and reads them all
- * consecutively, only decompressing the data one time.
+ * in a WIM or in an external file).  This function optimizes the case where
+ * multiple blobs are combined into a single solid compressed WIM resource by
+ * reading the blobs in sequential order, only decompressing the solid resource
+ * one time.
  *
  * @blob_list
  *	List of blobs to read.
@@ -1325,7 +1313,7 @@ read_blob_list(struct list_head *blob_list,
 		sink_cbs = alloca(sizeof(*sink_cbs));
 		*sink_cbs = (struct read_blob_list_callbacks) {
 			.begin_blob		= hasher_begin_blob,
-			.begin_blob_ctx	= hasher_ctx,
+			.begin_blob_ctx		= hasher_ctx,
 			.consume_chunk		= hasher_consume_chunk,
 			.consume_chunk_ctx	= hasher_ctx,
 			.end_blob		= hasher_end_blob,

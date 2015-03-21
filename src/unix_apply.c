@@ -33,10 +33,10 @@
 
 #include "wimlib/apply.h"
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
 #include "wimlib/file_io.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/reparse.h"
 #include "wimlib/timestamp.h"
 #include "wimlib/unix_data.h"

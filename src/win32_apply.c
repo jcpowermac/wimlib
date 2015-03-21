@@ -29,10 +29,10 @@
 
 #include "wimlib/apply.h"
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/capture.h" /* for mangle_pat() and match_pattern_list()  */
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/reparse.h"

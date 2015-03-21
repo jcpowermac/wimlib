@@ -304,8 +304,9 @@ for_blob_in_table(struct blob_table *table,
 	 int (*visitor)(struct blob_descriptor *, void *), void *arg);
 
 extern int
-for_blob_pos_sorted(struct blob_table *table,
-		    int (*visitor)(struct blob_descriptor *, void *), void *arg);
+for_blob_in_table_sorted_by_sequential_order(struct blob_table *table,
+					     int (*visitor)(struct blob_descriptor *, void *),
+					     void *arg);
 
 /* Function to get a "resource entry" (should be called "blob entry") in stable
  * format  */
@@ -384,14 +385,18 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
 			  struct blob_table *blob_table);
 
 static inline void
-add_unhashed_blob(struct blob_descriptor *blob,
-		  struct wim_inode *back_inode,
-		  u32 back_attr_id,
-		  struct list_head *unhashed_blobs)
+prepare_unhashed_blob(struct blob_descriptor *blob,
+		      struct wim_inode *back_inode,
+		      struct wim_inode_attribute *back_attr,
+		      struct list_head *unhashed_blobs)
 {
+	if (!blob)
+		return;
 	blob->unhashed = 1;
 	blob->back_inode = back_inode;
-	blob->back_attr_id = back_attr_id;
+	blob->back_attr_id = back_attr->attr_id;
+	back_attr->attr_blob = blob;
+	back_attr->attr_resolved = 1;
 	list_add_tail(&blob->unhashed_list, unhashed_blobs);
 }
 

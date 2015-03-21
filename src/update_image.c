@@ -55,12 +55,12 @@
 
 #include "wimlib/alloca.h"
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/capture.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #ifdef WITH_NTFS_3G
 #  include "wimlib/ntfs_3g.h" /* for do_ntfs_umount() */

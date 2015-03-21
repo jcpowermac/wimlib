@@ -33,12 +33,12 @@
 
 #include "wimlib.h"
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/bitops.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/file_io.h"
 #include "wimlib/integrity.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #ifdef WITH_NTFS_3G
 #  include "wimlib/ntfs_3g.h" /* for do_ntfs_umount() */
@@ -182,7 +182,6 @@ WIMLIBAPI int
 wimlib_create_new_wim(int ctype, WIMStruct **wim_ret)
 {
 	WIMStruct *wim;
-	struct blob_table *table;
 	int ret;
 
 	ret = wimlib_global_init(WIMLIB_INIT_FLAG_ASSUME_UTF8);
@@ -197,12 +196,11 @@ wimlib_create_new_wim(int ctype, WIMStruct **wim_ret)
 	if (ret)
 		goto out_free_wim;
 
-	table = new_blob_table(9001);
-	if (!table) {
+	wim->blob_table = new_blob_table(9001);
+	if (!wim->blob_table) {
 		ret = WIMLIB_ERR_NOMEM;
 		goto out_free_wim;
 	}
-	wim->blob_table = table;
 	wim->compression_type = ctype;
 	wim->out_compression_type = ctype;
 	wim->chunk_size = wim->hdr.chunk_size;
@@ -218,14 +216,14 @@ out_free_wim:
 static void
 destroy_image_metadata(struct wim_image_metadata *imd,
 		       struct blob_table *table,
-		       bool free_metadata_blob)
+		       bool free_metadata_blob_descriptor)
 {
 	free_dentry_tree(imd->root_dentry, table);
 	imd->root_dentry = NULL;
 	free_wim_security_data(imd->security_data);
 	imd->security_data = NULL;
 
-	if (free_metadata_blob) {
+	if (free_metadata_blob_descriptor) {
 		free_blob_descriptor(imd->metadata_blob);
 		imd->metadata_blob = NULL;
 	}
@@ -813,8 +811,8 @@ wimlib_open_wim(const tchar *wimfile, int open_flags, WIMStruct **wim_ret)
 }
 
 /* Checksum all blobs that are unhashed (other than the metadata blobs), merging
- * them into the blob table as needed.  This is a no-op unless the library has
- * previously used to add or mount an image using the same WIMStruct. */
+ * them into the blob table as needed.  This is a no-op unless files have been
+ * added to an image in the same WIMStruct.  */
 int
 wim_checksum_unhashed_blobs(WIMStruct *wim)
 {

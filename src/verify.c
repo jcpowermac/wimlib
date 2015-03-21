@@ -25,9 +25,9 @@
 #  include "config.h"
 #endif
 
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/progress.h"
 #include "wimlib/security.h"
@@ -47,7 +47,7 @@ struct verify_blob_list_ctx {
 };
 
 static int
-end_verify_stream(struct blob_descriptor *blob, int status, void *_ctx)
+end_verify_blob(struct blob_descriptor *blob, int status, void *_ctx)
 {
 	struct verify_blob_list_ctx *ctx = _ctx;
 	union wimlib_progress_info *progress = ctx->progress;
@@ -117,7 +117,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 	struct verify_blob_list_ctx ctx;
 	struct blob_descriptor *blob;
 	struct read_blob_list_callbacks cbs = {
-		.end_blob = end_verify_stream,
+		.end_blob = end_verify_blob,
 		.end_blob_ctx = &ctx,
 	};
 
@@ -165,7 +165,7 @@ wimlib_verify_wim(WIMStruct *wim, int verify_flags)
 			wim->filename);
 	}
 
-	/* Verify the streams  */
+	/* Verify the blobs: SHA-1 message digests must match  */
 
 	for_blob_in_table(wim->blob_table, append_blob_to_list, &blob_list);
 

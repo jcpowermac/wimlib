@@ -296,8 +296,8 @@ out_free_new_table:
  *	being written.
  *
  * @old_blob_table_end:
- *	If nonzero, the offset of the byte directly following the old lookup
- *	table in the WIM.
+ *	If nonzero, the offset of the byte directly following the old blob table
+ *	in the WIM.
  *
  * @old_table
  *	Pointer to the old integrity table read into memory, or NULL if not

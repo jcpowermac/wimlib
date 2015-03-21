@@ -527,8 +527,9 @@ add_blob_to_array(struct blob_descriptor *blob, void *_pp)
 /* Iterate through the blobs in the specified blob table, but first sort them in
  * an order optimized for sequential reading.  */
 int
-for_blob_pos_sorted(struct blob_table *table,
-		    int (*visitor)(struct blob_descriptor *, void *), void *arg)
+for_blob_in_table_sorted_by_sequential_order(struct blob_table *table,
+					     int (*visitor)(struct blob_descriptor *, void *),
+					     void *arg)
 {
 	struct blob_descriptor **blob_array, **p;
 	size_t num_blobs = table->num_blobs;

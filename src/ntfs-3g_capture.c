@@ -257,9 +257,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_free_blob;
 		}
-		attr->attr_blob = blob;
-		if (blob)
-			add_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
+		prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
 	}
 	if (errno == ENOENT) {
 		ret = 0;

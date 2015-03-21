@@ -36,8 +36,8 @@
 #include "wimlib/win32_common.h"
 
 #include "wimlib/assert.h"
-#include "wimlib/error.h"
 #include "wimlib/blob_table.h"
+#include "wimlib/error.h"
 #include "wimlib/util.h"
 #include "wimlib/wimboot.h"
 #include "wimlib/win32.h"

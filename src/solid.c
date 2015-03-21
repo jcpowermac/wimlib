@@ -25,10 +25,10 @@
 #  include "config.h"
 #endif
 
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/solid.h"
@@ -143,7 +143,7 @@ dentry_fill_in_solid_sort_names(struct wim_dentry *dentry, void *_blob_table)
 
 	hash = inode_get_hash_of_unnamed_data_stream(inode);
 	head = &blob_table->table[load_size_t_unaligned(hash) %
-				    blob_table->capacity];
+				  blob_table->capacity];
 	hlist_for_each_entry(blob, cur, head, hash_list_2) {
 		if (hashes_equal(hash, blob->hash)) {
 			blob_set_solid_sort_name_from_inode(blob, inode);
@@ -204,7 +204,7 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 		found_wim:
 			hlist_add_head(&blob->hash_list_2,
 				       &blob_table.table[load_size_t_unaligned(blob->hash) %
-							   blob_table.capacity]);
+							 blob_table.capacity]);
 			break;
 		case BLOB_IN_FILE_ON_DISK:
 	#ifdef __WIN32__
@@ -232,9 +232,9 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 	}
 
 	ret = sort_blob_list(blob_list,
-			       offsetof(struct blob_descriptor,
-					write_blobs_list),
-			       cmp_blobs_by_solid_sort_name);
+			     offsetof(struct blob_descriptor,
+				      write_blobs_list),
+			     cmp_blobs_by_solid_sort_name);
 
 out:
 	list_for_each_entry(blob, blob_list, write_blobs_list)

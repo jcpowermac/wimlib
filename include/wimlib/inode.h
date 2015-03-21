@@ -23,7 +23,7 @@ enum {
 	ATTR_UNKNOWN,
 };
 
-static const utf16lechar NO_NAME[] = { 0 };
+extern const utf16lechar NO_NAME[1];
 
 /*
  * 'struct wim_inode_attribute' represents an NTFS-style attribute, which is a
@@ -365,6 +365,18 @@ inode_add_attribute_with_data(struct wim_inode *inode, int attr_type,
 			      const tchar *attr_name,
 			      const void *data, size_t size,
 			      struct blob_table *blob_table);
+
+static inline bool
+attribute_is_named(const struct wim_inode_attribute *attr)
+{
+	return attr->attr_name != NO_NAME;
+}
+
+static inline bool
+attribute_is_named_data_stream(const struct wim_inode_attribute *attr)
+{
+	return attr->attr_type == ATTR_DATA && attribute_is_named(attr);
+}
 
 extern bool
 inode_has_named_data_stream(const struct wim_inode *inode);

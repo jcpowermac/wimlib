@@ -32,10 +32,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "wimlib/blob_table.h"
 #include "wimlib/capture.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/reparse.h"
 #include "wimlib/timestamp.h"
 #include "wimlib/unix_data.h"
@@ -103,7 +103,7 @@ static int
 unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		       struct list_head *unhashed_blobs)
 {
-	struct blob_descriptor *blob;
+	struct blob_descriptor *blob = NULL;
 	struct wim_inode_attribute *attr;
 
 	inode->i_file_flags = FILE_ATTRIBUTE_NORMAL;
@@ -121,8 +121,6 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		blob->file_inode = inode;
 		blob->blob_location = BLOB_IN_FILE_ON_DISK;
 		blob->size = size;
-	} else {
-		blob = NULL;
 	}
 
 	attr = inode_add_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
@@ -130,8 +128,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
-	add_unhashed_blob(blob, inode, 0, unhashed_blobs);
-	attr->attr_blob = blob;
+	prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
 	return 0;
 }
 

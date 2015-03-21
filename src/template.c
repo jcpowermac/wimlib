@@ -26,8 +26,8 @@
 #endif
 
 #include "wimlib.h"
-#include "wimlib/assert.h"
 #include "wimlib/blob_table.h"
+#include "wimlib/assert.h"
 #include "wimlib/dentry.h"
 #include "wimlib/error.h"
 #include "wimlib/metadata.h"
