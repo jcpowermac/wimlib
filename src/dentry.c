@@ -1002,7 +1002,6 @@ new_filler_directory(struct wim_dentry **dentry_ret)
 		return ret;
 	/* Leave the inode number as 0; this is allowed for non
 	 * hard-linked files. */
-	dentry->d_inode->i_resolved = 1;
 	dentry->d_inode->i_file_flags = FILE_ATTRIBUTE_DIRECTORY;
 	*dentry_ret = dentry;
 	return 0;

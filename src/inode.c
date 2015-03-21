@@ -260,9 +260,9 @@ inode_remove_attribute(struct wim_inode *inode, struct wim_inode_attribute *attr
 	unsigned idx = attr - inode->i_attrs;
 
 	wimlib_assert(idx < inode->i_num_attrs);
-	wimlib_assert(inode->i_resolved);
+	wimlib_assert(attr->attr_resolved);
 
-	blob = attr->attr_blob;
+	blob = attribute_blob(attr, blob_table);
 	if (blob)
 		blob_decrement_refcnt(blob, blob_table);
 
@@ -282,8 +282,6 @@ inode_add_attribute_with_data(struct wim_inode *inode,
 {
 	struct wim_inode_attribute *new_attr;
 
-	wimlib_assert(inode->i_resolved);
-
 	new_attr = inode_add_attribute(inode, attr_type, attr_name);
 	if (unlikely(!new_attr))
 		return NULL;
@@ -293,6 +291,7 @@ inode_add_attribute_with_data(struct wim_inode *inode,
 		inode_remove_attribute(inode, new_attr, NULL);
 		return NULL;
 	}
+	new_attr->attr_resolved = 1;
 	return new_attr;
 }
 
@@ -322,8 +321,6 @@ inode_has_named_data_stream(const struct wim_inode *inode)
  *	course, cause the data of these blobs to magically exist, but this is
  *	needed by the code for extraction from a pipe.
  *
- * If the inode is already resolved, this function does nothing.
- *
  * Returns 0 on success; WIMLIB_ERR_NOMEM if out of memory; or
  * WIMLIB_ERR_RESOURCE_NOT_FOUND if @force is %false and at least one blob
  * referenced by the inode was missing.
@@ -334,10 +331,10 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 {
 	struct blob_descriptor *blobs[inode->i_num_attrs];
 
-	if (inode->i_resolved)
-		return 0;
-
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+
+		if (inode->i_attrs[i].attr_resolved)
+			continue;
 
 		const u8 *hash = inode->i_attrs[i].attr_hash;
 		struct blob_descriptor *blob = NULL;
@@ -358,25 +355,25 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 	}
 
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		if (inode->i_attrs[i].attr_resolved)
+			continue;
 		inode->i_attrs[i].attr_blob = blobs[i];
 		inode->i_attrs[i].attr_resolved = 1;
 	}
-	inode->i_resolved = 1;
 	return 0;
 }
 
 /*
  * Undo the effects of inode_resolve_attributes().
- *
- * If the inode is not resolved, this function does nothing.
  */
 void
 inode_unresolve_attributes(struct wim_inode *inode)
 {
-	if (!inode->i_resolved)
-		return;
-
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+
+		if (!inode->i_attrs[i].attr_resolved)
+			continue;
+
 		if (inode->i_attrs[i].attr_blob)
 			copy_hash(inode->i_attrs[i].attr_hash,
 				  inode->i_attrs[i].attr_blob->hash);
@@ -384,7 +381,6 @@ inode_unresolve_attributes(struct wim_inode *inode)
 			zero_out_hash(inode->i_attrs[i].attr_hash);
 		inode->i_attrs[i].attr_resolved = 0;
 	}
-	inode->i_resolved = 0;
 }
 
 int
@@ -429,7 +425,7 @@ attribute_hash(const struct wim_inode_attribute *attr)
  */
 struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
-				       const struct blob_table *table)
+				       const struct blob_table *blob_table)
 {
 	struct wim_inode_attribute *attr;
 
@@ -437,10 +433,7 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 	if (!attr)
 		return NULL;
 
-	if (inode->i_resolved)
-		return attr->attr_blob;
-	else
-		return lookup_blob(table, attr->attr_hash);
+	return attribute_blob(attr, table);
 }
 
 /* Return the SHA-1 message digest of the unnamed data stream of the inode, or a
@@ -460,15 +453,15 @@ inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 /* Acquire another reference to each blob referenced by this inode.  This is
  * necessary when creating a hard link to this inode.
  *
- * The inode must be resolved.  */
+ * All attributes of the inode must be resolved.  */
 void
 inode_ref_attributes(struct wim_inode *inode)
 {
-	wimlib_assert(inode->i_resolved);
-
-	for (unsigned i = 0; i < inode->i_num_attrs; i++)
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		wimlib_assert(inode->i_attrs[i].attr_resolved);
 		if (inode->i_attrs[i].attr_blob)
 			inode->i_attrs[i].attr_blob->refcnt++;
+	}
 }
 
 /* Drop a reference to each blob referenced by this inode.  This is necessary

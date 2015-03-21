@@ -54,15 +54,14 @@ inode_metadata_consistent(const struct wim_inode *inode,
 	if (inode->i_num_attrs != template_inode->i_num_attrs)
 		return false;
 
-	/* If the attributes for the inode are for some reason not resolved,
-	 * then the hashes are already available and the point of this function
-	 * is defeated.  */
-	if (!inode->i_resolved)
-		return false;
-
-	/* Iterate through each attribute and do some more checks.  */
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		const struct blob_descriptor *blob, *template_blob;
+
+		/* If the attributes for the inode are for some reason not
+		 * resolved, then the hashes are already available and the point
+		 * of this function is defeated.  */
+		if (!inode->i_attrs[i].attr_resolved)
+			return false;
 
 		blob = inode->i_attrs[i].attr_blob;
 		template_blob = attribute_blob(&template_inode->i_attrs[i],

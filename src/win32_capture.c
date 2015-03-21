@@ -1313,7 +1313,6 @@ retry_open:
 	inode->i_creation_time = file_info.BasicInformation.CreationTime.QuadPart;
 	inode->i_last_write_time = file_info.BasicInformation.LastWriteTime.QuadPart;
 	inode->i_last_access_time = file_info.BasicInformation.LastAccessTime.QuadPart;
-	inode->i_resolved = 1;
 
 	/* Get the file's security descriptor, unless we are capturing in
 	 * NO_ACLS mode or the volume does not support security descriptors.  */

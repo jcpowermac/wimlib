@@ -112,15 +112,6 @@ struct wim_inode {
 	/* Number of dentries that are aliases for this inode.  */
 	u32 i_nlink;
 
-	/* Flag that indicates whether this inode's attributes have been
-	 * "resolved".  By default, the inode starts as "unresolved", meaning
-	 * the 'attr_hash' field of each associated attribute is valid and
-	 * should be used as a key into the blob table to find the associated
-	 * 'struct blob_descriptor'.  But if the inode has been "resolved", then each
-	 * 'attr_hash' field has been overlain with a pointer directly to the
-	 * appropriate 'struct blob_descriptor'.  */
-	u8 i_resolved : 1;
-
 	/* Flag used to mark this inode as visited; this is used when visiting
 	 * all the inodes in a dentry tree exactly once.  It will be 0 by
 	 * default and must be cleared following the tree traversal, even in
@@ -397,7 +388,7 @@ attribute_blob(const struct wim_inode_attribute *attr,
 
 extern struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
-				       const struct blob_table *table);
+				       const struct blob_table *blob_table);
 
 extern const u8 *
 attribute_hash(const struct wim_inode_attribute *attr);

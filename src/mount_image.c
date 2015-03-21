@@ -456,7 +456,6 @@ create_dentry(struct fuse_context *fuse_ctx, const char *path,
 
 	new_inode = new_dentry->d_inode;
 
-	new_inode->i_resolved = 1;
 	new_inode->i_ino = wimfs_ctx->next_ino++;
 	new_inode->i_file_flags = attributes;
 

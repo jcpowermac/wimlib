@@ -399,7 +399,6 @@ unix_build_dentry_tree_recursive(struct wim_dentry **tree_ret,
 	inode->i_last_write_time = time_t_to_wim_timestamp(stbuf.st_mtime);
 	inode->i_last_access_time = time_t_to_wim_timestamp(stbuf.st_atime);
 #endif
-	inode->i_resolved = 1;
 	if (params->add_flags & WIMLIB_ADD_FLAG_UNIX_DATA) {
 		struct wimlib_unix_data unix_data;
 
