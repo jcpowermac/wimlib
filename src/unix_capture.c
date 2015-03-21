@@ -123,8 +123,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		blob->size = size;
 	}
 
-	stream = inode_add_stream_utf16le_with_blob(inode, STREAM_TYPE_DATA,
-						     NO_STREAM_NAME, blob);
+	stream = inode_add_stream(inode, STREAM_TYPE_DATA, NO_STREAM_NAME, blob);
 	if (!stream) {
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;

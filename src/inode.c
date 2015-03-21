@@ -150,22 +150,6 @@ inode_dec_num_opened_fds(struct wim_inode *inode)
 #endif
 
 struct wim_inode_stream *
-inode_get_stream_utf16le(const struct wim_inode *inode, int stream_type,
-			 const utf16lechar *stream_name)
-{
-	for (unsigned i = 0; i < inode->i_num_streams; i++) {
-		struct wim_inode_stream *strm = &inode->i_streams[i];
-		if (strm->stream_type == stream_type &&
-		    !cmp_utf16le_strings_z(strm->stream_name, stream_name,
-					   default_ignore_case))
-		{
-			return strm;
-		}
-	}
-	return NULL;
-}
-
-struct wim_inode_stream *
 inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
 {
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
@@ -181,24 +165,26 @@ inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
 
 struct wim_inode_stream *
 inode_get_stream(const struct wim_inode *inode, int stream_type,
-		 const tchar *stream_name)
+		 const utf16lechar *stream_name)
 {
-	const utf16lechar *ustr;
-	struct wim_inode_stream *strm;
+	if (stream_name == NO_STREAM_NAME)
+		return inode_get_unnamed_stream(inode, stream_type);
 
-	if (tstr_get_utf16le(stream_name, &ustr))
-		return NULL;
-
-	strm = inode_get_stream_utf16le(inode, stream_type, ustr);
-
-	tstr_put_utf16le(ustr);
-
-	return strm;
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		struct wim_inode_stream *strm = &inode->i_streams[i];
+		if (strm->stream_type == stream_type &&
+		    !cmp_utf16le_strings_z(strm->stream_name, stream_name,
+					   default_ignore_case))
+		{
+			return strm;
+		}
+	}
+	return NULL;
 }
 
-static struct wim_inode_stream *
-inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
-			 const utf16lechar *stream_name)
+struct wim_inode_stream *
+inode_add_stream(struct wim_inode *inode, int stream_type,
+		 const utf16lechar *stream_name, struct blob_descriptor *blob)
 {
 	if (inode->i_num_streams >= 0xFFFF) {
 		ERROR("Inode has too many streams! Path=\"%"TS"\"",
@@ -246,24 +232,9 @@ inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
 	inode->i_streams = streams;
 	inode->i_num_streams++;
 
+	stream_set_blob(new_stream, blob);
+
 	return new_stream;
-}
-
-static struct wim_inode_stream *
-inode_add_stream(struct wim_inode *inode, int stream_type,
-		 const tchar *stream_name)
-{
-	const utf16lechar *ustr;
-	struct wim_inode_stream *strm;
-
-	if (tstr_get_utf16le(stream_name, &ustr))
-		return NULL;
-
-	strm = inode_add_stream_utf16le(inode, stream_type, ustr);
-
-	tstr_put_utf16le(ustr);
-
-	return strm;
 }
 
 void
@@ -289,35 +260,8 @@ inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
 }
 
 struct wim_inode_stream *
-inode_add_stream_utf16le_with_blob(struct wim_inode *inode,
-				   int stream_type,
-				   const utf16lechar *stream_name,
-				   struct blob_descriptor *blob)
-{
-	struct wim_inode_stream *strm;
-
-	strm = inode_add_stream_utf16le(inode, stream_type, stream_name);
-	if (strm)
-		stream_set_blob(strm, blob);
-	return strm;
-}
-
-struct wim_inode_stream *
-inode_add_stream_with_blob(struct wim_inode *inode,
-			   int stream_type, const tchar *stream_name,
-			   struct blob_descriptor *blob)
-{
-	struct wim_inode_stream *strm;
-
-	strm = inode_add_stream(inode, stream_type, stream_name);
-	if (strm)
-		stream_set_blob(strm, blob);
-	return strm;
-}
-
-struct wim_inode_stream *
 inode_add_stream_with_data(struct wim_inode *inode,
-			   int stream_type, const tchar *stream_name,
+			   int stream_type, const utf16lechar *stream_name,
 			   const void *data, size_t size,
 			   struct blob_table *blob_table)
 {
@@ -328,31 +272,9 @@ inode_add_stream_with_data(struct wim_inode *inode,
 	if (!blob)
 		return NULL;
 
-	strm = inode_add_stream_with_blob(inode, stream_type, stream_name, blob);
-
+	strm = inode_add_stream(inode, stream_type, stream_name, blob);
 	if (!strm)
 		blob_decrement_refcnt(blob, blob_table);
-
-	return strm;
-}
-
-struct wim_inode_stream *
-inode_add_reparse_stream_with_data(struct wim_inode *inode,
-				   const void *data, size_t size,
-				   struct blob_table *blob_table)
-{
-	struct blob_descriptor *blob;
-	struct wim_inode_stream *strm;
-
-	blob = new_blob_from_data_buffer(data, size, blob_table);
-	if (!blob)
-		return NULL;
-
-	strm = inode_add_stream_utf16le_with_blob(inode, stream_type, stream_name, blob);
-
-	if (!strm)
-		blob_decrement_refcnt(blob, blob_table);
-
 	return strm;
 }
 

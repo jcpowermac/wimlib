@@ -39,11 +39,11 @@
 #include "wimlib/wim.h"
 
 static int
-attr_to_wimlib_stream_entry(const struct wim_inode *inode,
-			    const struct wim_inode_stream *stream,
-			    struct wimlib_stream_entry *wstream,
-			    const struct blob_table *blob_table,
-			    int flags)
+stream_to_wimlib_stream_entry(const struct wim_inode *inode,
+			      const struct wim_inode_stream *stream,
+			      struct wimlib_stream_entry *wstream,
+			      const struct blob_table *blob_table,
+			      int flags)
 {
 	const struct blob_descriptor *blob;
 	const u8 *hash;
@@ -83,7 +83,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 	int ret;
 	size_t dummy;
 	const struct wim_inode *inode = dentry->d_inode;
-	const struct wim_inode_stream *stream;
+	const struct wim_inode_stream *strm;
 	struct wimlib_unix_data unix_data;
 
 	ret = utf16le_get_tstr(dentry->file_name, dentry->file_name_nbytes,
@@ -125,30 +125,29 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 		wdentry->unix_rdev = unix_data.rdev;
 	}
 
-	stream = inode_get_stream_utf16le(inode,
-					   (inode->i_attributes &
-					    FILE_ATTRIBUTE_REPARSE_POINT) ?
-					   	STREAM_TYPE_REPARSE_POINT : STREAM_TYPE_DATA,
-					   NO_STREAM_NAME);
+	strm = inode_get_unnamed_stream(inode,
+					(inode->i_attributes &
+					 FILE_ATTRIBUTE_REPARSE_POINT) ?
+					STREAM_TYPE_REPARSE_POINT : STREAM_TYPE_DATA);
 
-	ret = attr_to_wimlib_stream_entry(inode, stream, &wdentry->streams[0],
-					  wim->blob_table, flags);
+	ret = stream_to_wimlib_stream_entry(inode, strm, &wdentry->streams[0],
+					    wim->blob_table, flags);
 	if (ret)
 		return ret;
 
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 
-		stream = &inode->i_streams[i];
+		strm = &inode->i_streams[i];
 
-		if (stream->stream_type != STREAM_TYPE_DATA || !*stream->stream_name)
+		if (!stream_is_named_data_stream(strm))
 			continue;
 
 		wdentry->num_named_streams++;
 
-		ret = attr_to_wimlib_stream_entry(inode, stream,
-						  &wdentry->streams[
-						  	wdentry->num_named_streams],
-						  wim->blob_table, flags);
+		ret = stream_to_wimlib_stream_entry(inode, strm,
+						    &wdentry->streams[
+							wdentry->num_named_streams],
+						    wim->blob_table, flags);
 		if (ret)
 			return ret;
 	}

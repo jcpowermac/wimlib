@@ -254,11 +254,10 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 			}
 		}
 
-		stream = inode_add_stream_utf16le_with_blob(
-				     inode,
-				     ntfs_3g_attr_type_to_wimlib_stream_type(type),
-				     stream_name,
-				     blob);
+		stream = inode_add_stream(inode,
+					  ntfs_3g_attr_type_to_wimlib_stream_type(type),
+					  stream_name,
+					  blob);
 		if (!stream) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_free_blob;

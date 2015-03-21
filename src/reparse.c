@@ -177,11 +177,12 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	if (!blob_override) {
 		struct wim_inode_stream *stream;
 
-		stream = inode_get_stream_utf16le(inode, STREAM_TYPE_REPARSE_POINT,
-						   NO_STREAM_NAME);
-		blob = NULL;
+		stream = inode_get_stream(inode, STREAM_TYPE_REPARSE_POINT,
+					  NO_STREAM_NAME);
 		if (stream)
 			blob = stream_blob_resolved(stream);
+		else
+			blob = NULL;
 		if (!blob) {
 			ERROR("Reparse point has no reparse data!");
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
@@ -498,8 +499,12 @@ wim_inode_set_symlink(struct wim_inode *inode,
 
 	ret = make_reparse_buffer(&rpdata, (u8*)&rpbuf_disk, &rpbuflen);
 	if (ret == 0) {
-		if (!inode_add_reparse_stream(inode, (u8*)&rpbuf_disk + 8,
-					      rpbuflen - 8, blob_table))
+		if (!inode_add_stream_with_data(inode,
+						STREAM_TYPE_REPARSE_POINT,
+						NO_STREAM_NAME,
+						(u8*)&rpbuf_disk + 8,
+						rpbuflen - 8,
+						blob_table))
 			ret = WIMLIB_ERR_NOMEM;
 	}
 	FREE(name_utf16le);

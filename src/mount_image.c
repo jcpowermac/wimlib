@@ -348,6 +348,28 @@ wim_pathname_to_inode(WIMStruct *wim, const char *path)
 /* Can look up directory (otherwise get -ENOTDIR)  */
 #define LOOKUP_FLAG_DIRECTORY_OK	0x02
 
+static struct wim_inode_stream *
+inode_get_data_stream_tstr(const struct wim_inode *inode,
+			   const char *stream_name)
+{
+	struct wim_inode_stream *strm;
+
+	if (!stream_name || !*stream_name) {
+		strm = inode_get_unnamed_stream(inode, STREAM_TYPE_DATA);
+	} else {
+		const utf16lechar *uname;
+
+		if (tstr_get_utf16le(stream_name, &uname))
+			return NULL;
+		strm = inode_get_stream(inode, STREAM_TYPE_DATA, uname);
+
+		tstr_put_utf16le(uname);
+	}
+	if (!strm)
+		errno = ENOENT;
+	return strm;
+}
+
 /*
  * Translate a path into the corresponding dentry and stream in the mounted WIM
  * image.
@@ -359,12 +381,12 @@ wim_pathname_to_stream(const struct wimfs_context *ctx,
 		       const char *path,
 		       int lookup_flags,
 		       struct wim_dentry **dentry_ret,
-		       struct wim_inode_stream **stream_ret)
+		       struct wim_inode_stream **strm_ret)
 {
 	WIMStruct *wim = ctx->wim;
 	struct wim_dentry *dentry;
 	struct wim_inode *inode;
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 	const char *stream_name = NULL;
 	char *p = NULL;
 
@@ -393,14 +415,14 @@ wim_pathname_to_stream(const struct wimfs_context *ctx,
 	      && inode_is_directory(inode))
 		return -EISDIR;
 
-	stream = inode_get_stream(inode, STREAM_TYPE_DATA, stream_name);
-	if (!stream)
+	strm = inode_get_data_stream_tstr(inode, stream_name);
+	if (!strm)
 		return -errno;
 
 	if (dentry_ret)
 		*dentry_ret = dentry;
-	if (stream_ret)
-		*stream_ret = stream;
+	if (strm_ret)
+		*strm_ret = strm;
 	return 0;
 }
 
@@ -1340,7 +1362,7 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 	if (!inode)
 		return -errno;
 
-	stream = inode_get_stream(inode, STREAM_TYPE_DATA, name);
+	stream = inode_get_data_stream_tstr(inode, name);
 	if (!stream)
 		return (errno == ENOENT) ? -ENOATTR : -errno;
 
@@ -1483,6 +1505,7 @@ wimfs_mknod(const char *path, mode_t mode, dev_t rdev)
 		struct wim_inode *inode;
 		struct wim_inode_stream *new_strm;
 		char *p;
+		const utf16lechar *uname;
 
 		/* Create a named data stream.  */
 
@@ -1497,8 +1520,13 @@ wimfs_mknod(const char *path, mode_t mode, dev_t rdev)
 		if (!inode)
 			return -errno;
 
-		new_strm = inode_add_stream_with_blob(inode, STREAM_TYPE_DATA,
-						      stream_name, NULL);
+		if (tstr_get_utf16le(stream_name, &uname))
+			return -errno;
+
+		new_strm = inode_add_stream(inode, STREAM_TYPE_DATA, uname, NULL);
+
+		tstr_put_utf16le(uname);
+
 		if (!new_strm)
 			return -errno;
 		return 0;
@@ -1595,10 +1623,10 @@ wimfs_opendir(const char *path, struct fuse_file_info *fi)
 		return -ENOTDIR;
 	strm = inode_get_unnamed_stream(inode, STREAM_TYPE_DATA);
 	if (!strm) {
-		strm = inode_add_stream_utf16le_with_blob(inode,
-							  STREAM_TYPE_DATA,
-							  NO_STREAM_NAME,
-							  NULL);
+		strm = inode_add_stream(inode,
+					STREAM_TYPE_DATA,
+					NO_STREAM_NAME,
+					NULL);
 		if (!strm)
 			return -errno;
 	}
@@ -1745,7 +1773,7 @@ wimfs_removexattr(const char *path, const char *name)
 	if (!inode)
 		return -errno;
 
-	stream = inode_get_stream(inode, STREAM_TYPE_DATA, name);
+	stream = inode_get_data_stream_tstr(inode, name);
 	if (!stream)
 		return (errno == ENOENT) ? -ENOATTR : -errno;
 
@@ -1788,6 +1816,7 @@ wimfs_setxattr(const char *path, const char *name,
 	struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_inode *inode;
 	struct wim_inode_stream *existing;
+	const utf16lechar *uname;
 	int ret;
 
 	if (!strncmp(name, "wimfs.", 6)) {
@@ -1828,7 +1857,7 @@ wimfs_setxattr(const char *path, const char *name,
 	if (ret)
 		return -errno;
 
-	existing = inode_get_stream_utf16le(inode, STREAM_TYPE_DATA, uname);
+	existing = inode_get_stream(inode, STREAM_TYPE_DATA, uname);
 	if (existing) {
 		ret = -EEXIST;
 		if (flags & XATTR_CREATE)
@@ -1842,8 +1871,8 @@ wimfs_setxattr(const char *path, const char *name,
 			goto out_put_uname;
 	}
 
-	if (!inode_add_stream_utf16le_with_data(inode, STREAM_TYPE_DATA, uname,
-						value, size, ctx->wim->blob_table))
+	if (!inode_add_stream_with_data(inode, STREAM_TYPE_DATA, uname,
+					value, size, ctx->wim->blob_table))
 		return -errno;
 	if (existing)
 		inode_remove_stream(inode, existing, ctx->wim->blob_table);

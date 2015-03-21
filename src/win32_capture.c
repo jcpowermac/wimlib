@@ -852,8 +852,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	if (ret)
 		goto err;
 
-	stream = inode_add_stream_utf16le_with_blob(inode, STREAM_TYPE_DATA,
-						     NO_STREAM_NAME, blob);
+	stream = inode_add_stream(inode, STREAM_TYPE_DATA, NO_STREAM_NAME, blob);
 	if (!stream)
 		goto err_nomem;
 
@@ -975,8 +974,7 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 		blob->file_inode = inode;
 	}
 
-	stream = inode_add_stream_utf16le_with_blob(inode, STREAM_TYPE_DATA,
-						     stream_name, blob);
+	stream = inode_add_stream(inode, STREAM_TYPE_DATA, stream_name, blob);
 	if (!stream) {
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
@@ -1330,8 +1328,12 @@ retry_open:
 			goto out;
 		}
 		inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
-		if (!inode_add_reparse_stream(inode, rpbuf + 8, rpbuflen - 8,
-					      params->blob_table))
+		if (!inode_add_stream_with_data(inode,
+						STREAM_TYPE_REPARSE_POINT,
+						NO_STREAM_NAME,
+						rpbuf + 8,
+						rpbuflen - 8,
+						params->blob_table))
 		{
 			ret = WIMLIB_ERR_NOMEM;
 			goto out;
