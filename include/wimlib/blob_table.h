@@ -390,7 +390,7 @@ hash_unhashed_blob(struct blob_descriptor *blob,
 		   struct blob_descriptor **lte_ret);
 
 extern struct blob_descriptor **
-retrieve_blob_pointer(struct blob_descriptor *blob);
+retrieve_pointer_to_unhashed_blob(struct blob_descriptor *blob);
 
 static inline void
 prepare_unhashed_blob(struct blob_descriptor *blob,

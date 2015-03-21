@@ -31,11 +31,11 @@
 #include <errno.h>
 
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/error.h"
 #include "wimlib/inode.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/timestamp.h"
 
 /*
@@ -74,7 +74,7 @@ new_timeless_inode(void)
 }
 
 static inline void
-destroy_wim_inode_stream(struct wim_inode_stream *strm)
+destroy_stream(struct wim_inode_stream *strm)
 {
 	if (strm->stream_name != NO_STREAM_NAME)
 		FREE(strm->stream_name);
@@ -84,7 +84,7 @@ static void
 free_inode(struct wim_inode *inode)
 {
 	for (unsigned i = 0; i < inode->i_num_streams; i++)
-		destroy_wim_inode_stream(&inode->i_streams[i]);
+		destroy_stream(&inode->i_streams[i]);
 	if (inode->i_streams != inode->i_embedded_streams)
 		FREE(inode->i_streams);
 	if (inode->i_extra)
@@ -155,6 +155,19 @@ inode_dec_num_opened_fds(struct wim_inode *inode)
 }
 #endif
 
+/*
+ * Retrieve a stream of an inode.
+ *
+ * @inode
+ *	The inode from which the stream is desired
+ * @stream_type
+ *	The type of the stream desired
+ * @stream_name
+ *	The name of the stream desired as a null-terminated UTF-16LE string, or
+ *	NO_STREAM_NAME if an unnamed stream is desired
+ *
+ * Returns a pointer to the stream if found, otherwise null.
+ */
 struct wim_inode_stream *
 inode_get_stream(const struct wim_inode *inode, int stream_type,
 		 const utf16lechar *stream_name)
@@ -174,6 +187,10 @@ inode_get_stream(const struct wim_inode *inode, int stream_type,
 	return NULL;
 }
 
+/*
+ * This is equivalent to inode_get_stream(inode, stream_type, NO_STREAM_NAME),
+ * but this optimizes for the unnamed case by not doing full string comparisons.
+ */
 struct wim_inode_stream *
 inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
 {
@@ -188,6 +205,21 @@ inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
 	return NULL;
 }
 
+/*
+ * Add a new stream to the specified inode.
+ *
+ * @inode
+ *	The inode to which to add the stream
+ * @stream_type
+ *	The type of the stream being added
+ * @stream_name
+ *	The name of the stream being added as a null-terminated UTF-16LE string,
+ *	or NO_STREAM_NAME if the stream is unnamed
+ * @blob
+ *	The blob that the new stream will initially reference, or NULL.
+ *
+ * Returns a pointer to the new stream, or NULL if it could not be added.
+ */
 struct wim_inode_stream *
 inode_add_stream(struct wim_inode *inode, int stream_type,
 		 const utf16lechar *stream_name, struct blob_descriptor *blob)
@@ -246,6 +278,26 @@ inode_add_stream(struct wim_inode *inode, int stream_type,
 	return new_strm;
 }
 
+/*
+ * Create a new blob descriptor for the specified data buffer or use an existing
+ * blob descriptor in @blob_table for an identical blob, then add a stream of
+ * the specified type and name to the specified inode and set it to initially
+ * reference the blob.
+ *
+ * @inode
+ *	The inode to which to add the stream
+ * @stream_type
+ *	The type of the stream being added
+ * @stream_name
+ *	The name of the stream being added as a null-terminated UTF-16LE string,
+ *	or NO_STREAM_NAME if the stream is unnamed
+ * @data
+ *	The uncompressed data of the blob
+ * @size
+ *	The size, in bytes, of the blob data
+ * @blob_table
+ *	Pointer to the blob table in which the blob needs to be indexed.
+ */
 struct wim_inode_stream *
 inode_add_stream_with_data(struct wim_inode *inode,
 			   int stream_type, const utf16lechar *stream_name,
@@ -264,6 +316,10 @@ inode_add_stream_with_data(struct wim_inode *inode,
 	return strm;
 }
 
+/*
+ * Remove a stream from the specified inode and release the reference to the
+ * blob descriptor, if any.
+ */
 void
 inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
 		    struct blob_table *blob_table)
@@ -272,13 +328,12 @@ inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
 	unsigned idx = strm - inode->i_streams;
 
 	wimlib_assert(idx < inode->i_num_streams);
-	wimlib_assert(strm->stream_resolved);
 
 	blob = stream_blob(strm, blob_table);
 	if (blob)
 		blob_decrement_refcnt(blob, blob_table);
 
-	destroy_wim_inode_stream(strm);
+	destroy_stream(strm);
 
 	memmove(&inode->i_streams[idx],
 		&inode->i_streams[idx + 1],
@@ -286,6 +341,7 @@ inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
 	inode->i_num_streams--;
 }
 
+/* Returns true iff the specified inode has at least one named data stream.  */
 bool
 inode_has_named_data_stream(const struct wim_inode *inode)
 {
@@ -317,7 +373,7 @@ inode_has_named_data_stream(const struct wim_inode *inode)
  */
 int
 inode_resolve_streams(struct wim_inode *inode, struct blob_table *table,
-			 bool force)
+		      bool force)
 {
 	struct blob_descriptor *blobs[inode->i_num_streams];
 
@@ -410,7 +466,7 @@ stream_hash(const struct wim_inode_stream *strm)
 }
 
 /*
- * Return the blob descriptor for the unnamed data stream of an inode, or NULL
+ * Return the blob descriptor for the unnamed data stream of the inode, or NULL
  * if the blob for the inode's unnamed data stream is empty or not available.
  */
 struct blob_descriptor *
@@ -456,7 +512,7 @@ inode_ref_blobs(struct wim_inode *inode)
 	}
 }
 
-/* Drop a reference to each blob referenced by this inode.  This is necessary
+/* Release a reference to each blob referenced by this inode.  This is necessary
  * when deleting a hard link to this inode.  */
 void
 inode_unref_blobs(struct wim_inode *inode, struct blob_table *blob_table)
@@ -480,7 +536,7 @@ inode_unref_blobs(struct wim_inode *inode, struct blob_table *blob_table)
  * hash is known!)
  */
 struct blob_descriptor **
-retrieve_blob_pointer(struct blob_descriptor *blob)
+retrieve_pointer_to_unhashed_blob(struct blob_descriptor *blob)
 {
 	wimlib_assert(blob->unhashed);
 

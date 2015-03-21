@@ -617,7 +617,7 @@ utf16le_len_bytes(const utf16lechar *s)
 	return (p - s) * sizeof(utf16lechar);
 }
 
-/* Return the length, in UTF-16 coding points, of a UTF-null terminated UTF-16
+/* Return the length, in UTF-16 coding units, of a UTF-null terminated UTF-16
  * string, excluding the null terminator.  */
 size_t
 utf16le_len_chars(const utf16lechar *s)

@@ -978,7 +978,7 @@ delete_empty_blobs(struct wimfs_context *ctx)
 
         image_for_each_unhashed_blob_safe(blob, tmp, imd) {
                 if (!blob->size) {
-                        *retrieve_blob_pointer(blob) = NULL;
+                        *retrieve_pointer_to_unhashed_blob(blob) = NULL;
                         list_del(&blob->unhashed_list);
                         free_blob_descriptor(blob);
                 }

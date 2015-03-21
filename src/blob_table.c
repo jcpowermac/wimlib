@@ -1,7 +1,7 @@
 /*
  * blob_table.c
  *
- * The blob table maps SHA-1 message digests to "blobs", which are nonempty
+ * A blob table maps SHA-1 message digests to "blobs", which are nonempty
  * sequences of binary data.  Within a WIM file, blobs are single-instanced.
  *
  * This file also contains code to read and write the corresponding on-disk
@@ -34,10 +34,10 @@
 #include <unistd.h> /* for unlink()  */
 
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/ntfs_3g.h"
 #include "wimlib/resource.h"
@@ -556,7 +556,11 @@ for_blob_in_table_sorted_by_sequential_order(struct blob_table *table,
 	return ret;
 }
 
-/* On-disk format of a blob descriptor in a WIM file  */
+/* On-disk format of a blob descriptor in a WIM file.
+ *
+ * Note: if the WIM file contains solid resource(s), then this structure is
+ * sometimes overloaded to describe a "resource" rather than a "blob".  See the
+ * code for details.  */
 struct blob_descriptor_disk {
 
 	/* Size, offset, and flags of the blob.  */
@@ -715,13 +719,13 @@ out_free_rdescs:
 }
 
 /* Given a 'struct blob_descriptor' allocated for an on-disk blob descriptor
- * with the SOLID flag set, try to bind it to resource in the current solid run.
- */
+ * with the SOLID flag set, try to assign it to resource in the current solid
+ * run.  */
 static int
-bind_blob_to_solid_resource(const struct wim_reshdr *reshdr,
-			    struct blob_descriptor *blob,
-			    struct wim_resource_descriptor **rdescs,
-			    size_t num_rdescs)
+assign_blob_to_solid_resource(const struct wim_reshdr *reshdr,
+			      struct blob_descriptor *blob,
+			      struct wim_resource_descriptor **rdescs,
+			      size_t num_rdescs)
 {
 	u64 offset = reshdr->offset_in_wim;
 
@@ -796,9 +800,9 @@ validate_resource(struct wim_resource_descriptor *rdesc)
 	 */
 	if (out_of_order) {
 		ret = sort_blob_list(&rdesc->blob_list,
-				       offsetof(struct blob_descriptor,
-						rdesc_node),
-				       cmp_blobs_by_offset_in_res);
+				     offsetof(struct blob_descriptor,
+					      rdesc_node),
+				     cmp_blobs_by_offset_in_res);
 		if (ret)
 			return ret;
 
@@ -836,25 +840,26 @@ finish_solid_rdescs(struct wim_resource_descriptor **rdescs, size_t num_rdescs)
 }
 
 /*
- * Reads the blob table from a WIM file.  Usually, each entry in this table
- * specifies a blob that the WIM file contains, along with its location and
- * SHA-1 message digest.
+ * read_blob_table() -
  *
- * Descriptors for non-metadata blobs will be saved in the in-memory blob table
+ * Read the blob table from a WIM file.  Usually, each entry in this table
+ * describes a "blob", or equivalently a "resource", that the WIM file contains,
+ * along with its location and SHA-1 message digest.  Descriptors for
+ * non-metadata blobs will be saved in the in-memory blob table
  * (wim->blob_table), whereas descriptors for metadata blobs will be saved in a
  * special location per-image (the wim->image_metadata array).
  *
- * This works for both version WIM_VERSION_DEFAULT (68864) and version
- * WIM_VERSION_SOLID (3584) WIMs.  In the latter, a consecutive run of blob
- * descriptors that all have flag WIM_RESHDR_FLAG_SOLID (0x10) set is a "solid
- * run".  A solid run logically contains zero or more resources, each of which
- * logically contains zero or more blobs.  Physically, in such a run, a "blob
- * descriptor" with uncompressed size SOLID_RESOURCE_MAGIC_NUMBER (0x100000000)
- * specifies a resource, whereas any other blob descriptor actually does specify
- * a blob.  Within such a run, real blob descriptors and resource entries need
- * not be in any particular order, except that the order of the resource entries
- * is important, as it affects how blobs are assigned to resources.  See the
- * code for details.
+ * However, in WIM_VERSION_SOLID (3584) WIMs, a resource may contain multiple
+ * blobs that are compressed together.  Such a resource is called a "solid
+ * resource".  Solid resources are still described in the on-disk "blob table",
+ * although the format is not the most logical.  A consecutive sequence of
+ * entries that all have flag WIM_RESHDR_FLAG_SOLID (0x10) set is a "solid run".
+ * A solid run describes a set of solid resources, each of which contains a set
+ * of blobs.  In a solid run, a 'struct wim_reshdr_disk' with 'uncompressed_size
+ * = SOLID_RESOURCE_MAGIC_NUMBER (0x100000000)' specifies a solid resource,
+ * whereas any other 'struct wim_reshdr_disk' specifies a blob within a solid
+ * resource.  There are some oddities in how we need to determine which solid
+ * resource a blob is actually in; see the code for details.
  *
  * Possible return values:
  *	WIMLIB_ERR_SUCCESS (0)
@@ -949,10 +954,10 @@ read_blob_table(WIMStruct *wim)
 
 			/* Blob entry  */
 
-			ret = bind_blob_to_solid_resource(&reshdr,
-							  cur_entry,
-							  cur_solid_rdescs,
-							  cur_num_solid_rdescs);
+			ret = assign_blob_to_solid_resource(&reshdr,
+							    cur_entry,
+							    cur_solid_rdescs,
+							    cur_num_solid_rdescs);
 			if (ret)
 				goto out;
 
@@ -1280,13 +1285,13 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
  * identical blob.
  *
  * @blob:
- *	An unhashed blob.
+ *	The blob to hash
  * @blob_table:
- *	The blob table.
+ *	The blob table in which the blob needs to be indexed
  * @blob_ret:
- *	On success, write a pointer to the resulting blob descriptor to this
- *	location.  This will be the same as @blob if it was inserted into the
- *	blob table, or different if a duplicate blob was found.
+ *	On success, a pointer to the resulting blob descriptor is written to
+ *	this location.  This will be the same as @blob if it was inserted into
+ *	the blob table, or different if a duplicate blob was found.
  *
  * Returns 0 on success; nonzero if there is an error reading the blob data.
  */
@@ -1303,7 +1308,7 @@ hash_unhashed_blob(struct blob_descriptor *blob, struct blob_table *blob_table,
 	/* back_ptr must be saved because @back_inode and @back_stream_id are in
 	 * union with the SHA-1 message digest and will no longer be valid once
 	 * the SHA-1 has been calculated. */
-	back_ptr = retrieve_blob_pointer(blob);
+	back_ptr = retrieve_pointer_to_unhashed_blob(blob);
 
 	ret = sha1_blob(blob);
 	if (ret)
