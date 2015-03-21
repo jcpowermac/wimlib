@@ -684,7 +684,7 @@ extract_blob_to_staging_dir(struct wim_inode *inode,
 	int result;
 	int ret;
 
-	old_blob = stream_blob_resolved(stream);
+	old_blob = stream_blob_resolved(strm);
 
 	/* Create the staging file.  */
 	staging_fd = create_staging_file(ctx, &staging_file_name);
@@ -762,7 +762,7 @@ extract_blob_to_staging_dir(struct wim_inode *inode,
 	if (old_blob) {
 		old_blob->num_opened_fds -= new_blob->num_opened_fds;
 		for (u32 i = 0; i < inode->i_nlink; i++)
-			blob_decrement_refcnt(blob, ctx->wim->blob_table);
+			blob_decrement_refcnt(old_blob, ctx->wim->blob_table);
 	}
 
 	new_blob->refcnt            = inode->i_nlink;
@@ -1586,6 +1586,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 						  ctx);
 		if (ret)
 			return ret;
+		blob = stream_blob_resolved(strm);
 	}
 
 	ret = alloc_wimfs_fd(inode, strm, &fd);
@@ -1767,8 +1768,8 @@ wimfs_removexattr(const char *path, const char *name)
 	if (!inode)
 		return -errno;
 
-	stream = inode_get_data_stream_tstr(inode, name);
-	if (!stream)
+	strm = inode_get_data_stream_tstr(inode, name);
+	if (!strm)
 		return (errno == ENOENT) ? -ENOATTR : -errno;
 
 	inode_remove_stream(inode, strm, ctx->wim->blob_table);
@@ -1914,7 +1915,7 @@ wimfs_truncate(const char *path, off_t size)
 	if (ret)
 		return ret;
 
-	blob = stream_blob_resolved(stream);
+	blob = stream_blob_resolved(strm);
 
 	if (!blob && !size)
 		return 0;
