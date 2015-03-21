@@ -3,7 +3,7 @@
  */
 
 /*
- * Copyright (C) 2012, 2013, 2014 Eric Biggers
+ * Copyright (C) 2012, 2013, 2014, 2015 Eric Biggers
  *
  * This file is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -57,8 +57,6 @@
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #endif
-
-#if 0
 
 #include <errno.h>
 
@@ -346,17 +344,19 @@ dentry_min_len_with_names(u16 file_name_nbytes, u16 short_name_nbytes)
 }
 
 
-/* Return the length, in bytes, required for the specified attribute on-disk.
- * This accounts for the fixed-length portion of the attribute the stream name
- * and its null terminator if present, and the padding after the entry to align
- * the next attribute or dentry on an 8-byte boundary in the uncompressed
- * metadata resource buffer.  */
+/* Return the length, in bytes, required for the specified attribute on-disk,
+ * when represented as an extra attribute entry.  */
 static size_t
 attribute_out_total_length(const struct wim_inode_attribute *attr)
 {
+	/* Account for the fixed length portion  */
 	size_t len = sizeof(struct wim_inode_attribute_on_disk);
-	if (*attr->attr_name)
+
+	/* For named attributes, account for the variable-length name.  */
+	if (attribute_is_named(attr))
 		len += utf16le_len_bytes(attr->attr_name) + 2;
+
+	/* Account for any necessary padding to the next 8-byte boundary.  */
 	return (len + 7) & ~7;
 }
 
@@ -383,31 +383,28 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 
 	/*
 	 * - One extra attribute for each named data stream
-	 * - One extra attribute for the unnamed data stream, if either there is
-	 *   a reparse point attribute, or if there are any named data streams
-	 *   (for Windows PE bug workaronud)
+	 * - One extra attribute for the unnamed data stream there is either:
+	 * 	- a reparse point attribute
+	 * 	- at least one named data stream (for Windows PE bug workaround)
+	 * 		- UNLESS it's an encrypted file
 	 */
 	bool need_extra_attr_for_unnamed_data_stream = false;
-	bool have_unnamed_data_stream = false;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
 		switch (attr->attr_type) {
-		case ATTR_REPARSE_POINT:
-			need_extra_attr_for_unnamed_data_stream = true;
-			break;
 		case ATTR_DATA:
-			if (*attr->attr_name) {
+			if (unlikely(attribute_is_named(attr))) {
 				len += attribute_out_total_length(attr);
 				if (!(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED))
 					need_extra_attr_for_unnamed_data_stream = true;
-			} else {
-				have_unnamed_data_stream = true;
 			}
-		default:
+			break;
+		case ATTR_REPARSE_POINT:
+			need_extra_attr_for_unnamed_data_stream = true;
 			break;
 		}
 	}
-	if (need_extra_attr_for_unnamed_data_stream && have_unnamed_data_stream) {
+	if (need_extra_attr_for_unnamed_data_stream) {
 		len += sizeof(struct wim_inode_attribute_on_disk);
 		len = (len + 7) & ~7;
 	}
@@ -1235,143 +1232,115 @@ read_extra_data(const u8 *p, const u8 *end, struct wim_inode *inode)
 	return 0;
 }
 
-/*
- * Read the alternate data stream entries of a WIM dentry.
- *
- * @p:
- *	Pointer to buffer that starts with the first alternate stream entry.
- *
- * @inode:
- *	Inode to load the alternate data streams into.  @inode->i_num_ads must
- *	have been set to the number of alternate data streams that are expected.
- *
- * @nbytes_remaining_p:
- *	Number of bytes of data remaining in the buffer pointed to by @p.
- *	On success this will be updated to point just past the ADS entries.
- *
- * On success, inode->i_ads_entries is set to an array of `struct
- * wim_ads_entry's of length inode->i_num_ads.  On failure, @inode is not
- * modified.
- *
- * Return values:
- *	WIMLIB_ERR_SUCCESS (0)
- *	WIMLIB_ERR_INVALID_METADATA_RESOURCE
- *	WIMLIB_ERR_NOMEM
- */
 static int
-read_extra_attributes(const u8 * restrict p, struct wim_inode * restrict inode,
-		      size_t *nbytes_remaining_p)
+prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode,
+			     u32 num_extra_attributes, const u8 *default_hash)
 {
-	size_t nbytes_remaining = *nbytes_remaining_p;
-	unsigned num_ads;
-	struct wim_inode_attribute *attributes;
-	int ret;
+	inode->i_num_attrs = 1 + num_extra_attributes;
 
-	/* Allocate an array for our in-memory representation of the alternate
-	 * data stream entries. */
-	num_ads = inode->i_num_ads;
-	ads_entries = CALLOC(num_ads, sizeof(inode->i_ads_entries[0]));
-	if (!ads_entries)
-		goto out_of_memory;
+	if (inode->i_num_attrs <= INODE_NUM_EMBEDDED_ATTRS) {
+		inode->i_attrs = inode->i_embedded_attrs;
+	} else {
+		inode->i_attrs = CALLOC(inode->i_num_attrs, sizeof(inode->i_attrs[0]));
+		if (!inode->i_attrs)
+			return WIMLIB_ERR_NOMEM;
+	}
 
-	/* Read the entries into our newly allocated buffer. */
-	for (unsigned i = 0; i < num_ads; i++) {
+	inode->i_attrs[0].attr_name = (utf16lechar *)NO_NAME;
+	copy_hash(inode->i_attrs[0]._attr_hash, default_hash);
+
+	for (unsigned i = 1; i < inode->i_num_attrs; i++) {
+		struct wim_inode_attribute *attr;
+		const struct wim_inode_attribute_on_disk *disk_attr;
 		u64 length;
-		struct wim_ads_entry *cur_entry;
-		const struct wim_inode_attribute_on_disk *disk_entry =
-			(const struct wim_inode_attribute_on_disk*)p;
+		u16 name_nbytes;
 
-		cur_entry = &ads_entries[i];
-		ads_entries[i].stream_id = i + 1;
+		attr = &inode->i_attrs[i];
+
+		attr->attr_id = i;
 
 		/* Do we have at least the size of the fixed-length data we know
-		 * need? */
-		if (nbytes_remaining < sizeof(struct wim_inode_attribute_on_disk))
-			goto out_invalid;
+		 * need?  */
+		if ((end - p) < sizeof(struct wim_inode_attribute_on_disk))
+			return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
-		/* Read the length field */
-		length = le64_to_cpu(disk_entry->length);
+		disk_attr = (const struct wim_inode_attribute_on_disk *)p;
+
+		/* Read the length field  */
+		length = le64_to_cpu(disk_attr->length);
 
 		/* Make sure the length field is neither so small it doesn't
 		 * include all the fixed-length data nor so large it overflows
 		 * the metadata resource buffer. */
 		if (length < sizeof(struct wim_inode_attribute_on_disk) ||
-		    length > nbytes_remaining)
-			goto out_invalid;
+		    length > (end - p))
+			return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
 		/* Read the rest of the fixed-length data. */
 
-		cur_entry->reserved = le64_to_cpu(disk_entry->reserved);
-		copy_hash(cur_entry->hash, disk_entry->hash);
-		cur_entry->stream_name_nbytes = le16_to_cpu(disk_entry->stream_name_nbytes);
+		copy_hash(attr->_attr_hash, disk_attr->hash);
+		name_nbytes = le16_to_cpu(disk_attr->name_nbytes);
 
-		/* If stream_name_nbytes != 0, this is a named stream.
-		 * Otherwise this is an unnamed stream, or in some cases (bugs
-		 * in Microsoft's software I guess) a meaningless entry
-		 * distinguished from the real unnamed stream entry, if any, by
-		 * the fact that the real unnamed stream entry has a nonzero
-		 * hash field. */
-		if (cur_entry->stream_name_nbytes) {
+		/* If stream_name_nbytes != 0, the attribute is named.  */
+		if (name_nbytes != 0) {
 			/* The name is encoded in UTF16-LE, which uses 2-byte
 			 * coding units, so the length of the name had better be
-			 * an even number of bytes... */
-			if (cur_entry->stream_name_nbytes & 1)
-				goto out_invalid;
+			 * an even number of bytes.  */
+			if (name_nbytes & 1)
+				return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
 			/* Add the length of the stream name to get the length
 			 * we actually need to read.  Make sure this isn't more
-			 * than the specified length of the entry. */
+			 * than the specified length of the entry.  */
 			if (sizeof(struct wim_inode_attribute_on_disk) +
-			    cur_entry->stream_name_nbytes > length)
-				goto out_invalid;
+			    name_nbytes > length)
+				return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
-			cur_entry->stream_name = utf16le_dupz(disk_entry->stream_name,
-							      cur_entry->stream_name_nbytes);
-			if (!cur_entry->stream_name)
-				goto out_of_memory;
+			attr->attr_name = utf16le_dupz(disk_attr->name, name_nbytes);
+			if (!attr->attr_name)
+				return WIMLIB_ERR_NOMEM;
 		} else {
-			/* Mark inode as having weird stream entries.  */
-			inode->i_canonical_streams = 0;
+			attr->attr_name = (utf16lechar *)NO_NAME;
 		}
+	}
 
-		/* It's expected that the size of every ADS entry is a multiple
-		 * of 8.  However, to be safe, I'm allowing the possibility of
-		 * an ADS entry at the very end of the metadata resource ending
-		 * unaligned.  So although we still need to increment the input
-		 * pointer by @length to reach the next ADS entry, it's possible
-		 * that less than @length is actually remaining in the metadata
-		 * resource. We should set the remaining bytes to 0 if this
-		 * happens. */
-		length = (length + 7) & ~7;
-		p += length;
-		if (nbytes_remaining < length)
-			nbytes_remaining = 0;
-		else
-			nbytes_remaining -= length;
+	inode->i_next_attr_id = inode->i_num_attrs;
+
+	/* Now, assign a type to each attribute.  */
+
+	if (inode->i_num_attrs == 1) {
+		/* Just the unnamed data stream  */
+		inode->i_attrs[0].attr_type = ATTR_DATA;
+	} else {
+		bool found_reparse_point = false;
+		bool found_unnamed_data_stream = false;
+		struct wim_inode_attribute *unnamed_zero_hash_attr = NULL;
+		for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+			struct wim_inode_attribute *attr = &inode->i_attrs[i];
+			if (attribute_is_named(attr)) {
+				attr->attr_type = ATTR_DATA;
+			} else if (!is_zero_hash(inode->i_attrs[i]._attr_hash)) {
+				if ((inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) &&
+				    !found_reparse_point) {
+					found_reparse_point = true;
+					attr->attr_type = ATTR_REPARSE_POINT;
+				} else if (!found_unnamed_data_stream) {
+					found_unnamed_data_stream = true;
+					attr->attr_type = ATTR_DATA;
+				}
+			} else {
+				unnamed_zero_hash_attr = attr;
+				attr->attr_type = ATTR_UNKNOWN;
+			}
+		}
+		if (!found_unnamed_data_stream && unnamed_zero_hash_attr != NULL)
+			unnamed_zero_hash_attr->attr_type = ATTR_DATA;
 	}
-	inode->i_ads_entries = ads_entries;
-	inode->i_next_stream_id = inode->i_num_ads + 1;
-	*nbytes_remaining_p = nbytes_remaining;
-	ret = 0;
-	goto out;
-out_of_memory:
-	ret = WIMLIB_ERR_NOMEM;
-	goto out_free_ads_entries;
-out_invalid:
-	ERROR("An alternate data stream entry is invalid");
-	ret = WIMLIB_ERR_INVALID_METADATA_RESOURCE;
-out_free_ads_entries:
-	if (ads_entries) {
-		for (unsigned i = 0; i < num_ads; i++)
-			destroy_ads_entry(&ads_entries[i]);
-		FREE(ads_entries);
-	}
-out:
-	return ret;
+	return 0;
 }
 
-/* Read a dentry, including all alternate data stream entries that follow it,
- * from an uncompressed metadata resource buffer.  */
+/* Read a dentry, including all extra attribute entries that follow it, from an
+ * uncompressed metadata resource buffer.  */
 static int
 read_dentry(const u8 * restrict buf, size_t buf_len,
 	    u64 *offset_p, struct wim_dentry **dentry_ret)
@@ -1447,7 +1416,6 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	inode->i_creation_time = le64_to_cpu(disk_dentry->creation_time);
 	inode->i_last_access_time = le64_to_cpu(disk_dentry->last_access_time);
 	inode->i_last_write_time = le64_to_cpu(disk_dentry->last_write_time);
-	copy_hash(inode->i_hash, disk_dentry->unnamed_stream_hash);
 
 	/* I don't know what's going on here.  It seems like M$ screwed up the
 	 * reparse points, then put the fields in the same place and didn't
@@ -1466,7 +1434,6 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 		inode->i_rp_unknown_1 = le32_to_cpu(disk_dentry->nonreparse.rp_unknown_1);
 		inode->i_ino = le64_to_cpu(disk_dentry->nonreparse.hard_link_group_id);
 	}
-	inode->i_num_attrs = le16_to_cpu(disk_dentry->num_alternate_data_streams);
 
 	/* Now onto reading the names.  There are two of them: the (long) file
 	 * name, and the short name.  */
@@ -1524,7 +1491,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 		p += (u32)short_name_nbytes + 2;
 	}
 
-	/* Read extra data at end of dentry (but before alternate data stream
+	/* Read extra data at end of dentry (but before extra attribute
 	 * entries).  This may contain tagged items.  */
 	ret = read_extra_data(p, &buf[offset + length], inode);
 	if (ret)
@@ -1535,28 +1502,14 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 
 	offset += length;
 
-	/* Read the alternate data streams, if present.  inode->i_num_ads tells
-	 * us how many they are, and they will directly follow the dentry in the
-	 * metadata resource buffer.
-	 *
-	 * Note that each alternate data stream entry begins on an 8-byte
-	 * aligned boundary, and the alternate data stream entries seem to NOT
-	 * be included in the dentry->length field for some reason.  */
-	if (unlikely(inode->i_num_ads != 0)) {
-		size_t orig_bytes_remaining;
-		size_t bytes_remaining;
+	p = &buf[offset];
 
-		if (offset > buf_len) {
-			ret = WIMLIB_ERR_INVALID_METADATA_RESOURCE;
-			goto err_free_dentry;
-		}
-		bytes_remaining = buf_len - offset;
-		orig_bytes_remaining = bytes_remaining;
-		ret = read_extra_attributes(&buf[offset], inode, &bytes_remaining);
-		if (ret)
-			goto err_free_dentry;
-		offset += (orig_bytes_remaining - bytes_remaining);
-	}
+	/* Prepare the inode's list of attributes.  */
+	ret = prepare_inode_attribute_list(&buf[offset], &buf[buf_len], inode,
+					   le16_to_cpu(disk_dentry->num_extra_attributes),
+					   disk_dentry->default_hash);
+	if (ret)
+		goto err_free_dentry;
 
 	*offset_p = offset;  /* Sets offset of next dentry in directory  */
 	*dentry_ret = dentry;
@@ -1920,4 +1873,3 @@ write_dentry_tree(struct wim_dentry *root, u8 *p)
 
 	return p;
 }
-#endif

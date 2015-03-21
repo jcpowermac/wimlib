@@ -144,7 +144,7 @@ will_extract_dentry(const struct wim_dentry *dentry)
 	return dentry->d_extraction_list_node.next != NULL;
 }
 
-extern u64
+extern size_t
 dentry_out_total_length(const struct wim_dentry *dentry);
 
 extern int

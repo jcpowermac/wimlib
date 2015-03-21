@@ -220,9 +220,11 @@ inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
 	memset(new_attr, 0, sizeof(*new_attr));
 
 	new_attr->attr_type = attr_type;
-	if (attr_name == NO_NAME) {
+	if (!*attr_name) {
+		/* Unnamed attribute  */
 		new_attr->attr_name = (utf16lechar *)NO_NAME;
 	} else {
+		/* Named attribute  */
 		new_attr->attr_name = utf16le_dup(attr_name);
 		if (!new_attr->attr_name)
 			return NULL;
