@@ -115,7 +115,7 @@ struct wim_dentry_on_disk {
 	le64 last_access_time;
 	le64 last_write_time;
 
-	/* 
+	/*
 	 * Usually this is the SHA-1 message digest of the file's contents
 	 * (unnamed data stream).
 	 *

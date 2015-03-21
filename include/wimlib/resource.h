@@ -132,11 +132,11 @@ zero_reshdr(struct wim_reshdr *reshdr)
 }
 
 extern void
-wim_res_hdr_to_spec(const struct wim_reshdr *reshdr, WIMStruct *wim,
+wim_res_hdr_to_desc(const struct wim_reshdr *reshdr, WIMStruct *wim,
 		    struct wim_resource_descriptor *rdesc);
 
 extern void
-wim_res_spec_to_hdr(const struct wim_resource_descriptor *rdesc,
+wim_res_desc_to_hdr(const struct wim_resource_descriptor *rdesc,
 		    struct wim_reshdr *reshdr);
 
 extern void

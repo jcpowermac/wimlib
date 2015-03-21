@@ -2,8 +2,6 @@
 #define _WIMLIB_CAPTURE_H
 
 #include "wimlib.h"
-#include "wimlib/blob_table.h"
-#include "wimlib/inode.h"
 #include "wimlib/inode_table.h"
 #include "wimlib/list.h"
 #include "wimlib/progress.h"
@@ -27,7 +25,7 @@ struct capture_params {
 	/* Pointer to the blob table of the WIM.  */
 	struct blob_table *blob_table;
 
-	/* List of blob that have been added so far, but without their SHA-1
+	/* List of blobs that have been added so far, but without their SHA-1
 	 * message digests being calculated (as a shortcut).  */
 	struct list_head *unhashed_blobs;
 

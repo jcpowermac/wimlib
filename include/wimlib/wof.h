@@ -66,7 +66,7 @@ struct wim_provider_rpdata {
 	/* SHA-1 message digest of the file's unnamed data stream.  */
 	u8 unnamed_data_stream_hash[20];
 
-	/* SHA-1 message digest of the WIM's blob table.  */
+	/* SHA-1 message digest of the WIM's blob table as stored on disk.  */
 	u8 blob_table_hash[20];
 
 	/* Uncompressed size of the file's unnamed data stream, in bytes.  */

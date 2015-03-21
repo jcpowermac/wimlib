@@ -5,7 +5,7 @@
  */
 
 /*
- * Copyright (C) 2012, 2013 Eric Biggers
+ * Copyright (C) 2012, 2013, 2015 Eric Biggers
  *
  * This file is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -100,7 +100,7 @@ struct data_range {
  * Read data from a compressed WIM resource.
  *
  * @rdesc
- *	Specification of the compressed WIM resource to read from.
+ *	Description of the compressed WIM resource to read from.
  * @ranges
  *	Nonoverlapping, nonempty ranges of the uncompressed resource data to
  *	read, sorted by increasing offset.
@@ -918,7 +918,7 @@ wim_reshdr_to_data(const struct wim_reshdr *reshdr, WIMStruct *wim, void **buf_r
 	struct blob_descriptor *blob;
 	int ret;
 
-	wim_res_hdr_to_spec(reshdr, wim, &rdesc);
+	wim_res_hdr_to_desc(reshdr, wim, &rdesc);
 
 	blob = new_blob_descriptor();
 	if (!blob)
@@ -944,7 +944,7 @@ wim_reshdr_to_hash(const struct wim_reshdr *reshdr, WIMStruct *wim,
 	int ret;
 	struct blob_descriptor *blob;
 
-	wim_res_hdr_to_spec(reshdr, wim, &rdesc);
+	wim_res_hdr_to_desc(reshdr, wim, &rdesc);
 
 	blob = new_blob_descriptor();
 	if (blob == NULL)
@@ -1451,13 +1451,13 @@ sha1_blob(struct blob_descriptor *blob)
 	return read_full_blob_with_sha1(blob, &cbs);
 }
 
-/* Convert a short WIM resource header to a stand-alone WIM resource
- * specification.
+/*
+ * Convert a short WIM resource header to a stand-alone WIM resource descriptor.
  *
  * Note: for solid resources some fields still need to be overridden.
  */
 void
-wim_res_hdr_to_spec(const struct wim_reshdr *reshdr, WIMStruct *wim,
+wim_res_hdr_to_desc(const struct wim_reshdr *reshdr, WIMStruct *wim,
 		    struct wim_resource_descriptor *rdesc)
 {
 	rdesc->wim = wim;
@@ -1476,9 +1476,9 @@ wim_res_hdr_to_spec(const struct wim_reshdr *reshdr, WIMStruct *wim,
 	}
 }
 
-/* Convert a stand-alone resource specification to a WIM resource header.  */
+/* Convert a stand-alone resource descriptor to a WIM resource header.  */
 void
-wim_res_spec_to_hdr(const struct wim_resource_descriptor *rdesc,
+wim_res_desc_to_hdr(const struct wim_resource_descriptor *rdesc,
 		    struct wim_reshdr *reshdr)
 {
 	reshdr->offset_in_wim     = rdesc->offset_in_wim;

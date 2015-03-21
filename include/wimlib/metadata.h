@@ -28,16 +28,16 @@ struct wim_image_metadata {
 	/* Linked list of 'struct wim_inode's for this image. */
 	struct list_head inode_list;
 
-	/* Linked list of 'struct blob_descriptor's for this image that are referred to in
-	 * the dentry tree, but have not had a SHA-1 message digest calculated
-	 * yet and therefore have not been inserted into the WIMStruct's blob
-	 * table.  This list is added to during wimlib_add_image() and
-	 * wimlib_mount_image() (read-write only). */
+	/* Linked list of 'struct blob_descriptor's for blobs that are
+	 * referenced by this image's dentry tree, but have not had their SHA-1
+	 * message digests calculated yet and therefore have not been inserted
+	 * into the WIMStruct's blob table.  This list is appended to when files
+	 * are scanned for inclusion in this WIM image.  */
 	struct list_head unhashed_blobs;
 
-	/* 1 iff the dentry tree has been modified.  If this is the case, the
-	 * memory for the dentry tree should not be freed when switching to a
-	 * different WIM image. */
+	/* 1 iff the dentry tree has been modified from the original stored in
+	 * the WIM file.  If this is the case, the memory for the dentry tree
+	 * should not be freed when switching to a different WIM image. */
 	u8 modified : 1;
 
 #ifdef WITH_NTFS_3G

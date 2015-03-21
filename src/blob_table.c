@@ -608,7 +608,7 @@ count_solid_resources(const struct blob_descriptor_disk *entries, size_t max)
 /*
  * Given a run of consecutive blob descriptors with the SOLID flag set and
  * having @num_rdescs resource entries, load resource information from them into
- * the resource specifications in the @rdescs array.
+ * the resource descriptors in the @rdescs array.
  *
  * Returns 0 on success, or a nonzero error code on failure.
  */
@@ -631,7 +631,7 @@ do_load_solid_info(WIMStruct *wim, struct wim_resource_descriptor **rdescs,
 
 		rdesc = rdescs[i];
 
-		wim_res_hdr_to_spec(&reshdr, wim, rdesc);
+		wim_res_hdr_to_desc(&reshdr, wim, rdesc);
 
 		/* For solid resources, the uncompressed size, compression type,
 		 * and chunk size are stored in the resource itself, not in the
@@ -895,7 +895,7 @@ read_blob_table(WIMStruct *wim)
 		goto out;
 
 	/* Allocate a hash table to map SHA-1 message digests into blob
-	 * specifications.  This is the in-memory "blob table".  */
+	 * descriptors.  This is the in-memory "blob table".  */
 	table = new_blob_table(num_entries * 2 + 1);
 	if (!table)
 		goto oom;
@@ -998,13 +998,13 @@ read_blob_table(WIMStruct *wim)
 				reshdr.uncompressed_size = reshdr.size_in_wim;
 			}
 
-			/* Set up a resource specification for this blob.  */
+			/* Set up a resource descriptor for this blob.  */
 
 			rdesc = MALLOC(sizeof(struct wim_resource_descriptor));
 			if (!rdesc)
 				goto oom;
 
-			wim_res_hdr_to_spec(&reshdr, wim, rdesc);
+			wim_res_hdr_to_desc(&reshdr, wim, rdesc);
 
 			cur_entry->offset_in_res = 0;
 			cur_entry->size = reshdr.uncompressed_size;

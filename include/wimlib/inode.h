@@ -14,21 +14,18 @@ struct wim_security_data;
 struct wimfs_fd;
 
 /* Valid values for the 'stream_type' field of a 'struct wim_inode_stream'  */
-enum {
+enum wim_inode_stream_type {
+
 	/* Data stream, may be unnamed (usual case) or named  */
 	STREAM_TYPE_DATA,
 
-	/* Reparse point stream, always unnamed.  */
+	/* Reparse point stream, always unnamed  */
 	STREAM_TYPE_REPARSE_POINT,
 
-	/* Stream type could not be determined.  */
+	/* Stream type could not be determined  */
 	STREAM_TYPE_UNKNOWN,
 };
 
-/*
- * The 'stream_name' field of unnamed streams always points to this array, which
- * is an empty UTF-16 string.
- */
 extern const utf16lechar NO_STREAM_NAME[1];
 
 /*
@@ -77,7 +74,7 @@ struct wim_inode_stream {
 };
 
 /*
- * WIM inode - a "file" in a WIM image.  An inode may have multiple names.
+ * WIM inode - a "file" in an image which may be accessible via multiple paths
  *
  * As mentioned in the comment above 'struct wim_dentry', in WIM files there is
  * no on-disk analogue of a real inode, as most of these fields are duplicated
@@ -87,13 +84,8 @@ struct wim_inode_stream {
 struct wim_inode {
 
 	/*
-	 * The NTFS-style collection of streams for this inode.  If
-	 * 'i_num_streams' is not more than the length of 'i_embedded_streams',
-	 * then 'i_streams' points to 'i_embedded_streams'.  Otherwise,
-	 * 'i_streams' points to an allocated array.
-	 *
-	 * The most common case is that 'i_num_streams == 1' and the only stream
-	 * is the unnamed data stream.
+	 * The collection of NTFS-style streams for this inode.  'i_streams'
+	 * points to either 'i_embedded_streams' or an allocated array.
 	 */
 	struct wim_inode_stream *i_streams;
 	struct wim_inode_stream i_embedded_streams[1];
@@ -319,17 +311,6 @@ inode_is_directory(const struct wim_inode *inode)
 			== FILE_ATTRIBUTE_DIRECTORY;
 }
 
-/* Is the inode a directory with the encrypted attribute set?
- * This returns true for encrypted directories even if they have reparse data
- * (I'm not sure if such files can even exist!).  */
-static inline bool
-inode_is_encrypted_directory(const struct wim_inode *inode)
-{
-	return ((inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
-					FILE_ATTRIBUTE_ENCRYPTED))
-		== (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_ENCRYPTED));
-}
-
 /* Is the inode a symbolic link?
  * This returns true iff the inode is a reparse point that is either a "real"
  * symbolic link or a junction point.  */
@@ -341,10 +322,9 @@ inode_is_symlink(const struct wim_inode *inode)
 		    inode->i_reparse_tag == WIM_IO_REPARSE_TAG_MOUNT_POINT);
 }
 
-/* Does the inode have children?
- * Currently (based on read_dentry_tree()), this can only return true for inodes
- * for which inode_is_directory() returns true.  (This also returns false on
- * empty directories.)  */
+/* Does the inode have children?  Currently (based on read_dentry_tree() as well
+ * as the various build-dentry-tree implementations), this can only return true
+ * for inodes for which inode_is_directory() returns true.  */
 static inline bool
 inode_has_children(const struct wim_inode *inode)
 {

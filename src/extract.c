@@ -208,7 +208,7 @@ read_pwm_blob_header(WIMStruct *pwm, struct blob_descriptor *blob,
 	reshdr.flags = le32_to_cpu(buf.blob_hdr.flags);
 	reshdr.offset_in_wim = pwm->in_fd.offset;
 	reshdr.uncompressed_size = le64_to_cpu(buf.blob_hdr.uncompressed_size);
-	wim_res_hdr_to_spec(&reshdr, pwm, rdesc);
+	wim_res_hdr_to_desc(&reshdr, pwm, rdesc);
 	blob_set_is_located_in_wim_resource(blob, rdesc);
 	blob->flags = rdesc->flags;
 	blob->size = rdesc->uncompressed_size;
@@ -1946,7 +1946,7 @@ wimlib_extract_image_from_pipe_with_progress(int pipe_fd,
 			goto out_wimlib_free;
 		}
 
-		wim_res_spec_to_hdr(&xml_rdesc, &pwm->hdr.xml_data_reshdr);
+		wim_res_desc_to_hdr(&xml_rdesc, &pwm->hdr.xml_data_reshdr);
 
 		ret = read_wim_xml_data(pwm);
 		if (ret)
