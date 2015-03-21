@@ -24,14 +24,14 @@ enum {
 	STREAM_TYPE_UNKNOWN,
 };
 
-extern const utf16lechar NO_NAME[1];
+extern const utf16lechar NO_STREAM_NAME[1];
 
 /*
  * 'struct wim_inode_stream' represents an NTFS-style stream, which is a blob of
  * data associated with an inode.  Each stream has a type and optionally a name.
  */
 struct wim_inode_stream {
-	/* The name of the stream, or NO_NAME if the stream is unnamed.
+	/* The name of the stream, or NO_STREAM_NAME if the stream is unnamed.
 	 */
 	utf16lechar *stream_name;
 
@@ -384,7 +384,7 @@ stream_set_blob(struct wim_inode_stream *stream, struct blob_descriptor *blob)
 static inline bool
 stream_is_named(const struct wim_inode_stream *stream)
 {
-	return stream->stream_name != NO_NAME;
+	return stream->stream_name != NO_STREAM_NAME;
 }
 
 static inline bool

@@ -129,7 +129,7 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 					   (inode->i_attributes &
 					    FILE_ATTRIBUTE_REPARSE_POINT) ?
 					   	STREAM_TYPE_REPARSE_POINT : STREAM_TYPE_DATA,
-					   NO_NAME);
+					   NO_STREAM_NAME);
 
 	ret = attr_to_wimlib_stream_entry(inode, stream, &wdentry->streams[0],
 					  wim->blob_table, flags);

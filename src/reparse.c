@@ -178,7 +178,7 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 		struct wim_inode_stream *stream;
 
 		stream = inode_get_stream_utf16le(inode, STREAM_TYPE_REPARSE_POINT,
-						   NO_NAME);
+						   NO_STREAM_NAME);
 		blob = NULL;
 		if (stream)
 			blob = stream_blob_resolved(stream);

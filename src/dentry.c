@@ -1249,7 +1249,7 @@ prepare_inode_stream_list(const u8 *p, const u8 *end, struct wim_inode *inode,
 			return WIMLIB_ERR_NOMEM;
 	}
 
-	inode->i_streams[0].stream_name = (utf16lechar *)NO_NAME;
+	inode->i_streams[0].stream_name = (utf16lechar *)NO_STREAM_NAME;
 	copy_hash(inode->i_streams[0]._stream_hash, default_hash);
 
 	for (unsigned i = 1; i < inode->i_num_streams; i++) {
@@ -1306,7 +1306,7 @@ prepare_inode_stream_list(const u8 *p, const u8 *end, struct wim_inode *inode,
 			if (!strm->stream_name)
 				return WIMLIB_ERR_NOMEM;
 		} else {
-			strm->stream_name = (utf16lechar *)NO_NAME;
+			strm->stream_name = (utf16lechar *)NO_STREAM_NAME;
 		}
 
 		p += length;
@@ -1700,7 +1700,7 @@ write_extra_stream_entry(u8 * restrict p, const utf16lechar * restrict name,
 	u8 *orig_p = p;
 	size_t name_nbytes;
 
-	if (name == NO_NAME)
+	if (name == NO_STREAM_NAME)
 		name_nbytes = 0;
 	else
 		name_nbytes = utf16le_len_bytes(name);
@@ -1826,7 +1826,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 
 	if (need_extra_entry_for_unnamed_data_stream) {
 		copy_hash(disk_dentry->default_hash, reparse_point_hash);
-		p = write_extra_stream_entry(p, NO_NAME, unnamed_data_stream_hash);
+		p = write_extra_stream_entry(p, NO_STREAM_NAME, unnamed_data_stream_hash);
 		num_extra_streams++;
 	} else {
 		copy_hash(disk_dentry->default_hash, unnamed_data_stream_hash);

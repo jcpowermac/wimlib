@@ -38,7 +38,7 @@
 #include "wimlib/blob_table.h"
 #include "wimlib/timestamp.h"
 
-const utf16lechar NO_NAME[1];
+const utf16lechar NO_STREAM_NAME[1];
 
 /* Allocate a new inode.  Set the timestamps to the current time.  */
 struct wim_inode *
@@ -74,7 +74,7 @@ static void
 free_inode(struct wim_inode *inode)
 {
 	for (unsigned i = 0; i < inode->i_num_streams; i++)
-		if (inode->i_streams[i].stream_name != NO_NAME)
+		if (inode->i_streams[i].stream_name != NO_STREAM_NAME)
 			FREE(inode->i_streams[i].stream_name);
 	if (inode->i_streams != inode->i_embedded_streams)
 		FREE(inode->i_streams);
@@ -217,7 +217,7 @@ inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
 	new_stream->stream_type = stream_type;
 	if (!*stream_name) {
 		/* Unnamed stream  */
-		new_stream->stream_name = (utf16lechar *)NO_NAME;
+		new_stream->stream_name = (utf16lechar *)NO_STREAM_NAME;
 	} else {
 		/* Named stream  */
 		new_stream->stream_name = utf16le_dup(stream_name);

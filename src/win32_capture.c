@@ -853,7 +853,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 		goto err;
 
 	stream = inode_add_stream_utf16le_with_blob(inode, STREAM_TYPE_DATA,
-						     NO_NAME, blob);
+						     NO_STREAM_NAME, blob);
 	if (!stream)
 		goto err_nomem;
 
@@ -1330,7 +1330,7 @@ retry_open:
 			goto out;
 		}
 		inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
-		if (!inode_add_stream_with_data(inode, STREAM_TYPE_REPARSE_POINT, NO_NAME,
+		if (!inode_add_stream_with_data(inode, STREAM_TYPE_REPARSE_POINT, NO_STREAM_NAME,
 						rpbuf + 8, rpbuflen - 8,
 						params->blob_table))
 		{
