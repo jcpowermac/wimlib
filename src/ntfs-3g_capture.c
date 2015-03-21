@@ -195,7 +195,7 @@ load_ntfs_attrs_with_type(struct wim_inode *inode,
 	{
 		u64 data_size = ntfs_get_attribute_value_length(actx->attr);
 		size_t name_nchars = actx->attr->name_length;
-		struct wim_inode_stream *stream;
+		struct wim_inode_stream *strm;
 		const utf16lechar *stream_name = NO_STREAM_NAME;
 
 		if (data_size == 0) {
@@ -252,15 +252,15 @@ load_ntfs_attrs_with_type(struct wim_inode *inode,
 			}
 		}
 
-		stream = inode_add_stream(inode,
-					  ntfs_3g_attr_type_to_wimlib_stream_type(type),
-					  stream_name,
-					  blob);
-		if (!stream) {
+		strm = inode_add_stream(inode,
+					ntfs_3g_attr_type_to_wimlib_stream_type(type),
+					stream_name,
+					blob);
+		if (!strm) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_free_blob;
 		}
-		prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
+		prepare_unhashed_blob(blob, inode, strm->stream_id, unhashed_blobs);
 	}
 	if (errno == ENOENT) {
 		ret = 0;

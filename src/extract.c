@@ -1015,11 +1015,11 @@ dentry_list_resolve_streams(struct list_head *dentry_list,
 }
 
 static int
-ref_stream(struct wim_inode_stream *stream,
+ref_stream(struct wim_inode_stream *strm,
 	   struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct blob_descriptor *blob = stream_blob_resolved(stream);
+	struct blob_descriptor *blob = stream_blob_resolved(strm);
 	struct blob_extraction_target *targets;
 
 	if (!blob)
@@ -1077,19 +1077,19 @@ ref_stream(struct wim_inode_stream *stream,
 		targets = blob->blob_extraction_targets;
 	}
 	targets[blob->out_refcnt].inode = inode;
-	targets[blob->out_refcnt].stream = stream;
+	targets[blob->out_refcnt].stream = strm;
 	blob->out_refcnt++;
 	return 0;
 }
 
 static int
-dentry_ref_data_stream(struct wim_inode_stream *stream,
+dentry_ref_data_stream(struct wim_inode_stream *strm,
 		       struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
-	if (unlikely(stream_is_named(stream))) {
+	if (unlikely(stream_is_named(strm))) {
 		/* Named data stream  */
 		if (ctx->supported_features.named_data_streams)
-			return ref_stream(stream, dentry, ctx);
+			return ref_stream(strm, dentry, ctx);
 	} else {
 		/* Unnamed data stream  */
 		if (ctx->apply_ops->will_externally_back) {
@@ -1102,7 +1102,7 @@ dentry_ref_data_stream(struct wim_inode_stream *stream,
 			}
 			/* Won't externally back */
 		}
-		return ref_stream(stream, dentry, ctx);
+		return ref_stream(strm, dentry, ctx);
 	}
 	return 0;
 }

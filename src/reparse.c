@@ -175,12 +175,12 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 
 	if (!blob_override) {
-		struct wim_inode_stream *stream;
+		struct wim_inode_stream *strm;
 
-		stream = inode_get_stream(inode, STREAM_TYPE_REPARSE_POINT,
-					  NO_STREAM_NAME);
-		if (stream)
-			blob = stream_blob_resolved(stream);
+		strm = inode_get_stream(inode, STREAM_TYPE_REPARSE_POINT,
+					NO_STREAM_NAME);
+		if (strm)
+			blob = stream_blob_resolved(strm);
 		else
 			blob = NULL;
 		if (!blob) {
