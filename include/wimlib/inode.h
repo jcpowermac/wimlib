@@ -67,10 +67,10 @@ struct wim_inode_stream {
 
 	/* A unique identifier for this stream within the context of its inode.
 	 * This stays constant even if the streams array is reallocated.  */
-	u32 stream_id : 27;
+	u32 stream_id : 28;
 
 	/* The type of this stream as one of the STREAM_TYPE_* values  */
-	u32 stream_type : 4;
+	u32 stream_type : 3;
 };
 
 /*
