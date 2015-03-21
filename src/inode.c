@@ -149,20 +149,6 @@ inode_dec_num_opened_fds(struct wim_inode *inode)
 #endif
 
 struct wim_inode_stream *
-inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
-{
-	for (unsigned i = 0; i < inode->i_num_streams; i++) {
-		struct wim_inode_stream *strm = &inode->i_streams[i];
-		if (strm->stream_type == stream_type &&
-		    strm->stream_name == NO_STREAM_NAME)
-		{
-			return strm;
-		}
-	}
-	return NULL;
-}
-
-struct wim_inode_stream *
 inode_get_stream(const struct wim_inode *inode, int stream_type,
 		 const utf16lechar *stream_name)
 {
@@ -174,6 +160,20 @@ inode_get_stream(const struct wim_inode *inode, int stream_type,
 		if (strm->stream_type == stream_type &&
 		    !cmp_utf16le_strings_z(strm->stream_name, stream_name,
 					   default_ignore_case))
+		{
+			return strm;
+		}
+	}
+	return NULL;
+}
+
+struct wim_inode_stream *
+inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
+{
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		struct wim_inode_stream *strm = &inode->i_streams[i];
+		if (strm->stream_type == stream_type &&
+		    strm->stream_name == NO_STREAM_NAME)
 		{
 			return strm;
 		}
@@ -417,7 +417,7 @@ struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 				       const struct blob_table *blob_table)
 {
-	struct wim_inode_stream *strm;
+	const struct wim_inode_stream *strm;
 
 	strm = inode_get_unnamed_stream(inode, STREAM_TYPE_DATA);
 	if (!strm)
@@ -445,7 +445,7 @@ inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
  *
  * All streams of the inode must be resolved.  */
 void
-inode_ref_streams(struct wim_inode *inode)
+inode_ref_blobs(struct wim_inode *inode)
 {
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		struct blob_descriptor *blob;
@@ -459,7 +459,7 @@ inode_ref_streams(struct wim_inode *inode)
 /* Drop a reference to each blob referenced by this inode.  This is necessary
  * when deleting a hard link to this inode.  */
 void
-inode_unref_streams(struct wim_inode *inode, struct blob_table *blob_table)
+inode_unref_blobs(struct wim_inode *inode, struct blob_table *blob_table)
 {
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		struct blob_descriptor *blob;

@@ -340,7 +340,7 @@ enlarge_blob_table(struct blob_table *table)
 	FREE(old_array);
 }
 
-/* Insert a blob into the blob table.  */
+/* Insert a blob descriptor into the blob table.  */
 void
 blob_table_insert(struct blob_table *table, struct blob_descriptor *blob)
 {
@@ -349,7 +349,7 @@ blob_table_insert(struct blob_table *table, struct blob_descriptor *blob)
 		enlarge_blob_table(table);
 }
 
-/* Unlinks a blob from the blob table; does not free it.  */
+/* Unlinks a blob descriptor from the blob table; does not free it.  */
 void
 blob_table_unlink(struct blob_table *table, struct blob_descriptor *blob)
 {
@@ -401,9 +401,9 @@ for_blob_in_table(struct blob_table *table,
 /*
  * This is a qsort() callback that sorts blobs into an order optimized for
  * reading.  Sorting is done primarily by blob location, then secondarily by a
- * location-dependent order.  Most importantly, blobs in WIM files are sorted
- * such that the WIM files will be read sequentially.  This is especially
- * importont for WIM files containing solid resources.
+ * location-dependent order.  For example, blobs in WIM resources are sorted
+ * such that the underlying WIM files will be read sequentially.  This is
+ * especially important for WIM files containing solid resources.
  */
 int
 cmp_blobs_by_sequential_order(const void *p1, const void *p2)
@@ -525,8 +525,8 @@ add_blob_to_array(struct blob_descriptor *blob, void *_pp)
 	return 0;
 }
 
-/* Iterate through the blob descriptors in the specified blob table, but first
- * sort them in an order optimized for sequential reading.  */
+/* Iterate through the blob descriptors in the specified blob table in an order
+ * optimized for sequential reading.  */
 int
 for_blob_in_table_sorted_by_sequential_order(struct blob_table *table,
 					     int (*visitor)(struct blob_descriptor *, void *),

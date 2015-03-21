@@ -74,11 +74,11 @@ struct wim_dentry_on_disk {
 
 	/* Length of this directory entry in bytes, not including any extra
 	 * stream entries.  Should be a multiple of 8 so that the following
-	 * dentry or alternate data stream entry is aligned on an 8-byte
-	 * boundary.  (If not, wimlib will round it up.)  It must be at least as
-	 * long as the fixed-length fields of the dentry (WIM_DENTRY_DISK_SIZE),
-	 * plus the lengths of the file name and/or short name if present, plus
-	 * the size of any "extra" data.
+	 * dentry or extra stream entry is aligned on an 8-byte boundary.  (If
+	 * not, wimlib will round it up.)  It must be at least as long as the
+	 * fixed-length fields of the dentry (WIM_DENTRY_DISK_SIZE), plus the
+	 * lengths of the file name and/or short name if present, plus the size
+	 * of any "extra" data.
 	 *
 	 * It is also possible for this field to be 0.  This situation, which is
 	 * undocumented, indicates the end of a list of sibling nodes in a
@@ -115,30 +115,17 @@ struct wim_dentry_on_disk {
 	le64 last_access_time;
 	le64 last_write_time;
 
-	/* Vaguely, the SHA-1 message digest ("hash") of the file's contents.
-	 * More specifically, this is for the "unnamed data stream" rather than
-	 * any "alternate data streams".  This hash value is used to look up the
-	 * corresponding entry in the WIM's stream blob table to actually find
-	 * the file contents within the WIM.
+	/* 
+	 * Usually this is the SHA-1 message digest of the file's contents
+	 * (unnamed data stream).
 	 *
-	 * If the file has no unnamed data stream (e.g. is a directory), then
-	 * this field will be all zeroes.  If the unnamed data stream is empty
-	 * (i.e. an "empty file"), then this field is also expected to be all
-	 * zeroes.  (It will be if wimlib created the WIM image, at least;
-	 * otherwise it can't be ruled out that the SHA-1 message digest of 0
-	 * bytes of data is given explicitly.)
+	 * If the file has FILE_ATTRIBUTE_REPARSE_POINT set, then this is
+	 * instead usually the SHA-1 message digest of the uncompressed reparse
+	 * point data.
 	 *
-	 * If the file has reparse data, then this field will instead specify
-	 * the SHA-1 message digest of the reparse data.  If it is somehow
-	 * possible for a file to have both an unnamed data stream and reparse
-	 * data, then this is not handled by wimlib.
-	 *
-	 * As a further special case, if this field is all zeroes but there is
-	 * an alternate data stream entry with no name and a nonzero SHA-1
-	 * message digest field, then that hash must be used instead of this
-	 * one.  In fact, when named data streams are present, some versions of
-	 * Windows PE contain a bug where they only look in the alternate data
-	 * stream entries for the unnamed data stream, not here.
+	 * However, there are some special rules that need to be applied to
+	 * interpret this field correctly when extra stream entries are present.
+	 * See the code for details.
 	 */
 	u8 default_hash[SHA1_HASH_SIZE];
 
@@ -221,7 +208,8 @@ struct wim_dentry_on_disk {
 	 * entries following the dentry, on an 8-byte aligned boundary.  They
 	 * are not counted in the 'length' field of the dentry.  */
 
-/* TODO  */
+/* On-disk format of an extra stream entry.  This represents an extra "stream"
+ * associated with the file, such as a named data stream.  */
 struct wim_inode_stream_on_disk {
 
 	/* Length of this structure, in bytes.  This includes all fixed-length
@@ -229,10 +217,11 @@ struct wim_inode_stream_on_disk {
 	 * padding such that the length is a multiple of 8.  */
 	le64 length;
 
+	/* Reserved field  */
 	le64 reserved;
 
-	/* SHA-1 message digest of this stream's data, or all zeroes if this
-	 * stream's data is of zero length.  */
+	/* SHA-1 message digest of this stream's uncompressed data, or all
+	 * zeroes if this stream's data is of zero length.  */
 	u8 hash[SHA1_HASH_SIZE];
 
 	/* Length of this stream's name, in bytes and excluding the null
@@ -382,8 +371,10 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 	}
 
 	/*
-	 * - One extra stream for each named data stream
-	 * - One extra stream for the unnamed data stream there is either:
+	 * Extra stream entries:
+	 *
+	 * - One extra stream entry for each named data stream
+	 * - One extra stream entry for the unnamed data stream when there is either:
 	 * 	- a reparse point stream
 	 * 	- at least one named data stream (for Windows PE bug workaround)
 	 * 		- UNLESS it's an encrypted file
@@ -1045,9 +1036,9 @@ do_free_dentry(struct wim_dentry *dentry, void *_ignore)
 }
 
 static int
-do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *blob_table)
+do_free_dentry_and_unref_blobs(struct wim_dentry *dentry, void *blob_table)
 {
-	inode_unref_streams(dentry->d_inode, blob_table);
+	inode_unref_blobs(dentry->d_inode, blob_table);
 	free_dentry(dentry);
 	return 0;
 }
@@ -1076,7 +1067,7 @@ free_dentry_tree(struct wim_dentry *root, struct blob_table *blob_table)
 	int (*f)(struct wim_dentry *, void *);
 
 	if (blob_table)
-		f = do_free_dentry_and_unref_streams;
+		f = do_free_dentry_and_unref_blobs;
 	else
 		f = do_free_dentry;
 
@@ -1232,26 +1223,32 @@ read_extra_data(const u8 *p, const u8 *end, struct wim_inode *inode)
 	return 0;
 }
 
+/*
+ * Read and interpret the collection of streams for the specified inode.
+ */
 static int
-prepare_inode_stream_list(const u8 *p, const u8 *end, struct wim_inode *inode,
-			  u32 num_extra_streams, const u8 *default_hash,
-			  u64 *offset_p)
+setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
+		    u32 num_extra_streams, const u8 *default_hash,
+		    u64 *offset_p)
 {
 	const u8 *orig_p = p;
 
 	inode->i_num_streams = 1 + num_extra_streams;
 
-	if (inode->i_num_streams <= ARRAY_LEN(inode->i_embedded_streams)) {
+	if (likely(inode->i_num_streams <= ARRAY_LEN(inode->i_embedded_streams))) {
 		inode->i_streams = inode->i_embedded_streams;
 	} else {
-		inode->i_streams = CALLOC(inode->i_num_streams, sizeof(inode->i_streams[0]));
+		inode->i_streams = CALLOC(inode->i_num_streams,
+					  sizeof(inode->i_streams[0]));
 		if (!inode->i_streams)
 			return WIMLIB_ERR_NOMEM;
 	}
 
+	/* Use the default hash field for the first stream  */
 	inode->i_streams[0].stream_name = (utf16lechar *)NO_STREAM_NAME;
 	copy_hash(inode->i_streams[0]._stream_hash, default_hash);
 
+	/* Read the extra stream entries  */
 	for (unsigned i = 1; i < inode->i_num_streams; i++) {
 		struct wim_inode_stream *strm;
 		const struct wim_inode_stream_on_disk *disk_strm;
@@ -1314,9 +1311,11 @@ prepare_inode_stream_list(const u8 *p, const u8 *end, struct wim_inode *inode,
 
 	inode->i_next_stream_id = inode->i_num_streams;
 
-	/* Now, assign a type to each stream.  */
+	/* Now, assign a type to each stream.  Unfortunately this requires
+	 * various hacks because stream types aren't explicitly annotated in the
+	 * WIM format.  */
 
-	if (inode->i_num_streams == 1) {
+	if (likely(inode->i_num_streams == 1)) {
 		/* Just the unnamed data stream  */
 		inode->i_streams[0].stream_type = STREAM_TYPE_DATA;
 	} else {
@@ -1324,10 +1323,19 @@ prepare_inode_stream_list(const u8 *p, const u8 *end, struct wim_inode *inode,
 		bool found_unnamed_data_stream = false;
 		struct wim_inode_stream *unnamed_zero_hash_stream = NULL;
 		for (unsigned i = 0; i < inode->i_num_streams; i++) {
+
 			struct wim_inode_stream *strm = &inode->i_streams[i];
 			if (stream_is_named(strm)) {
+				/* If a name is specified, assume it is a named
+				 * data stream . */
 				strm->stream_type = STREAM_TYPE_DATA;
 			} else if (!is_zero_hash(inode->i_streams[i]._stream_hash)) {
+				/* If no name is specified and the hash is
+				 * nonzero, then assume it is an unnamed data
+				 * stream or a reparse point stream.  For
+				 * reparse points, assume the reparse stream is
+				 * given first and the unnamed data stream is
+				 * given second.  */
 				if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
 				    !found_reparse_point) {
 					found_reparse_point = true;
@@ -1335,12 +1343,19 @@ prepare_inode_stream_list(const u8 *p, const u8 *end, struct wim_inode *inode,
 				} else if (!found_unnamed_data_stream) {
 					found_unnamed_data_stream = true;
 					strm->stream_type = STREAM_TYPE_DATA;
+				} else {
+					strm->stream_type = STREAM_TYPE_UNKNOWN;
 				}
 			} else {
+				/* If no name is specified and the hash is zero,
+				 * then remember this stream for later so that
+				 * we can assign it to the unnamed data stream
+				 * if we don't find a better candidate.  */
 				unnamed_zero_hash_stream = strm;
 				strm->stream_type = STREAM_TYPE_UNKNOWN;
 			}
 		}
+
 		if (!found_unnamed_data_stream && unnamed_zero_hash_stream != NULL)
 			unnamed_zero_hash_stream->stream_type = STREAM_TYPE_DATA;
 	}
@@ -1502,18 +1517,20 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	}
 
 	/* Read extra data at end of dentry (but before extra stream entries).
-	 * This may contain tagged items.  */
+	 * This may contain tagged metadata items.  */
 	ret = read_extra_data(p, &buf[offset + length], inode);
 	if (ret)
 		goto err_free_dentry;
 
 	offset += (length + 7) & ~7;
 
-	/* Prepare the inode's list of streams.  */
-	ret = prepare_inode_stream_list(&buf[offset], &buf[buf_len], inode,
-					le16_to_cpu(disk_dentry->num_extra_streams),
-					disk_dentry->default_hash,
-					&offset);
+	/* Set up the inode's collection of streams.  */
+	ret = setup_inode_streams(&buf[offset],
+				  &buf[buf_len],
+				  inode,
+				  le16_to_cpu(disk_dentry->num_extra_streams),
+				  disk_dentry->default_hash,
+				  &offset);
 	if (ret)
 		goto err_free_dentry;
 
@@ -1693,7 +1710,7 @@ err_free_dentry_tree:
 
 static u8 *
 write_extra_stream_entry(u8 * restrict p, const utf16lechar * restrict name,
-			    const u8 * restrict hash)
+			 const u8 * restrict hash)
 {
 	struct wim_inode_stream_on_disk *disk_strm =
 			(struct wim_inode_stream_on_disk *)p;
@@ -1796,8 +1813,9 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	/* Streams  */
 
 	/*
-	 * - One extra stream for each named data stream
-	 * - One extra stream for the unnamed data stream there is either:
+	 * - Write one extra stream entry for each named data stream
+	 * - Write one extra stream entry for the unnamed data stream when there
+	 *   is either:
 	 * 	- a reparse point stream
 	 * 	- at least one named data stream (for Windows PE bug workaround)
 	 * 		- UNLESS it's an encrypted file

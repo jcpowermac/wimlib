@@ -512,8 +512,8 @@ static void
 remove_dentry(struct wim_dentry *dentry,
 	      struct blob_table *blob_table)
 {
-	/* Drop the reference to each of the inode's streams.  */
-	inode_unref_streams(dentry->d_inode, blob_table);
+	/* Drop blob references.  */
+	inode_unref_blobs(dentry->d_inode, blob_table);
 
 	/* Unlink the dentry from the image's dentry tree.  */
 	unlink_dentry(dentry);
@@ -1415,7 +1415,7 @@ wimfs_link(const char *existing_path, const char *new_path)
 	if (new_dentry(new_name, &new_alias))
 		return -ENOMEM;
 
-	inode_ref_streams(inode);
+	inode_ref_blobs(inode);
 	d_associate(new_alias, inode);
 	dentry_add_child(dir, new_alias);
 	touch_inode(dir->d_inode);

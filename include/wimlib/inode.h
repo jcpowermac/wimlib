@@ -425,10 +425,10 @@ extern const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode);
 
 extern void
-inode_ref_streams(struct wim_inode *inode);
+inode_ref_blobs(struct wim_inode *inode);
 
 extern void
-inode_unref_streams(struct wim_inode *inode, struct blob_table *blob_table);
+inode_unref_blobs(struct wim_inode *inode, struct blob_table *blob_table);
 
 /* inode_fixup.c  */
 extern int
