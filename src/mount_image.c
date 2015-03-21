@@ -1481,7 +1481,7 @@ wimfs_mknod(const char *path, mode_t mode, dev_t rdev)
 	     && (stream_name = path_stream_name(path)))
 	{
 		struct wim_inode *inode;
-		struct wim_inode_stream *new_stream;
+		struct wim_inode_stream *new_strm;
 		char *p;
 
 		/* Create a named data stream.  */
@@ -1497,8 +1497,9 @@ wimfs_mknod(const char *path, mode_t mode, dev_t rdev)
 		if (!inode)
 			return -errno;
 
-		new_stream = inode_add_stream(inode, STREAM_TYPE_DATA, stream_name);
-		if (!new_stream)
+		new_strm = inode_add_stream_with_blob(inode, STREAM_TYPE_DATA,
+						      stream_name, NULL);
+		if (!new_strm)
 			return -errno;
 		return 0;
 	} else {
@@ -1583,7 +1584,7 @@ wimfs_opendir(const char *path, struct fuse_file_info *fi)
 {
 	WIMStruct *wim = wimfs_get_WIMStruct();
 	struct wim_inode *inode;
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 	struct wimfs_fd *fd;
 	int ret;
 
@@ -1592,10 +1593,16 @@ wimfs_opendir(const char *path, struct fuse_file_info *fi)
 		return -errno;
 	if (!inode_is_directory(inode))
 		return -ENOTDIR;
-	stream = inode_get_unnamed_data_stream(inode);
-	if (!stream)
-		return -ENOTDIR;
-	ret = alloc_wimfs_fd(inode, stream, &fd);
+	strm = inode_get_unnamed_stream(inode, STREAM_TYPE_DATA);
+	if (!strm) {
+		strm = inode_add_stream_utf16le_with_blob(inode,
+							  STREAM_TYPE_DATA,
+							  NO_STREAM_NAME,
+							  NULL);
+		if (!strm)
+			return -errno;
+	}
+	ret = alloc_wimfs_fd(inode, strm, &fd);
 	if (ret)
 		return ret;
 	fi->fh = (uintptr_t)fd;
@@ -1781,6 +1788,7 @@ wimfs_setxattr(const char *path, const char *name,
 	struct wimfs_context *ctx = wimfs_get_context();
 	struct wim_inode *inode;
 	struct wim_inode_stream *existing;
+	int ret;
 
 	if (!strncmp(name, "wimfs.", 6)) {
 		/* Handle some magical extended attributes.  These really should
@@ -1816,23 +1824,32 @@ wimfs_setxattr(const char *path, const char *name,
 	if (!inode)
 		return -errno;
 
-	existing = inode_get_stream(inode, STREAM_TYPE_DATA, name);
+	ret = tstr_get_utf16le(name, &uname);
+	if (ret)
+		return -errno;
+
+	existing = inode_get_stream_utf16le(inode, STREAM_TYPE_DATA, uname);
 	if (existing) {
+		ret = -EEXIST;
 		if (flags & XATTR_CREATE)
-			return -EEXIST;
+			goto out_put_uname;
 	} else {
-		if (errno != ENOENT)
-			return -errno;
+		ret = -errno;
+		if (ret != -ENOENT)
+			goto out_put_uname;
+		ret = -ENOATTR;
 		if (flags & XATTR_REPLACE)
-			return -ENOATTR;
+			goto out_put_uname;
 	}
 
-	if (!inode_add_stream_with_data(inode, STREAM_TYPE_DATA, name, value,
-					size, ctx->wim->blob_table))
+	if (!inode_add_stream_utf16le_with_data(inode, STREAM_TYPE_DATA, uname,
+						value, size, ctx->wim->blob_table))
 		return -errno;
 	if (existing)
 		inode_remove_stream(inode, existing, ctx->wim->blob_table);
-	return 0;
+out_put_uname:
+	tstr_put_utf16le(uname);
+	return ret;
 }
 
 static int

@@ -66,7 +66,6 @@ new_timeless_inode(void)
 	if (inode) {
 		inode->i_security_id = -1;
 		/*inode->i_nlink = 0;*/
-		inode->i_next_stream_id = 1;
 		inode->i_not_rpfixed = 1;
 		INIT_LIST_HEAD(&inode->i_list);
 		INIT_LIST_HEAD(&inode->i_dentry);
@@ -82,7 +81,7 @@ free_inode(struct wim_inode *inode)
 			FREE(inode->i_streams[i].stream_name);
 	if (inode->i_streams != inode->i_embedded_streams)
 		FREE(inode->i_streams);
-	if (unlikely(inode->i_extra))
+	if (inode->i_extra)
 		FREE(inode->i_extra);
 	/* HACK: This may instead delete the inode from i_list, but hlist_del()
 	 * behaves the same as list_del(). */
@@ -154,21 +153,29 @@ struct wim_inode_stream *
 inode_get_stream_utf16le(const struct wim_inode *inode, int stream_type,
 			 const utf16lechar *stream_name)
 {
-	for (unsigned i = 0; i < inode->i_num_streams; i++)
-		if (inode->i_streams[i].stream_type == stream_type &&
-		    !cmp_utf16le_strings_z(inode->i_streams[i].stream_name, stream_name,
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		struct wim_inode_stream *strm = &inode->i_streams[i];
+		if (strm->stream_type == stream_type &&
+		    !cmp_utf16le_strings_z(strm->stream_name, stream_name,
 					   default_ignore_case))
-			return &inode->i_streams[i];
+		{
+			return strm;
+		}
+	}
 	return NULL;
 }
 
 struct wim_inode_stream *
-inode_get_unnamed_data_stream(const struct wim_inode *inode)
+inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
 {
-	for (unsigned i = 0; i < inode->i_num_streams; i++)
-		if (inode->i_streams[i].stream_type == STREAM_TYPE_DATA &&
-		    !*inode->i_streams[i].stream_name)
-			return &inode->i_streams[i];
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		struct wim_inode_stream *strm = &inode->i_streams[i];
+		if (strm->stream_type == stream_type &&
+		    strm->stream_name == NO_STREAM_NAME)
+		{
+			return strm;
+		}
+	}
 	return NULL;
 }
 
@@ -189,10 +196,16 @@ inode_get_stream(const struct wim_inode *inode, int stream_type,
 	return strm;
 }
 
-struct wim_inode_stream *
+static struct wim_inode_stream *
 inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
 			 const utf16lechar *stream_name)
 {
+	if (inode->i_num_streams >= 0xFFFF) {
+		ERROR("Inode has too many streams! Path=\"%"TS"\"",
+		      inode_first_full_path(inode));
+		return NULL;
+	}
+
 	struct wim_inode_stream *streams;
 	struct wim_inode_stream *new_stream;
 
@@ -236,7 +249,7 @@ inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
 	return new_stream;
 }
 
-struct wim_inode_stream *
+static struct wim_inode_stream *
 inode_add_stream(struct wim_inode *inode, int stream_type,
 		 const tchar *stream_name)
 {
@@ -316,6 +329,26 @@ inode_add_stream_with_data(struct wim_inode *inode,
 		return NULL;
 
 	strm = inode_add_stream_with_blob(inode, stream_type, stream_name, blob);
+
+	if (!strm)
+		blob_decrement_refcnt(blob, blob_table);
+
+	return strm;
+}
+
+struct wim_inode_stream *
+inode_add_reparse_stream_with_data(struct wim_inode *inode,
+				   const void *data, size_t size,
+				   struct blob_table *blob_table)
+{
+	struct blob_descriptor *blob;
+	struct wim_inode_stream *strm;
+
+	blob = new_blob_from_data_buffer(data, size, blob_table);
+	if (!blob)
+		return NULL;
+
+	strm = inode_add_stream_utf16le_with_blob(inode, stream_type, stream_name, blob);
 
 	if (!strm)
 		blob_decrement_refcnt(blob, blob_table);
@@ -435,7 +468,7 @@ stream_blob(const struct wim_inode_stream *strm, const struct blob_table *table)
 /* Return the SHA-1 message digest of the data of the specified stream, or a
  * void SHA-1 of all zeroes if the specified stream is empty.   */
 const u8 *
-stream_hash(const struct wim_inode_strm *strm)
+stream_hash(const struct wim_inode_stream *strm)
 {
 	if (strm->stream_resolved)
 		return strm->_stream_blob ? strm->_stream_blob->hash : zero_hash;
@@ -453,7 +486,7 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 {
 	struct wim_inode_stream *strm;
 
-	strm = inode_get_unnamed_data_stream(inode);
+	strm = inode_get_unnamed_stream(inode, STREAM_TYPE_DATA);
 	if (!strm)
 		return NULL;
 
@@ -467,7 +500,7 @@ inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 {
 	const struct wim_inode_stream *strm;
 
-	strm = inode_get_unnamed_data_stream(inode);
+	strm = inode_get_unnamed_stream(inode, STREAM_TYPE_DATA);
 	if (!strm)
 		return zero_hash;
 

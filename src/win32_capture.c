@@ -1330,9 +1330,8 @@ retry_open:
 			goto out;
 		}
 		inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
-		if (!inode_add_stream_with_data(inode, STREAM_TYPE_REPARSE_POINT, NO_STREAM_NAME,
-						rpbuf + 8, rpbuflen - 8,
-						params->blob_table))
+		if (!inode_add_reparse_stream(inode, rpbuf + 8, rpbuflen - 8,
+					      params->blob_table))
 		{
 			ret = WIMLIB_ERR_NOMEM;
 			goto out;

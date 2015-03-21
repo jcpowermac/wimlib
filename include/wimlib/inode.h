@@ -97,7 +97,7 @@ struct wim_inode {
 	 */
 	struct wim_inode_stream *i_streams;
 	struct wim_inode_stream i_embedded_streams[1];
-	u32 i_num_streams;
+	unsigned i_num_streams;
 
 	/* Windows file attribute flags (FILE_ATTRIBUTE_*).  */
 	u32 i_attributes;
@@ -360,15 +360,7 @@ inode_get_stream(const struct wim_inode *inode, int stream_type,
 		 const tchar *stream_name);
 
 extern struct wim_inode_stream *
-inode_get_unnamed_data_stream(const struct wim_inode *inode);
-
-extern struct wim_inode_stream *
-inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
-			 const utf16lechar *stream_name);
-
-extern struct wim_inode_stream *
-inode_add_stream(struct wim_inode *inode, int stream_type,
-		 const tchar *stream_name);
+inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type);
 
 extern void
 inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
@@ -390,6 +382,11 @@ inode_add_stream_with_data(struct wim_inode *inode, int stream_type,
 			   const tchar *stream_name,
 			   const void *data, size_t size,
 			   struct blob_table *blob_table);
+
+extern struct wim_inode_stream *
+inode_add_reparse_stream_with_data(struct wim_inode *inode,
+				   const void *data, size_t size,
+				   struct blob_table *blob_table);
 
 static inline struct blob_descriptor *
 stream_blob_resolved(const struct wim_inode_stream *strm)

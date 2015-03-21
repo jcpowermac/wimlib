@@ -498,12 +498,8 @@ wim_inode_set_symlink(struct wim_inode *inode,
 
 	ret = make_reparse_buffer(&rpdata, (u8*)&rpbuf_disk, &rpbuflen);
 	if (ret == 0) {
-		if (!inode_add_stream_with_data(inode,
-						   STREAM_TYPE_REPARSE_POINT,
-						   T(""),
-						   (u8*)&rpbuf_disk + 8,
-						   rpbuflen - 8,
-						   blob_table))
+		if (!inode_add_reparse_stream(inode, (u8*)&rpbuf_disk + 8,
+					      rpbuflen - 8, blob_table))
 			ret = WIMLIB_ERR_NOMEM;
 	}
 	FREE(name_utf16le);
