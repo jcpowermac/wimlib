@@ -1086,13 +1086,13 @@ static int
 dentry_ref_data_attribute(struct wim_inode_attribute *attr,
 			  struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
-	if (*attr->attr_name) {
+	if (unlikely(attribute_is_named(attr))) {
 		/* Named data stream  */
 		if (ctx->supported_features.named_data_streams)
 			return ref_attribute(attr, dentry, ctx);
 	} else {
 		/* Unnamed data stream  */
-		if (unlikely(ctx->apply_ops->will_externally_back)) {
+		if (ctx->apply_ops->will_externally_back) {
 			int ret = (*ctx->apply_ops->will_externally_back)(dentry, ctx);
 			if (ret >= 0) {
 				if (ret) /* Error */

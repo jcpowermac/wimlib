@@ -439,7 +439,7 @@ const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 {
 	const struct wim_inode_attribute *attr;
-	
+
 	attr = inode_get_unnamed_data_attribute(inode);
 	if (!attr)
 		return zero_hash;
@@ -456,7 +456,7 @@ inode_ref_attributes(struct wim_inode *inode)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		struct blob_descriptor *blob;
-		
+
 		blob = attribute_blob_resolved(&inode->i_attrs[i]);
 		if (blob)
 			blob->refcnt++;
