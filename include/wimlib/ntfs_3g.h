@@ -11,10 +11,10 @@ struct _ntfs_volume;
 struct _ntfs_volume;
 struct ntfs_location {
 	struct _ntfs_volume *ntfs_vol;
-	char *ntfs_inode_path;
-	utf16lechar *ntfs_attr_name;
-	unsigned ntfs_attr_name_nchars;
-	unsigned ntfs_attr_type;
+	char *path;
+	utf16lechar *attr_name;
+	unsigned attr_name_nchars;
+	unsigned ntfs_3g_attr_type;
 };
 #endif
 

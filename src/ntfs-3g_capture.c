@@ -59,12 +59,12 @@ open_ntfs_attr(ntfs_inode *ni, struct ntfs_location *loc)
 	ntfs_attr *na;
 
 	na = ntfs_attr_open(ni,
-			    (ATTR_TYPES)loc->ntfs_attr_type,
-			    loc->ntfs_attr_name,
-			    loc->ntfs_attr_name_nchars);
+			    (ATTR_TYPES)loc->ntfs_3g_attr_type,
+			    loc->attr_name,
+			    loc->attr_name_nchars);
 	if (!na) {
 		ERROR_WITH_ERRNO("Failed to open attribute of \"%"TS"\" in "
-				 "NTFS volume", loc->ntfs_inode_path);
+				 "NTFS volume", loc->path);
 	}
 	return na;
 }
@@ -82,10 +82,10 @@ read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
 	int ret;
 	u8 buf[BUFFER_SIZE];
 
-	ni = ntfs_pathname_to_inode(vol, NULL, loc->ntfs_inode_path);
+	ni = ntfs_pathname_to_inode(vol, NULL, loc->path);
 	if (!ni) {
 		ERROR_WITH_ERRNO("Can't find NTFS inode for \"%"TS"\"",
-				 loc->ntfs_inode_path);
+				 loc->path);
 		ret = WIMLIB_ERR_NTFS_3G;
 		goto out;
 	}
@@ -96,13 +96,13 @@ read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
 		goto out_close_ntfs_inode;
 	}
 
-	pos = (loc->ntfs_attr_type == AT_REPARSE_POINT) ? 8 : 0;
+	pos = (loc->ntfs_3g_attr_type == AT_REPARSE_POINT) ? 8 : 0;
 	bytes_remaining = size;
 	while (bytes_remaining) {
 		s64 to_read = min(bytes_remaining, sizeof(buf));
 		if (ntfs_attr_pread(na, pos, to_read, buf) != to_read) {
 			ERROR_WITH_ERRNO("Error reading \"%"TS"\"",
-					 loc->ntfs_inode_path);
+					 loc->path);
 			ret = WIMLIB_ERR_NTFS_3G;
 			goto out_close_ntfs_attr;
 		}
@@ -211,22 +211,22 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 				goto out_put_actx;
 			}
 			ntfs_loc->ntfs_vol = vol;
-			ntfs_loc->ntfs_attr_type = type;
-			ntfs_loc->ntfs_inode_path = memdup(path, path_len + 1);
-			if (!ntfs_loc->ntfs_inode_path) {
+			ntfs_loc->ntfs_3g_attr_type = type;
+			ntfs_loc->path = memdup(path, path_len + 1);
+			if (!ntfs_loc->path) {
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
 			}
 			if (name_nchars) {
-				ntfs_loc->ntfs_attr_name =
+				ntfs_loc->attr_name =
 					utf16le_dupz(attr_record_name(actx->attr),
 						     name_nchars * sizeof(ntfschar));
-				if (!ntfs_loc->ntfs_attr_name) {
+				if (!ntfs_loc->attr_name) {
 					ret = WIMLIB_ERR_NOMEM;
 					goto out_free_ntfs_loc;
 				}
-				ntfs_loc->ntfs_attr_name_nchars = name_nchars;
-				wimlib_attr_name = ntfs_loc->ntfs_attr_name;
+				ntfs_loc->attr_name_nchars = name_nchars;
+				wimlib_attr_name = ntfs_loc->attr_name;
 			}
 
 			blob = new_blob_descriptor();
@@ -276,8 +276,8 @@ out_free_blob:
 	free_blob_descriptor(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {
-		FREE(ntfs_loc->ntfs_inode_path);
-		FREE(ntfs_loc->ntfs_attr_name);
+		FREE(ntfs_loc->path);
+		FREE(ntfs_loc->attr_name);
 		FREE(ntfs_loc);
 	}
 out_put_actx:
