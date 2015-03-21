@@ -7,12 +7,13 @@
 #include "wimlib/types.h"
 
 struct avl_tree_node;
-struct wim_dentry;
-struct blob_table;
 struct blob_descriptor;
+struct blob_table;
+struct wim_dentry;
 struct wim_security_data;
 struct wimfs_fd;
 
+/* Valid values for the 'stream_type' field of a 'struct wim_inode_stream'  */
 enum {
 	/* Data stream, may be unnamed (usual case) or named  */
 	STREAM_TYPE_DATA,
@@ -24,32 +25,51 @@ enum {
 	STREAM_TYPE_UNKNOWN,
 };
 
+/*
+ * The 'stream_name' field of unnamed streams always points to this array, which
+ * is an empty UTF-16 string.
+ */
 extern const utf16lechar NO_STREAM_NAME[1];
 
 /*
- * 'struct wim_inode_stream' represents an NTFS-style stream, which is a blob of
+ * 'struct wim_inode_stream' describes an NTFS-style stream, which is a blob of
  * data associated with an inode.  Each stream has a type and optionally a name.
+ *
+ * The most frequently used stream type is the "unnamed data stream"
+ * (stream_type == STREAM_TYPE_DATA && stream_name == NO_STREAM_NAME), which is
+ * the "default file contents".  Many inodes just have an unnamed data stream
+ * and no other streams.
+ *
+ * A "reparse point" is an inode with reparse data set.  The reparse data is
+ * stored in a stream of type STREAM_TYPE_REPARSE_POINT.  There should be only
+ * one such stream, and it should be unnamed.  However, it is possible for an
+ * inode to have both a reparse point stream and an unnamed data stream, and
+ * even named data streams as well.
  */
 struct wim_inode_stream {
-	/* The name of the stream, or NO_STREAM_NAME if the stream is unnamed.
-	 */
+
+	/* The name of the stream, or NO_STREAM_NAME if the stream is unnamed.*/
 	utf16lechar *stream_name;
 
-	/* If stream_resolved = 0, the SHA-1 message digest of the uncompressed
-	 * data of this stream, or all zeroes if this stream is empty; If
-	 * stream_resolved = 1, a pointer directly to the blob descriptor for
-	 * this blob, or NULL if this stream is empty.  */
+	/*
+	 * If 'stream_resolved' = 0, then 'stream_hash' is the SHA-1 message
+	 * digest of the uncompressed data of this stream, or all zeroes if this
+	 * stream is empty.
+	 *
+	 * If 'stream_resolved' = 1, then 'stream_blob' is a pointer directly to
+	 * the blob descriptor for this blob, or NULL if this stream is empty.
+	 */
 	union {
 		u8 _stream_hash[SHA1_HASH_SIZE];
 		struct blob_descriptor *_stream_blob;
 	};
-	/* stream_resolved determines whether stream_hash or stream_blob is
-	 * valid as described above.  */
+
+	/* 'stream_resolved' determines whether 'stream_hash' or 'stream_blob'
+	 * is valid as described above.  */
 	u32 stream_resolved : 1;
 
-	/* A unique identifier for this stream within the context of its inode
-	 * TODOesn
-	 * */
+	/* A unique identifier for this stream within the context of its inode.
+	 * This stays constant even if the streams array is reallocated.  */
 	u32 stream_id : 27;
 
 	/* The type of this stream as one of the STREAM_TYPE_* values  */
@@ -57,19 +77,23 @@ struct wim_inode_stream {
 };
 
 /*
- * WIM inode.
+ * WIM inode - a "file" in a WIM image.  An inode may have multiple names.
  *
- * As mentioned in the comment above `struct wim_dentry', in WIM files there
- * is no on-disk analogue of a real inode, as most of these fields are
- * duplicated in the dentries.  Instead, a `struct wim_inode' is something we
- * create ourselves to simplify the handling of hard links.
+ * As mentioned in the comment above 'struct wim_dentry', in WIM files there is
+ * no on-disk analogue of a real inode, as most of these fields are duplicated
+ * in the dentries.  Instead, a 'struct wim_inode' is something we create
+ * ourselves to simplify the handling of hard links.
  */
 struct wim_inode {
 
 	/*
 	 * The NTFS-style collection of streams for this inode.  If
-	 * i_num_streams == 1, then i_streams points to i_embedded_streams.
-	 * Otherwise, i_streams points to an allocated array.
+	 * 'i_num_streams' is not more than the length of 'i_embedded_streams',
+	 * then 'i_streams' points to 'i_embedded_streams'.  Otherwise,
+	 * 'i_streams' points to an allocated array.
+	 *
+	 * The most common case is that 'i_num_streams == 1' and the only stream
+	 * is the unnamed data stream.
 	 */
 	struct wim_inode_stream *i_streams;
 	struct wim_inode_stream i_embedded_streams[1];
@@ -329,68 +353,68 @@ inode_has_children(const struct wim_inode *inode)
 
 extern struct wim_inode_stream *
 inode_get_stream_utf16le(const struct wim_inode *inode, int stream_type,
-			    const utf16lechar *stream_name);
+			 const utf16lechar *stream_name);
 
 extern struct wim_inode_stream *
 inode_get_stream(const struct wim_inode *inode, int stream_type,
-		    const tchar *stream_name);
+		 const tchar *stream_name);
 
 extern struct wim_inode_stream *
 inode_get_unnamed_data_stream(const struct wim_inode *inode);
 
 extern struct wim_inode_stream *
 inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
-			    const utf16lechar *stream_name);
+			 const utf16lechar *stream_name);
 
 extern struct wim_inode_stream *
 inode_add_stream(struct wim_inode *inode, int stream_type,
-		    const tchar *stream_name);
+		 const tchar *stream_name);
 
 extern void
-inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *stream,
-		       struct blob_table *blob_table);
+inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
+		    struct blob_table *blob_table);
 
 extern struct wim_inode_stream *
 inode_add_stream_utf16le_with_blob(struct wim_inode *inode,
-				      int stream_type,
-				      const utf16lechar *stream_name,
-				      struct blob_descriptor *blob);
+				   int stream_type,
+				   const utf16lechar *stream_name,
+				   struct blob_descriptor *blob);
 
 extern struct wim_inode_stream *
 inode_add_stream_with_blob(struct wim_inode *inode,
-			      int stream_type, const tchar *stream_name,
-			      struct blob_descriptor *blob);
+			   int stream_type, const tchar *stream_name,
+			   struct blob_descriptor *blob);
 
 extern struct wim_inode_stream *
 inode_add_stream_with_data(struct wim_inode *inode, int stream_type,
-			      const tchar *stream_name,
-			      const void *data, size_t size,
-			      struct blob_table *blob_table);
+			   const tchar *stream_name,
+			   const void *data, size_t size,
+			   struct blob_table *blob_table);
 
 static inline struct blob_descriptor *
-stream_blob_resolved(const struct wim_inode_stream *stream)
+stream_blob_resolved(const struct wim_inode_stream *strm)
 {
-	wimlib_assert(stream->stream_resolved);
-	return stream->_stream_blob;
+	wimlib_assert(strm->stream_resolved);
+	return strm->_stream_blob;
 }
 
 static inline void
-stream_set_blob(struct wim_inode_stream *stream, struct blob_descriptor *blob)
+stream_set_blob(struct wim_inode_stream *strm, struct blob_descriptor *blob)
 {
-	stream->_stream_blob = blob;
-	stream->stream_resolved = 1;
+	strm->_stream_blob = blob;
+	strm->stream_resolved = 1;
 }
 
 static inline bool
-stream_is_named(const struct wim_inode_stream *stream)
+stream_is_named(const struct wim_inode_stream *strm)
 {
-	return stream->stream_name != NO_STREAM_NAME;
+	return strm->stream_name != NO_STREAM_NAME;
 }
 
 static inline bool
-stream_is_named_data_stream(const struct wim_inode_stream *stream)
+stream_is_named_data_stream(const struct wim_inode_stream *strm)
 {
-	return stream->stream_type == STREAM_TYPE_DATA && stream_is_named(stream);
+	return strm->stream_type == STREAM_TYPE_DATA && stream_is_named(strm);
 }
 
 extern bool
@@ -407,15 +431,14 @@ extern int
 blob_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
 extern struct blob_descriptor *
-stream_blob(const struct wim_inode_stream *stream,
-	       const struct blob_table *table);
+stream_blob(const struct wim_inode_stream *strm, const struct blob_table *table);
 
 extern struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 				       const struct blob_table *blob_table);
 
 extern const u8 *
-stream_hash(const struct wim_inode_stream *stream);
+stream_hash(const struct wim_inode_stream *strm);
 
 extern const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode);
@@ -424,8 +447,7 @@ extern void
 inode_ref_streams(struct wim_inode *inode);
 
 extern void
-inode_unref_streams(struct wim_inode *inode,
-		       struct blob_table *blob_table);
+inode_unref_streams(struct wim_inode *inode, struct blob_table *blob_table);
 
 /* inode_fixup.c  */
 extern int

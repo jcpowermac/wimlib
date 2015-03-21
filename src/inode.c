@@ -38,6 +38,10 @@
 #include "wimlib/blob_table.h"
 #include "wimlib/timestamp.h"
 
+/*
+ * The 'stream_name' field of unnamed streams always points to this array, which
+ * is an empty UTF-16 string.
+ */
 const utf16lechar NO_STREAM_NAME[1];
 
 /* Allocate a new inode.  Set the timestamps to the current time.  */
@@ -173,16 +177,16 @@ inode_get_stream(const struct wim_inode *inode, int stream_type,
 		 const tchar *stream_name)
 {
 	const utf16lechar *ustr;
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 
 	if (tstr_get_utf16le(stream_name, &ustr))
 		return NULL;
 
-	stream = inode_get_stream_utf16le(inode, stream_type, ustr);
+	strm = inode_get_stream_utf16le(inode, stream_type, ustr);
 
 	tstr_put_utf16le(ustr);
 
-	return stream;
+	return strm;
 }
 
 struct wim_inode_stream *
@@ -237,33 +241,33 @@ inode_add_stream(struct wim_inode *inode, int stream_type,
 		 const tchar *stream_name)
 {
 	const utf16lechar *ustr;
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 
 	if (tstr_get_utf16le(stream_name, &ustr))
 		return NULL;
 
-	stream = inode_add_stream_utf16le(inode, stream_type, ustr);
+	strm = inode_add_stream_utf16le(inode, stream_type, ustr);
 
 	tstr_put_utf16le(ustr);
 
-	return stream;
+	return strm;
 }
 
 void
-inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *stream,
+inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
 		    struct blob_table *blob_table)
 {
 	struct blob_descriptor *blob;
-	unsigned idx = stream - inode->i_streams;
+	unsigned idx = strm - inode->i_streams;
 
 	wimlib_assert(idx < inode->i_num_streams);
-	wimlib_assert(stream->stream_resolved);
+	wimlib_assert(strm->stream_resolved);
 
-	blob = stream_blob(stream, blob_table);
+	blob = stream_blob(strm, blob_table);
 	if (blob)
 		blob_decrement_refcnt(blob, blob_table);
 
-	FREE(stream->stream_name);
+	FREE(strm->stream_name);
 
 	memmove(&inode->i_streams[idx],
 		&inode->i_streams[idx + 1],
@@ -277,12 +281,12 @@ inode_add_stream_utf16le_with_blob(struct wim_inode *inode,
 				   const utf16lechar *stream_name,
 				   struct blob_descriptor *blob)
 {
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 
-	stream = inode_add_stream_utf16le(inode, stream_type, stream_name);
-	if (stream)
-		stream_set_blob(stream, blob);
-	return stream;
+	strm = inode_add_stream_utf16le(inode, stream_type, stream_name);
+	if (strm)
+		stream_set_blob(strm, blob);
+	return strm;
 }
 
 struct wim_inode_stream *
@@ -290,12 +294,12 @@ inode_add_stream_with_blob(struct wim_inode *inode,
 			   int stream_type, const tchar *stream_name,
 			   struct blob_descriptor *blob)
 {
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 
-	stream = inode_add_stream(inode, stream_type, stream_name);
-	if (stream)
-		stream_set_blob(stream, blob);
-	return stream;
+	strm = inode_add_stream(inode, stream_type, stream_name);
+	if (strm)
+		stream_set_blob(strm, blob);
+	return strm;
 }
 
 struct wim_inode_stream *
@@ -305,18 +309,18 @@ inode_add_stream_with_data(struct wim_inode *inode,
 			   struct blob_table *blob_table)
 {
 	struct blob_descriptor *blob;
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 
 	blob = new_blob_from_data_buffer(data, size, blob_table);
 	if (!blob)
 		return NULL;
 
-	stream = inode_add_stream_with_blob(inode, stream_type, stream_name, blob);
+	strm = inode_add_stream_with_blob(inode, stream_type, stream_name, blob);
 
-	if (!stream)
+	if (!strm)
 		blob_decrement_refcnt(blob, blob_table);
 
-	return stream;;
+	return strm;
 }
 
 bool
@@ -420,23 +424,23 @@ blob_not_found_error(const struct wim_inode *inode, const u8 *hash)
 }
 
 struct blob_descriptor *
-stream_blob(const struct wim_inode_stream *stream, const struct blob_table *table)
+stream_blob(const struct wim_inode_stream *strm, const struct blob_table *table)
 {
-	if (stream->stream_resolved)
-		return stream->_stream_blob;
+	if (strm->stream_resolved)
+		return strm->_stream_blob;
 	else
-		return lookup_blob(table, stream->_stream_hash);
+		return lookup_blob(table, strm->_stream_hash);
 }
 
 /* Return the SHA-1 message digest of the data of the specified stream, or a
  * void SHA-1 of all zeroes if the specified stream is empty.   */
 const u8 *
-stream_hash(const struct wim_inode_stream *stream)
+stream_hash(const struct wim_inode_strm *strm)
 {
-	if (stream->stream_resolved)
-		return stream->_stream_blob ? stream->_stream_blob->hash : zero_hash;
+	if (strm->stream_resolved)
+		return strm->_stream_blob ? strm->_stream_blob->hash : zero_hash;
 	else
-		return stream->_stream_hash;
+		return strm->_stream_hash;
 }
 
 /*
@@ -447,13 +451,13 @@ struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 				       const struct blob_table *blob_table)
 {
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 
-	stream = inode_get_unnamed_data_stream(inode);
-	if (!stream)
+	strm = inode_get_unnamed_data_stream(inode);
+	if (!strm)
 		return NULL;
 
-	return stream_blob(stream, blob_table);
+	return stream_blob(strm, blob_table);
 }
 
 /* Return the SHA-1 message digest of the unnamed data stream of the inode, or a
@@ -461,13 +465,13 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 {
-	const struct wim_inode_stream *stream;
+	const struct wim_inode_stream *strm;
 
-	stream = inode_get_unnamed_data_stream(inode);
-	if (!stream)
+	strm = inode_get_unnamed_data_stream(inode);
+	if (!strm)
 		return zero_hash;
 
-	return stream_hash(stream);
+	return stream_hash(strm);
 }
 
 /* Acquire another reference to each blob referenced by this inode.  This is
