@@ -46,7 +46,7 @@
 #endif
 
 #ifdef WITH_NTFS_3G
-/* for read_ntfs_file_prefix() */
+/* for read_ntfs_attribute_prefix() */
 #  include "wimlib/ntfs_3g.h"
 #endif
 
@@ -860,7 +860,7 @@ read_blob_prefix(const struct blob_descriptor *blob, u64 size,
 		[BLOB_IN_STAGING_FILE] = read_staging_file_prefix,
 	#endif
 	#ifdef WITH_NTFS_3G
-		[BLOB_IN_NTFS_VOLUME] = read_ntfs_file_prefix,
+		[BLOB_IN_NTFS_VOLUME] = read_ntfs_attribute_prefix,
 	#endif
 	#ifdef __WIN32__
 		[BLOB_IN_WINNT_FILE_ON_DISK] = read_winnt_file_prefix,

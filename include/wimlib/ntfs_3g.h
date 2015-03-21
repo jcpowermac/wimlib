@@ -22,8 +22,8 @@ extern void
 libntfs3g_global_init(void);
 
 extern int
-read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
-		      consume_data_callback_t cb, void *cb_ctx);
+read_ntfs_attribute_prefix(const struct blob_descriptor *blob, u64 size,
+			   consume_data_callback_t cb, void *cb_ctx);
 
 extern int
 do_ntfs_umount(struct _ntfs_volume *vol);

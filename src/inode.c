@@ -73,6 +73,13 @@ new_timeless_inode(void)
 	return inode;
 }
 
+static inline void
+destroy_wim_inode_stream(struct wim_inode_stream *strm)
+{
+	if (strm->stream_name != NO_STREAM_NAME)
+		FREE(strm->stream_name);
+}
+
 static void
 free_inode(struct wim_inode *inode)
 {
@@ -255,13 +262,6 @@ inode_add_stream_with_data(struct wim_inode *inode,
 	if (!strm)
 		blob_decrement_refcnt(blob, blob_table);
 	return strm;
-}
-
-static inline void
-destroy_wim_inode_stream(struct wim_inode_stream *strm)
-{
-	if (strm->stream_name != NO_STREAM_NAME)
-		FREE(strm->stream_name);
 }
 
 void

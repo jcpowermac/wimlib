@@ -6,7 +6,7 @@
  */
 
 /*
- * Copyright (C) 2012, 2013, 2014 Eric Biggers
+ * Copyright (C) 2012, 2013, 2014, 2015 Eric Biggers
  *
  * This file is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -37,12 +37,12 @@
 
 #include "wimlib/alloca.h"
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/capture.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/endianness.h"
 #include "wimlib/error.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/ntfs_3g.h"
 #include "wimlib/paths.h"
 #include "wimlib/security.h"
@@ -54,7 +54,7 @@ attr_record_name(ATTR_RECORD *ar)
 }
 
 static ntfs_attr *
-open_ntfs_attr(ntfs_inode *ni, struct ntfs_location *loc)
+open_ntfs_attr(ntfs_inode *ni, const struct ntfs_location *loc)
 {
 	ntfs_attr *na;
 
@@ -70,10 +70,10 @@ open_ntfs_attr(ntfs_inode *ni, struct ntfs_location *loc)
 }
 
 int
-read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
-		      consume_data_callback_t cb, void *cb_ctx)
+read_ntfs_attribute_prefix(const struct blob_descriptor *blob, u64 size,
+			   consume_data_callback_t cb, void *cb_ctx)
 {
-	struct ntfs_location *loc = blob->ntfs_loc;
+	const struct ntfs_location *loc = blob->ntfs_loc;
 	ntfs_volume *vol = loc->ntfs_vol;
 	ntfs_inode *ni;
 	ntfs_attr *na;
@@ -84,8 +84,7 @@ read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
 
 	ni = ntfs_pathname_to_inode(vol, NULL, loc->path);
 	if (!ni) {
-		ERROR_WITH_ERRNO("Can't find NTFS inode for \"%"TS"\"",
-				 loc->path);
+		ERROR_WITH_ERRNO("Can't find NTFS inode for \"%"TS"\"", loc->path);
 		ret = WIMLIB_ERR_NTFS_3G;
 		goto out;
 	}
@@ -101,8 +100,7 @@ read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
 	while (bytes_remaining) {
 		s64 to_read = min(bytes_remaining, sizeof(buf));
 		if (ntfs_attr_pread(na, pos, to_read, buf) != to_read) {
-			ERROR_WITH_ERRNO("Error reading \"%"TS"\"",
-					 loc->path);
+			ERROR_WITH_ERRNO("Error reading \"%"TS"\"", loc->path);
 			ret = WIMLIB_ERR_NTFS_3G;
 			goto out_close_ntfs_attr;
 		}
@@ -168,20 +166,20 @@ ntfs_3g_attr_type_to_wimlib_stream_type(ATTR_TYPES type)
 
 /* Load attributes of the specified type from a file in the NTFS volume  */
 static int
-capture_ntfs_attrs_with_type(struct wim_inode *inode,
-			     ntfs_inode *ni,
-			     char *path,
-			     size_t path_len,
-			     struct list_head *unhashed_blobs,
-			     ntfs_volume *vol,
-			     ATTR_TYPES type)
+load_ntfs_attrs_with_type(struct wim_inode *inode,
+			  ntfs_inode *ni,
+			  char *path,
+			  size_t path_len,
+			  struct list_head *unhashed_blobs,
+			  ntfs_volume *vol,
+			  ATTR_TYPES type)
 {
 	ntfs_attr_search_ctx *actx;
 	struct ntfs_location *ntfs_loc;
 	int ret;
 	struct blob_descriptor *blob;
 
-	DEBUG("Capturing NTFS attributes from `%s'", path);
+	DEBUG("Loading NTFS attributes from \"%s\"", path);
 
 	/* Get context to search the attributes of the NTFS file. */
 	actx = ntfs_attr_get_search_ctx(ni, NULL);
@@ -240,9 +238,9 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 			ntfs_loc = NULL;
 			if (type == AT_REPARSE_POINT) {
 				if (data_size < 8) {
-					ERROR("Invalid reparse data on \"%s\" "
-					      "(only %u bytes)!", path,
-					      (unsigned)data_size);
+					ERROR("Reparse data of \"%s\" "
+					      "is invalid (only %u bytes)!",
+					      path, (unsigned)data_size);
 					ret = WIMLIB_ERR_NTFS_3G;
 					goto out_free_blob;
 				}
@@ -282,9 +280,9 @@ out_free_ntfs_loc:
 out_put_actx:
 	ntfs_attr_put_search_ctx(actx);
 	if (ret == 0)
-		DEBUG("Successfully captured NTFS attributes from \"%s\"", path);
+		DEBUG("Successfully loaded NTFS attributes from \"%s\"", path);
 	else
-		ERROR("Failed to capture NTFS attributes from \"%s\"", path);
+		ERROR("Failed to load NTFS attributes from \"%s\"", path);
 	return ret;
 }
 
@@ -564,25 +562,26 @@ build_dentry_tree_ntfs_recursive(struct wim_dentry **root_ret,
 	inode->i_attributes       = attributes;
 
 	if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-		/* Capture reparse point stream  */
-		ret = capture_ntfs_attrs_with_type(inode, ni, path, path_len,
-						   params->unhashed_blobs,
-						   vol, AT_REPARSE_POINT);
+		/* Load the reparse point stream.  */
+		ret = load_ntfs_attrs_with_type(inode, ni, path, path_len,
+						params->unhashed_blobs,
+						vol, AT_REPARSE_POINT);
 		if (ret)
 			goto out;
 	}
 
-	/* Capture data streams.
+	/* Load the data streams.
 	 *
-	 * Directories should not have an unnamed data stream, but they may have
-	 * named data streams.  Nondirectories (including reparse points) can
-	 * have an unnamed data stream as well as named data streams.  */
-	ret = capture_ntfs_attrs_with_type(inode, ni, path, path_len,
-					   params->unhashed_blobs, vol, AT_DATA);
+	 * Note: directories should not have an unnamed data stream, but they
+	 * may have named data streams.  Nondirectories (including reparse
+	 * points) can have an unnamed data stream as well as named data
+	 * streams.  */
+	ret = load_ntfs_attrs_with_type(inode, ni, path, path_len,
+					params->unhashed_blobs, vol, AT_DATA);
 	if (ret)
 		goto out;
 
-	if (ni->mrec->flags & MFT_RECORD_IS_DIRECTORY) {
+	if (inode_is_directory(inode)) {
 
 		/* Recurse to directory children */
 		s64 pos = 0;

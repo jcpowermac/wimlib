@@ -104,7 +104,7 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		       struct list_head *unhashed_blobs)
 {
 	struct blob_descriptor *blob = NULL;
-	struct wim_inode_stream *stream;
+	struct wim_inode_stream *strm;
 
 	inode->i_attributes = FILE_ATTRIBUTE_NORMAL;
 
@@ -123,12 +123,12 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		blob->size = size;
 	}
 
-	stream = inode_add_stream(inode, STREAM_TYPE_DATA, NO_STREAM_NAME, blob);
-	if (!stream) {
+	strm = inode_add_stream(inode, STREAM_TYPE_DATA, NO_STREAM_NAME, blob);
+	if (!strm) {
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
-	prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, strm->stream_id, unhashed_blobs);
 	return 0;
 }
 

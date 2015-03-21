@@ -104,7 +104,7 @@ cmp_blobs_by_solid_sort_name(const void *p1, const void *p2)
 
 static void
 blob_set_solid_sort_name_from_inode(struct blob_descriptor *blob,
-				   const struct wim_inode *inode)
+				    const struct wim_inode *inode)
 {
 	const struct wim_dentry *dentry;
 	const utf16lechar *best_name = NULL;

@@ -27,9 +27,9 @@
 #endif
 
 #include "wimlib.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/security.h"
@@ -40,7 +40,7 @@
 
 static int
 stream_to_wimlib_stream_entry(const struct wim_inode *inode,
-			      const struct wim_inode_stream *stream,
+			      const struct wim_inode_stream *strm,
 			      struct wimlib_stream_entry *wstream,
 			      const struct blob_table *blob_table,
 			      int flags)
@@ -48,26 +48,24 @@ stream_to_wimlib_stream_entry(const struct wim_inode *inode,
 	const struct blob_descriptor *blob;
 	const u8 *hash;
 
-	if (!stream)
+	if (!strm)
 		return 0;
 
-
-	if (*stream->stream_name) {
+	if (stream_is_named(strm)) {
 		size_t dummy;
 		int ret;
 
-		ret = utf16le_get_tstr(stream->stream_name,
-				       utf16le_len_bytes(stream->stream_name),
-				       &wstream->stream_name,
-				       &dummy);
+		ret = utf16le_get_tstr(strm->stream_name,
+				       utf16le_len_bytes(strm->stream_name),
+				       &wstream->stream_name, &dummy);
 		if (ret)
 			return ret;
 	}
 
-	blob = stream_blob(stream, blob_table);
+	blob = stream_blob(strm, blob_table);
 	if (blob) {
 		blob_to_wimlib_resource_entry(blob, &wstream->resource);
-	} else if (!is_zero_hash((hash = stream_hash(stream)))) {
+	} else if (!is_zero_hash((hash = stream_hash(strm)))) {
 		if (flags & WIMLIB_ITERATE_DIR_TREE_FLAG_RESOURCES_NEEDED)
 			return blob_not_found_error(inode, hash);
 		copy_hash(wstream->resource.sha1_hash, hash);

@@ -591,12 +591,11 @@ unix_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 {
 	struct unix_apply_ctx *ctx = _ctx;
 	const struct blob_extraction_target *targets = blob_extraction_targets(blob);
-	int ret;
 
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
-		const struct wim_inode *inode = targets[i].inode;
-
-		ret = unix_begin_extract_blob_instance(blob, inode, ctx);
+		int ret = unix_begin_extract_blob_instance(blob,
+							   targets[i].inode,
+							   ctx);
 		if (ret) {
 			ctx->reparse_ptr = NULL;
 			unix_cleanup_open_fds(ctx, 0);

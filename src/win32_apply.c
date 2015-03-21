@@ -68,7 +68,7 @@ struct win32_apply_ctx {
 	UNICODE_STRING pathbuf;
 
 	/* Object attributes to reuse for opening files in the target directory.
-	 * (stream.ObjectName == &pathbuf) and (stream.RootDirectory == h_target).
+	 * (attr.ObjectName == &pathbuf) and (attr.RootDirectory == h_target).
 	 */
 	OBJECT_ATTRIBUTES attr;
 
@@ -1319,17 +1319,17 @@ create_empty_named_data_streams(const struct wim_dentry *dentry,
 		return 0;
 
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
-		const struct wim_inode_stream *stream = &inode->i_streams[i];
+		const struct wim_inode_stream *strm = &inode->i_streams[i];
 		HANDLE h;
 
 		/* Not named?  */
-		if (!stream_is_named_data_stream(stream) ||
-		    stream_blob_resolved(stream))
+		if (!stream_is_named_data_stream(strm) ||
+		    stream_blob_resolved(strm) != NULL)
 			continue;
 
 		build_extraction_path_with_ads(dentry, ctx,
-					       stream->stream_name,
-					       utf16le_len_chars(stream->stream_name));
+					       strm->stream_name,
+					       utf16le_len_chars(strm->stream_name));
 		path_modified = true;
 		ret = supersede_file_or_stream(ctx, &h);
 		if (ret)
@@ -1646,7 +1646,7 @@ prepare_data_buffer(struct win32_apply_ctx *ctx, u64 blob_size)
 static int
 begin_extract_blob_instance(const struct blob_descriptor *blob,
 			    struct wim_dentry *dentry,
-			    const struct wim_inode_stream *stream,
+			    const struct wim_inode_stream *strm,
 			    struct win32_apply_ctx *ctx)
 {
 	const u32 attributes = dentry->d_inode->i_attributes;
@@ -1654,8 +1654,8 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 	HANDLE h;
 	NTSTATUS status;
 
-	if (unlikely(stream->stream_type != STREAM_TYPE_DATA)) {
-		if ((stream->stream_type == STREAM_TYPE_REPARSE_POINT) &&
+	if (unlikely(strm->stream_type != STREAM_TYPE_DATA)) {
+		if ((strm->stream_type == STREAM_TYPE_REPARSE_POINT) &&
 		    (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
 
 			/* We can't write the reparse point attribute directly;
@@ -1681,7 +1681,7 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 
 	/* Encrypted file?  */
 	if (unlikely(attributes & FILE_ATTRIBUTE_ENCRYPTED) &&
-	    !stream_is_named(stream))
+	    !stream_is_named(strm))
 	{
 		if (!ctx->common.supported_features.encrypted_files)
 			return 0;
@@ -1714,10 +1714,10 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 	}
 
 
-	if (unlikely(stream_is_named(stream))) {
+	if (unlikely(stream_is_named(strm))) {
 		build_extraction_path_with_ads(dentry, ctx,
-					       stream->stream_name,
-					       utf16le_len_chars(stream->stream_name));
+					       strm->stream_name,
+					       utf16le_len_chars(strm->stream_name));
 	} else {
 		build_extraction_path(dentry, ctx);
 	}
@@ -2036,14 +2036,14 @@ begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
 		const struct wim_inode *inode = targets[i].inode;
-		const struct wim_inode_stream *stream = targets[i].stream;
+		const struct wim_inode_stream *strm = targets[i].stream;
 		struct wim_dentry *dentry;
 
 		/* A copy of the blob needs to be extracted to @inode.  */
 
 		if (ctx->common.supported_features.hard_links) {
 			dentry = inode_first_extraction_dentry(inode);
-			ret = begin_extract_blob_instance(blob, dentry, stream, ctx);
+			ret = begin_extract_blob_instance(blob, dentry, strm, ctx);
 			ret = check_apply_error(dentry, ctx, ret);
 			if (ret)
 				goto fail;
@@ -2056,7 +2056,7 @@ begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 			do {
 				dentry = list_entry(next, struct wim_dentry,
 						    d_extraction_alias_node);
-				ret = begin_extract_blob_instance(blob, dentry, stream, ctx);
+				ret = begin_extract_blob_instance(blob, dentry, strm, ctx);
 				ret = check_apply_error(dentry, ctx, ret);
 				if (ret)
 					goto fail;
