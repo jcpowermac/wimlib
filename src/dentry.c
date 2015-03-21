@@ -356,7 +356,7 @@ attribute_out_total_length(const struct wim_inode_attribute *attr)
 {
 	size_t len = sizeof(struct wim_inode_attribute_on_disk);
 	if (*attr->attr_name)
-		len += utf16le_strlen(attr->attr_name) + 2;
+		len += utf16le_len_bytes(attr->attr_name) + 2;
 	return (len + 7) & ~7;
 }
 

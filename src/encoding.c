@@ -604,3 +604,23 @@ utf16le_dup(const utf16lechar *ustr)
 		;
 	return memdup(ustr, (const u8 *)p - (const u8 *)ustr);
 }
+
+/* Return the length, in bytes, of a UTF-null terminated UTF-16 string,
+ * excluding the null terminator.  */
+size_t
+utf16le_len_bytes(const utf16lechar *s)
+{
+	const utf16lechar *p = s;
+	while (*p)
+		p++;
+	return (p - s) * sizeof(utf16lechar);
+}
+
+/* Return the length, in UTF-16 coding points, of a UTF-null terminated UTF-16
+ * string, excluding the null terminator.  */
+size_t
+utf16le_len_chars(const utf16lechar *s)
+{
+	return utf16_len_bytes(s) / sizeof(utf16lechar);
+}
+

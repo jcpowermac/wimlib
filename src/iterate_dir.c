@@ -57,7 +57,7 @@ attr_to_wimlib_stream_entry(const struct wim_inode *inode,
 		int ret;
 
 		ret = utf16le_get_tstr(attr->attr_name,
-				       utf16le_strlen(attr->attr_name),
+				       utf16le_len_bytes(attr->attr_name),
 				       &stream->stream_name,
 				       &dummy);
 		if (ret)

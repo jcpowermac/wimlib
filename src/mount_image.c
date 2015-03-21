@@ -1430,7 +1430,7 @@ wimfs_listxattr(const char *path, char *list, size_t size)
 			continue;
 
 		if (utf16le_to_tstr(attr->attr_name,
-				    utf16le_strlen(attr->attr_name),
+				    utf16le_len_bytes(attr->attr_name),
 				    &stream_name_mbs,
 				    &stream_name_mbs_nbytes))
 			return -errno;

@@ -333,8 +333,7 @@ ntfs_3g_create_any_empty_ads(ntfs_inode *ni, const struct wim_inode *inode,
 			continue;
 
 		if (ntfs_attr_add(ni, AT_DATA, attr->attr_name,
-				  utf16le_strlen(attr->attr_name) /
-					sizeof(utf16lechar),
+				  utf16le_len_chars(attr->attr_name),
 				  NULL, 0))
 		{
 			ERROR_WITH_ERRNO("Failed to create named data stream "
@@ -681,36 +680,42 @@ ntfs_3g_create_nondirectories(struct list_head *dentry_list,
 }
 
 static int
-ntfs_3g_begin_extract_blob_to_attr(struct blob_descriptor *blob,
-				   ntfs_inode *ni,
-				   struct wim_inode *inode,
-				   const struct wim_inode_attribute *attr,
-				   struct ntfs_3g_apply_ctx *ctx)
+ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
+				    ntfs_inode *ni,
+				    struct wim_inode *inode,
+				    const struct wim_inode_attribute *attr,
+				    struct ntfs_3g_apply_ctx *ctx)
 {
 	struct wim_dentry *one_dentry = inode_first_extraction_dentry(inode);
-	size_t attr_name_nchars = 0;
+	size_t attr_name_nchars;
 	ntfs_attr *dest_attr;
 
-	if (attr->attr_type == ATTR_REPARSE_POINT) {
-		if (blob->size > REPARSE_DATA_MAX_SIZE) {
-			ERROR("Reparse data of \"%s\" has size "
-			      "%"PRIu64" bytes (exceeds %u bytes)",
-			      dentry_full_path(one_dentry),
-			      blob->size, REPARSE_DATA_MAX_SIZE);
-			return WIMLIB_ERR_INVALID_REPARSE_DATA;
+	if (unlikely(attr->attr_type != ATTR_DATA)) {
+		if ((inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) &&
+		    (attr->attr_type == ATTR_REPARSE_POINT))
+		{
+			if (blob->size > REPARSE_DATA_MAX_SIZE) {
+				ERROR("Reparse data of \"%s\" has size "
+				      "%"PRIu64" bytes (exceeds %u bytes)",
+				      dentry_full_path(one_dentry),
+				      blob->size, REPARSE_DATA_MAX_SIZE);
+				return WIMLIB_ERR_INVALID_REPARSE_DATA;
+			}
+			ctx->reparse_ptr = ctx->rpbuf.rpdata;
+			ctx->rpbuf.rpdatalen = cpu_to_le16(blob->size);
+			ctx->rpbuf.rpreserved = cpu_to_le16(0);
+			ctx->ntfs_reparse_inodes[ctx->num_reparse_inodes] = ni;
+			ctx->wim_reparse_inodes[ctx->num_reparse_inodes] = inode;
+			ctx->num_reparse_inodes++;
+			return 0;
 		}
-		ctx->reparse_ptr = ctx->rpbuf.rpdata;
-		ctx->rpbuf.rpdatalen = cpu_to_le16(blob->size);
-		ctx->rpbuf.rpreserved = cpu_to_le16(0);
-		ctx->ntfs_reparse_inodes[ctx->num_reparse_inodes] = ni;
-		ctx->wim_reparse_inodes[ctx->num_reparse_inodes] = inode;
-		ctx->num_reparse_inodes++;
+
 		return 0;
 	}
 
-	attr_name_nchars = utf16le_strlen(attr->attr_name) / sizeof(utf16lechar);
+	attr_name_nchars = utf16le_len_chars(attr->attr_name);
 
-	if (*attr->attr_name &&
+	if (attr_name_nchars &&
 	    (ntfs_attr_add(ni, AT_DATA, attr->attr_name, attr_name_nchars,
 			   NULL, 0)))
 	{
@@ -801,9 +806,9 @@ ntfs_3g_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 		if (!ni)
 			goto out_cleanup;
 
-		ret = ntfs_3g_begin_extract_blob_to_attr(blob, ni,
-							 targets[i].inode,
-							 targets[i].attr, ctx);
+		ret = ntfs_3g_begin_extract_blob_instance(blob, ni,
+							  targets[i].inode,
+							  targets[i].attr, ctx);
 		if (ret)
 			goto out_cleanup;
 	}

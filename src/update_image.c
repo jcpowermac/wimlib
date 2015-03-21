@@ -295,7 +295,7 @@ rollback_name_change(utf16lechar *old_name,
 	FREE(*name_ptr);
 	if (old_name) {
 		*name_ptr = old_name;
-		*name_nbytes_ptr = utf16le_strlen(old_name);
+		*name_nbytes_ptr = utf16le_len_bytes(old_name);
 	} else {
 		*name_ptr = NULL;
 		*name_nbytes_ptr = 0;

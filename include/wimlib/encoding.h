@@ -39,6 +39,12 @@ utf16le_dupz(const void *ustr, size_t usize);
 extern utf16lechar *
 utf16le_dup(const utf16lechar *ustr);
 
+extern size_t
+utf16le_len_bytes(const utf16lechar *s);
+
+extern size_t
+utf16le_len_chars(const utf16lechar *s);
+
 #if !TCHAR_IS_UTF16LE
 DECLARE_CHAR_CONVERSION_FUNCTIONS(utf16le, tstr, utf16lechar, tchar);
 DECLARE_CHAR_CONVERSION_FUNCTIONS(tstr, utf16le, tchar, utf16lechar);

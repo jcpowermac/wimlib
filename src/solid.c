@@ -79,11 +79,9 @@ cmp_blobs_by_solid_sort_name(const void *p1, const void *p2)
 		if (extension1) {
 			if (!extension2)
 				return 1;
-			int res = cmp_utf16le_strings(extension1,
-						      utf16le_strlen(extension1) / sizeof(utf16lechar),
-						      extension2,
-						      utf16le_strlen(extension2) / sizeof(utf16lechar),
-						      true); /* case insensitive */
+			int res = cmp_utf16le_strings_z(extension1,
+							extension2,
+							true); /* case insensitive */
 			if (res)
 				return res;
 		} else {

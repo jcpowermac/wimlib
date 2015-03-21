@@ -634,7 +634,7 @@ inode_longest_named_data_stream_spec(const struct wim_inode *inode)
 		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
 		if (!attribute_is_named_data_stream(attr))
 			continue;
-		size_t len = utf16le_strlen(attr->attr_name);
+		size_t len = utf16le_len_bytes(attr->attr_name);
 		if (len > max)
 			max = len;
 	}
@@ -1327,8 +1327,7 @@ create_any_empty_ads(const struct wim_dentry *dentry,
 
 		build_extraction_path_with_ads(dentry, ctx,
 					       attr->attr_name,
-					       utf16le_strlen(attr->attr_name) /
-							sizeof(wchar_t));
+					       utf16le_len_chars(attr->attr_name));
 		path_modified = true;
 		ret = supersede_file_or_stream(ctx, &h);
 		if (ret)
@@ -1716,8 +1715,7 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 	if (unlikely(attribute_is_named(attr))) {
 		build_extraction_path_with_ads(dentry, ctx,
 					       attr->attr_name,
-					       utf16le_strlen(attr->attr_name) /
-							sizeof(utf16lechar));
+					       utf16le_len_chars(attr->attr_name));
 	} else {
 		build_extraction_path(dentry, ctx);
 	}
