@@ -1302,7 +1302,7 @@ retry:
 }
 
 /*
- * Create empty named data streams.
+ * Create any empty named data streams for the specified file, if any.
  *
  * Since these won't have 'struct blob_descriptor's, they won't show up in the
  * call to extract_blob_list().  Hence the need for the special case.
@@ -1461,7 +1461,7 @@ create_nondirectory_inode(HANDLE *h_ret, const struct wim_dentry *dentry,
 	if (ret)
 		goto out_close;
 
-	ret = create_any_empty_ads(dentry, ctx);
+	ret = create_empty_named_data_streams(dentry, ctx);
 	if (ret)
 		goto out_close;
 
