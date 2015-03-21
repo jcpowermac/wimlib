@@ -100,7 +100,7 @@ verify_image_blobs_present(struct wim_image_metadata *imd,
 	int ret;
 
 	image_for_each_inode(inode, imd) {
-		ret = inode_resolve_attributes(inode, blob_table, false);
+		ret = inode_resolve_streams(inode, blob_table, false);
 		if (ret)
 			return ret;
 	}

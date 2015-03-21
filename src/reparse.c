@@ -172,16 +172,16 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 	struct reparse_buffer_disk *rpbuf_disk;
 	u16 rpdatalen;
 
-	wimlib_assert(inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT);
+	wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 
 	if (!blob_override) {
-		struct wim_inode_attribute *attr;
+		struct wim_inode_stream *stream;
 
-		attr = inode_get_attribute_utf16le(inode, ATTR_REPARSE_POINT,
+		stream = inode_get_stream_utf16le(inode, STREAM_TYPE_REPARSE_POINT,
 						   NO_NAME);
 		blob = NULL;
-		if (attr)
-			blob = attribute_blob_resolved(attr);
+		if (stream)
+			blob = stream_blob_resolved(stream);
 		if (!blob) {
 			ERROR("Reparse point has no reparse data!");
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
@@ -326,8 +326,7 @@ parse_substitute_name(const utf16lechar *substitute_name,
  *
  * @blob_override
  *	If not NULL, the blob from which to read the reparse data.  Otherwise,
- *	the reparse data will be read from the reparse point attribute of
- *	@inode.
+ *	the reparse data will be read from the reparse point stream of @inode.
  *
  * If the entire symbolic link target was placed in the buffer, returns the
  * number of bytes written.  The resulting string is not null-terminated.  If
@@ -499,8 +498,8 @@ wim_inode_set_symlink(struct wim_inode *inode,
 
 	ret = make_reparse_buffer(&rpdata, (u8*)&rpbuf_disk, &rpbuflen);
 	if (ret == 0) {
-		if (!inode_add_attribute_with_data(inode,
-						   ATTR_REPARSE_POINT,
+		if (!inode_add_stream_with_data(inode,
+						   STREAM_TYPE_REPARSE_POINT,
 						   T(""),
 						   (u8*)&rpbuf_disk + 8,
 						   rpbuflen - 8,

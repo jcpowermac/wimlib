@@ -1211,7 +1211,7 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 	 * link bytes", and this size is multiplied by the link count (NOT one
 	 * less than the link count).
 	 */
-	if (!(inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
+	if (!(inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 				     FILE_ATTRIBUTE_REPARSE_POINT)))
 	{
 		struct blob_descriptor *blob;
@@ -1225,9 +1225,9 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 		}
 
 		if (inode->i_nlink >= 2 && dentry_is_first_in_inode(dentry)) {
-			for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-				if (attribute_is_named_data_stream(&inode->i_attrs[i])) {
-					blob = attribute_blob(&inode->i_attrs[i],
+			for (unsigned i = 0; i < inode->i_num_streams; i++) {
+				if (stream_is_named_data_stream(&inode->i_streams[i])) {
+					blob = stream_blob(&inode->i_streams[i],
 							      info->blob_table);
 					if (blob) {
 						info->hard_link_bytes += inode->i_nlink *

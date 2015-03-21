@@ -59,12 +59,12 @@ inode_export_blobs(struct wim_inode *inode, struct blob_table *src_blob_table,
 	const u8 *hash;
 	struct blob_descriptor *src_blob, *dest_blob;
 
-	inode_unresolve_attributes(inode);
+	inode_unresolve_streams(inode);
 
-	for (i = 0; i < inode->i_num_attrs; i++) {
+	for (i = 0; i < inode->i_num_streams; i++) {
 
 		/* Retrieve SHA-1 message digest of blob to export.  */
-		hash = attribute_hash(&inode->i_attrs[i]);
+		hash = stream_hash(&inode->i_streams[i]);
 		if (is_zero_hash(hash))  /* Empty blob?  */
 			continue;
 

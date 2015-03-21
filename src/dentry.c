@@ -73,7 +73,7 @@
 struct wim_dentry_on_disk {
 
 	/* Length of this directory entry in bytes, not including any extra
-	 * attribute entries.  Should be a multiple of 8 so that the following
+	 * stream entries.  Should be a multiple of 8 so that the following
 	 * dentry or alternate data stream entry is aligned on an 8-byte
 	 * boundary.  (If not, wimlib will round it up.)  It must be at least as
 	 * long as the fixed-length fields of the dentry (WIM_DENTRY_DISK_SIZE),
@@ -86,10 +86,10 @@ struct wim_dentry_on_disk {
 	 * included only the length field, but that takes up 8 bytes.  */
 	le64 length;
 
-	/* Flags for the file or directory.  This is a bitwise OR of the
-	 * FILE_ATTRIBUTE_* constants and should correspond to the value
+	/* File attributes for the file or directory.  This is a bitwise OR of
+	 * the FILE_ATTRIBUTE_* constants and should correspond to the value
 	 * retrieved by GetFileAttributes() on Windows. */
-	le32 file_flags;
+	le32 attributes;
 
 	/* A value that specifies the security descriptor for this file or
 	 * directory.  If -1, the file or directory has no security descriptor.
@@ -146,7 +146,7 @@ struct wim_dentry_on_disk {
 	 * do not correspond to Microsoft's documentation.
 	 *
 	 * If this directory entry is for a reparse point (has
-	 * FILE_ATTRIBUTE_REPARSE_POINT set in the file_flags field), then the
+	 * FILE_ATTRIBUTE_REPARSE_POINT set in the 'attributes' field), then the
 	 * version of the following fields containing the reparse tag is valid.
 	 * Furthermore, the field notated as not_rpfixed, as far as I can tell,
 	 * is supposed to be set to 1 if reparse point fixups (a.k.a. fixing the
@@ -181,9 +181,9 @@ struct wim_dentry_on_disk {
 		} _packed_attribute nonreparse;
 	};
 
-	/* Number of extra attribute entries that directly follow this dentry
-	 * on-disk. */
-	le16 num_extra_attributes;
+	/* Number of extra stream entries that directly follow this dentry
+	 * on-disk.  */
+	le16 num_extra_streams;
 
 	/* If nonzero, this is the length, in bytes, of this dentry's UTF-16LE
 	 * encoded short name (8.3 DOS-compatible name), excluding the null
@@ -217,12 +217,12 @@ struct wim_dentry_on_disk {
 	/* u8 tagged_items[] _aligned_attribute(8); */
 
 } _packed_attribute;
-	/* If num_extra_attributes != 0, then there are that many attribute
+	/* If num_extra_streams != 0, then there are that many extra stream
 	 * entries following the dentry, on an 8-byte aligned boundary.  They
 	 * are not counted in the 'length' field of the dentry.  */
 
 /* TODO  */
-struct wim_inode_attribute_on_disk {
+struct wim_inode_stream_on_disk {
 
 	/* Length of this structure, in bytes.  This includes all fixed-length
 	 * fields, plus the name and null terminator if present, and any needed
@@ -231,17 +231,17 @@ struct wim_inode_attribute_on_disk {
 
 	le64 reserved;
 
-	/* SHA-1 message digest of this attribute's data, or all zeroes if this
-	 * attribute's data is of zero length.  */
+	/* SHA-1 message digest of this stream's data, or all zeroes if this
+	 * stream's data is of zero length.  */
 	u8 hash[SHA1_HASH_SIZE];
 
-	/* Length of this attributes's name, in bytes and excluding the null
-	 * terminator; or 0 if this attributes is unnamed.  */
+	/* Length of this stream's name, in bytes and excluding the null
+	 * terminator; or 0 if this stream is unnamed.  */
 	le16 name_nbytes;
 
-	/* Attribute name in UTF-16LE.  It is @name_nbytes bytes long, excluding
+	/* Stream name in UTF-16LE.  It is @name_nbytes bytes long, excluding
 	 * the null terminator.  There is a null terminator character if
-	 * @name_nbytes != 0; i.e., if this attribute is named.  */
+	 * @name_nbytes != 0; i.e., if this stream is named.  */
 	utf16lechar name[];
 } _packed_attribute;
 
@@ -330,7 +330,7 @@ dentry_set_name(struct wim_dentry *dentry, const tchar *name)
 /* Calculate the minimum unaligned length, in bytes, of an on-disk WIM dentry
  * that has names of the specified lengths.  (Zero length means the
  * corresponding name actually does not exist.)  The returned value excludes
- * tagged metadata items as well as any extra attribute entries that may need to
+ * tagged metadata items as well as any extra stream entries that may need to
  * follow the dentry.  */
 static size_t
 dentry_min_len_with_names(u16 file_name_nbytes, u16 short_name_nbytes)
@@ -344,17 +344,17 @@ dentry_min_len_with_names(u16 file_name_nbytes, u16 short_name_nbytes)
 }
 
 
-/* Return the length, in bytes, required for the specified attribute on-disk,
- * when represented as an extra attribute entry.  */
+/* Return the length, in bytes, required for the specified stream on-disk, when
+ * represented as an extra stream entry.  */
 static size_t
-attribute_out_total_length(const struct wim_inode_attribute *attr)
+stream_out_total_length(const struct wim_inode_stream *strm)
 {
 	/* Account for the fixed length portion  */
-	size_t len = sizeof(struct wim_inode_attribute_on_disk);
+	size_t len = sizeof(struct wim_inode_stream_on_disk);
 
-	/* For named attributes, account for the variable-length name.  */
-	if (attribute_is_named(attr))
-		len += utf16le_len_bytes(attr->attr_name) + 2;
+	/* For named streams, account for the variable-length name.  */
+	if (stream_is_named(strm))
+		len += utf16le_len_bytes(strm->stream_name) + 2;
 
 	/* Account for any necessary padding to the next 8-byte boundary.  */
 	return (len + 7) & ~7;
@@ -363,7 +363,7 @@ attribute_out_total_length(const struct wim_inode_attribute *attr)
 /*
  * Calculate the total number of bytes that will be consumed when a dentry is
  * written.  This includes the fixed-length portion of the dentry, the name
- * fields, any tagged metadata items, and any extra attributes.  This also
+ * fields, any tagged metadata items, and any extra stream entries.  This also
  * includes all alignment bytes.
  */
 size_t
@@ -382,30 +382,30 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 	}
 
 	/*
-	 * - One extra attribute for each named data stream
-	 * - One extra attribute for the unnamed data stream there is either:
-	 * 	- a reparse point attribute
+	 * - One extra stream for each named data stream
+	 * - One extra stream for the unnamed data stream there is either:
+	 * 	- a reparse point stream
 	 * 	- at least one named data stream (for Windows PE bug workaround)
 	 * 		- UNLESS it's an encrypted file
 	 */
-	bool need_extra_attr_for_unnamed_data_stream = false;
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
-		switch (attr->attr_type) {
-		case ATTR_DATA:
-			if (unlikely(attribute_is_named(attr))) {
-				len += attribute_out_total_length(attr);
-				if (!(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED))
-					need_extra_attr_for_unnamed_data_stream = true;
+	bool need_extra_entry_for_unnamed_data_stream = false;
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		const struct wim_inode_stream *strm = &inode->i_streams[i];
+		switch (strm->stream_type) {
+		case STREAM_TYPE_DATA:
+			if (unlikely(stream_is_named(strm))) {
+				len += stream_out_total_length(strm);
+				if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
+					need_extra_entry_for_unnamed_data_stream = true;
 			}
 			break;
-		case ATTR_REPARSE_POINT:
-			need_extra_attr_for_unnamed_data_stream = true;
+		case STREAM_TYPE_REPARSE_POINT:
+			need_extra_entry_for_unnamed_data_stream = true;
 			break;
 		}
 	}
-	if (need_extra_attr_for_unnamed_data_stream) {
-		len += sizeof(struct wim_inode_attribute_on_disk);
+	if (need_extra_entry_for_unnamed_data_stream) {
+		len += sizeof(struct wim_inode_stream_on_disk);
 		len = (len + 7) & ~7;
 	}
 
@@ -1001,7 +1001,7 @@ new_filler_directory(struct wim_dentry **dentry_ret)
 		return ret;
 	/* Leave the inode number as 0; this is allowed for non
 	 * hard-linked files. */
-	dentry->d_inode->i_file_flags = FILE_ATTRIBUTE_DIRECTORY;
+	dentry->d_inode->i_attributes = FILE_ATTRIBUTE_DIRECTORY;
 	*dentry_ret = dentry;
 	return 0;
 }
@@ -1045,9 +1045,9 @@ do_free_dentry(struct wim_dentry *dentry, void *_ignore)
 }
 
 static int
-do_free_dentry_and_unref_attributes(struct wim_dentry *dentry, void *blob_table)
+do_free_dentry_and_unref_streams(struct wim_dentry *dentry, void *blob_table)
 {
-	inode_unref_attributes(dentry->d_inode, blob_table);
+	inode_unref_streams(dentry->d_inode, blob_table);
 	free_dentry(dentry);
 	return 0;
 }
@@ -1076,7 +1076,7 @@ free_dentry_tree(struct wim_dentry *root, struct blob_table *blob_table)
 	int (*f)(struct wim_dentry *, void *);
 
 	if (blob_table)
-		f = do_free_dentry_and_unref_attributes;
+		f = do_free_dentry_and_unref_streams;
 	else
 		f = do_free_dentry;
 
@@ -1233,44 +1233,44 @@ read_extra_data(const u8 *p, const u8 *end, struct wim_inode *inode)
 }
 
 static int
-prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode,
-			     u32 num_extra_attributes, const u8 *default_hash,
-			     u64 *offset_p)
+prepare_inode_stream_list(const u8 *p, const u8 *end, struct wim_inode *inode,
+			  u32 num_extra_streams, const u8 *default_hash,
+			  u64 *offset_p)
 {
 	const u8 *orig_p = p;
 
-	inode->i_num_attrs = 1 + num_extra_attributes;
+	inode->i_num_streams = 1 + num_extra_streams;
 
-	if (inode->i_num_attrs <= INODE_NUM_EMBEDDED_ATTRS) {
-		inode->i_attrs = inode->i_embedded_attrs;
+	if (inode->i_num_streams <= ARRAY_LEN(inode->i_embedded_streams)) {
+		inode->i_streams = inode->i_embedded_streams;
 	} else {
-		inode->i_attrs = CALLOC(inode->i_num_attrs, sizeof(inode->i_attrs[0]));
-		if (!inode->i_attrs)
+		inode->i_streams = CALLOC(inode->i_num_streams, sizeof(inode->i_streams[0]));
+		if (!inode->i_streams)
 			return WIMLIB_ERR_NOMEM;
 	}
 
-	inode->i_attrs[0].attr_name = (utf16lechar *)NO_NAME;
-	copy_hash(inode->i_attrs[0]._attr_hash, default_hash);
+	inode->i_streams[0].stream_name = (utf16lechar *)NO_NAME;
+	copy_hash(inode->i_streams[0]._stream_hash, default_hash);
 
-	for (unsigned i = 1; i < inode->i_num_attrs; i++) {
-		struct wim_inode_attribute *attr;
-		const struct wim_inode_attribute_on_disk *disk_attr;
+	for (unsigned i = 1; i < inode->i_num_streams; i++) {
+		struct wim_inode_stream *strm;
+		const struct wim_inode_stream_on_disk *disk_strm;
 		u64 length;
 		u16 name_nbytes;
 
-		attr = &inode->i_attrs[i];
+		strm = &inode->i_streams[i];
 
-		attr->attr_id = i;
+		strm->stream_id = i;
 
 		/* Do we have at least the size of the fixed-length data we know
 		 * need?  */
-		if ((end - p) < sizeof(struct wim_inode_attribute_on_disk))
+		if ((end - p) < sizeof(struct wim_inode_stream_on_disk))
 			return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
-		disk_attr = (const struct wim_inode_attribute_on_disk *)p;
+		disk_strm = (const struct wim_inode_stream_on_disk *)p;
 
 		/* Read the length field  */
-		length = le64_to_cpu(disk_attr->length);
+		length = le64_to_cpu(disk_strm->length);
 
 		/* 8-byte align the length  */
 		length = (length + 7) & ~7;
@@ -1278,16 +1278,16 @@ prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode
 		/* Make sure the length field is neither so small it doesn't
 		 * include all the fixed-length data nor so large it overflows
 		 * the metadata resource buffer. */
-		if (length < sizeof(struct wim_inode_attribute_on_disk) ||
+		if (length < sizeof(struct wim_inode_stream_on_disk) ||
 		    length > (end - p))
 			return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
 		/* Read the rest of the fixed-length data. */
 
-		copy_hash(attr->_attr_hash, disk_attr->hash);
-		name_nbytes = le16_to_cpu(disk_attr->name_nbytes);
+		copy_hash(strm->_stream_hash, disk_strm->hash);
+		name_nbytes = le16_to_cpu(disk_strm->name_nbytes);
 
-		/* If stream_name_nbytes != 0, the attribute is named.  */
+		/* If stream_name_nbytes != 0, the stream is named.  */
 		if (name_nbytes != 0) {
 			/* The name is encoded in UTF16-LE, which uses 2-byte
 			 * coding units, so the length of the name had better be
@@ -1298,58 +1298,58 @@ prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode
 			/* Add the length of the stream name to get the length
 			 * we actually need to read.  Make sure this isn't more
 			 * than the specified length of the entry.  */
-			if (sizeof(struct wim_inode_attribute_on_disk) +
+			if (sizeof(struct wim_inode_stream_on_disk) +
 			    name_nbytes > length)
 				return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
-			attr->attr_name = utf16le_dupz(disk_attr->name, name_nbytes);
-			if (!attr->attr_name)
+			strm->stream_name = utf16le_dupz(disk_strm->name, name_nbytes);
+			if (!strm->stream_name)
 				return WIMLIB_ERR_NOMEM;
 		} else {
-			attr->attr_name = (utf16lechar *)NO_NAME;
+			strm->stream_name = (utf16lechar *)NO_NAME;
 		}
 
 		p += length;
 	}
 
-	inode->i_next_attr_id = inode->i_num_attrs;
+	inode->i_next_stream_id = inode->i_num_streams;
 
-	/* Now, assign a type to each attribute.  */
+	/* Now, assign a type to each stream.  */
 
-	if (inode->i_num_attrs == 1) {
+	if (inode->i_num_streams == 1) {
 		/* Just the unnamed data stream  */
-		inode->i_attrs[0].attr_type = ATTR_DATA;
+		inode->i_streams[0].stream_type = STREAM_TYPE_DATA;
 	} else {
 		bool found_reparse_point = false;
 		bool found_unnamed_data_stream = false;
-		struct wim_inode_attribute *unnamed_zero_hash_attr = NULL;
-		for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-			struct wim_inode_attribute *attr = &inode->i_attrs[i];
-			if (attribute_is_named(attr)) {
-				attr->attr_type = ATTR_DATA;
-			} else if (!is_zero_hash(inode->i_attrs[i]._attr_hash)) {
-				if ((inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) &&
+		struct wim_inode_stream *unnamed_zero_hash_stream = NULL;
+		for (unsigned i = 0; i < inode->i_num_streams; i++) {
+			struct wim_inode_stream *strm = &inode->i_streams[i];
+			if (stream_is_named(strm)) {
+				strm->stream_type = STREAM_TYPE_DATA;
+			} else if (!is_zero_hash(inode->i_streams[i]._stream_hash)) {
+				if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
 				    !found_reparse_point) {
 					found_reparse_point = true;
-					attr->attr_type = ATTR_REPARSE_POINT;
+					strm->stream_type = STREAM_TYPE_REPARSE_POINT;
 				} else if (!found_unnamed_data_stream) {
 					found_unnamed_data_stream = true;
-					attr->attr_type = ATTR_DATA;
+					strm->stream_type = STREAM_TYPE_DATA;
 				}
 			} else {
-				unnamed_zero_hash_attr = attr;
-				attr->attr_type = ATTR_UNKNOWN;
+				unnamed_zero_hash_stream = strm;
+				strm->stream_type = STREAM_TYPE_UNKNOWN;
 			}
 		}
-		if (!found_unnamed_data_stream && unnamed_zero_hash_attr != NULL)
-			unnamed_zero_hash_attr->attr_type = ATTR_DATA;
+		if (!found_unnamed_data_stream && unnamed_zero_hash_stream != NULL)
+			unnamed_zero_hash_stream->stream_type = STREAM_TYPE_DATA;
 	}
 
 	*offset_p += p - orig_p;
 	return 0;
 }
 
-/* Read a dentry, including all extra attribute entries that follow it, from an
+/* Read a dentry, including all extra stream entries that follow it, from an
  * uncompressed metadata resource buffer.  */
 static int
 read_dentry(const u8 * restrict buf, size_t buf_len,
@@ -1420,7 +1420,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	inode = dentry->d_inode;
 
 	/* Read more fields: some into the dentry, and some into the inode.  */
-	inode->i_file_flags = le32_to_cpu(disk_dentry->file_flags);
+	inode->i_attributes = le32_to_cpu(disk_dentry->attributes);
 	inode->i_security_id = le32_to_cpu(disk_dentry->security_id);
 	dentry->subdir_offset = le64_to_cpu(disk_dentry->subdir_offset);
 	inode->i_creation_time = le64_to_cpu(disk_dentry->creation_time);
@@ -1431,7 +1431,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	 * reparse points, then put the fields in the same place and didn't
 	 * document it.  So we have some fields we read for reparse points, and
 	 * some fields in the same place for non-reparse-points.  */
-	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
 		inode->i_rp_unknown_1 = le32_to_cpu(disk_dentry->reparse.rp_unknown_1);
 		inode->i_reparse_tag = le32_to_cpu(disk_dentry->reparse.reparse_tag);
 		inode->i_rp_unknown_2 = le16_to_cpu(disk_dentry->reparse.rp_unknown_2);
@@ -1501,19 +1501,19 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 		p += (u32)short_name_nbytes + 2;
 	}
 
-	/* Read extra data at end of dentry (but before extra attribute
-	 * entries).  This may contain tagged items.  */
+	/* Read extra data at end of dentry (but before extra stream entries).
+	 * This may contain tagged items.  */
 	ret = read_extra_data(p, &buf[offset + length], inode);
 	if (ret)
 		goto err_free_dentry;
 
 	offset += (length + 7) & ~7;
 
-	/* Prepare the inode's list of attributes.  */
-	ret = prepare_inode_attribute_list(&buf[offset], &buf[buf_len], inode,
-					   le16_to_cpu(disk_dentry->num_extra_attributes),
-					   disk_dentry->default_hash,
-					   &offset);
+	/* Prepare the inode's list of streams.  */
+	ret = prepare_inode_stream_list(&buf[offset], &buf[buf_len], inode,
+					le16_to_cpu(disk_dentry->num_extra_streams),
+					disk_dentry->default_hash,
+					&offset);
 	if (ret)
 		goto err_free_dentry;
 
@@ -1692,11 +1692,11 @@ err_free_dentry_tree:
 }
 
 static u8 *
-write_extra_attribute_entry(u8 * restrict p, const utf16lechar * restrict name,
+write_extra_stream_entry(u8 * restrict p, const utf16lechar * restrict name,
 			    const u8 * restrict hash)
 {
-	struct wim_inode_attribute_on_disk *disk_attr =
-			(struct wim_inode_attribute_on_disk *)p;
+	struct wim_inode_stream_on_disk *disk_strm =
+			(struct wim_inode_stream_on_disk *)p;
 	u8 *orig_p = p;
 	size_t name_nbytes;
 
@@ -1705,24 +1705,23 @@ write_extra_attribute_entry(u8 * restrict p, const utf16lechar * restrict name,
 	else
 		name_nbytes = utf16le_len_bytes(name);
 
-	disk_attr->reserved = 0;
-	copy_hash(disk_attr->hash, hash);
-	disk_attr->name_nbytes = cpu_to_le16(name_nbytes);
-	p += sizeof(struct wim_inode_attribute_on_disk);
+	disk_strm->reserved = 0;
+	copy_hash(disk_strm->hash, hash);
+	disk_strm->name_nbytes = cpu_to_le16(name_nbytes);
+	p += sizeof(struct wim_inode_stream_on_disk);
 	if (name_nbytes != 0)
 		p = mempcpy(p, name, name_nbytes + 2);
 	/* Align to 8-byte boundary */
 	while ((uintptr_t)p & 7)
 		*p++ = 0;
-	disk_attr->length = cpu_to_le64(p - orig_p);
+	disk_strm->length = cpu_to_le64(p - orig_p);
 	return p;
 }
 
 /*
  * Write a WIM dentry to an output buffer.
  *
- * This includes any alternate data stream entries that may follow the dentry
- * itself.
+ * This includes any extra stream entries that may follow the dentry itself.
  *
  * @dentry:
  *	The dentry to write.
@@ -1745,7 +1744,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	inode = dentry->d_inode;
 	disk_dentry = (struct wim_dentry_on_disk*)p;
 
-	disk_dentry->file_flags = cpu_to_le32(inode->i_file_flags);
+	disk_dentry->attributes = cpu_to_le32(inode->i_attributes);
 	disk_dentry->security_id = cpu_to_le32(inode->i_security_id);
 	disk_dentry->subdir_offset = cpu_to_le64(dentry->subdir_offset);
 
@@ -1755,7 +1754,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	disk_dentry->creation_time = cpu_to_le64(inode->i_creation_time);
 	disk_dentry->last_access_time = cpu_to_le64(inode->i_last_access_time);
 	disk_dentry->last_write_time = cpu_to_le64(inode->i_last_write_time);
-	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
 		disk_dentry->reparse.rp_unknown_1 = cpu_to_le32(inode->i_rp_unknown_1);
 		disk_dentry->reparse.reparse_tag = cpu_to_le32(inode->i_reparse_tag);
 		disk_dentry->reparse.rp_unknown_2 = cpu_to_le16(inode->i_rp_unknown_2);
@@ -1794,53 +1793,53 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 
 	disk_dentry->length = cpu_to_le64(p - orig_p);
 
-	/* Attributes  */
+	/* Streams  */
 
 	/*
-	 * - One extra attribute for each named data stream
-	 * - One extra attribute for the unnamed data stream there is either:
-	 * 	- a reparse point attribute
+	 * - One extra stream for each named data stream
+	 * - One extra stream for the unnamed data stream there is either:
+	 * 	- a reparse point stream
 	 * 	- at least one named data stream (for Windows PE bug workaround)
 	 * 		- UNLESS it's an encrypted file
 	 */
-	bool need_extra_attr_for_unnamed_data_stream = false;
-	u16 num_extra_attrs = 0;
+	bool need_extra_entry_for_unnamed_data_stream = false;
+	u16 num_extra_streams = 0;
 	const u8 *unnamed_data_stream_hash = zero_hash;
 	const u8 *reparse_point_hash = zero_hash;
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
-		switch (attr->attr_type) {
-		case ATTR_DATA:
-			if (unlikely(attribute_is_named(attr))) {
-				if (!(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED))
-					need_extra_attr_for_unnamed_data_stream = true;
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		const struct wim_inode_stream *strm = &inode->i_streams[i];
+		switch (strm->stream_type) {
+		case STREAM_TYPE_DATA:
+			if (unlikely(stream_is_named(strm))) {
+				if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
+					need_extra_entry_for_unnamed_data_stream = true;
 			} else {
-				unnamed_data_stream_hash = attribute_hash(attr);
+				unnamed_data_stream_hash = stream_hash(strm);
 			}
 			break;
-		case ATTR_REPARSE_POINT:
-			reparse_point_hash = attribute_hash(attr);
-			need_extra_attr_for_unnamed_data_stream = true;
+		case STREAM_TYPE_REPARSE_POINT:
+			reparse_point_hash = stream_hash(strm);
+			need_extra_entry_for_unnamed_data_stream = true;
 			break;
 		}
 	}
 
-	if (need_extra_attr_for_unnamed_data_stream) {
+	if (need_extra_entry_for_unnamed_data_stream) {
 		copy_hash(disk_dentry->default_hash, reparse_point_hash);
-		p = write_extra_attribute_entry(p, NO_NAME, unnamed_data_stream_hash);
-		num_extra_attrs++;
+		p = write_extra_stream_entry(p, NO_NAME, unnamed_data_stream_hash);
+		num_extra_streams++;
 	} else {
 		copy_hash(disk_dentry->default_hash, unnamed_data_stream_hash);
 	}
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
-		if (attribute_is_named_data_stream(attr)) {
-			p = write_extra_attribute_entry(p, attr->attr_name,
-							attribute_hash(attr));
-			num_extra_attrs++;
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		const struct wim_inode_stream *strm = &inode->i_streams[i];
+		if (stream_is_named_data_stream(strm)) {
+			p = write_extra_stream_entry(p, strm->stream_name,
+						     stream_hash(strm));
+			num_extra_streams++;
 		}
 	}
-	disk_dentry->num_extra_attributes = cpu_to_le16(num_extra_attrs);
+	disk_dentry->num_extra_streams = cpu_to_le16(num_extra_streams);
 
 	return p;
 }

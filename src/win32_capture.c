@@ -194,7 +194,7 @@ read_win32_encrypted_file_prefix(const struct blob_descriptor *blob,
 	int ret;
 	DWORD flags = 0;
 
-	if (blob->file_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
+	if (blob->file_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
 		flags |= CREATE_FOR_DIR;
 
 	export_ctx.read_prefix_cb = cb;
@@ -828,7 +828,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 				 struct list_head *unhashed_blobs)
 {
 	struct blob_descriptor *blob;
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 	int ret;
 
 	blob = new_blob_descriptor();
@@ -847,17 +847,17 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	blob->file_inode = inode;
 
 	ret = win32_get_encrypted_file_size(blob->file_on_disk,
-					    (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY),
+					    (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY),
 					    &blob->size);
 	if (ret)
 		goto err;
 
-	attr = inode_add_attribute_utf16le_with_blob(inode, ATTR_DATA,
+	stream = inode_add_stream_utf16le_with_blob(inode, STREAM_TYPE_DATA,
 						     NO_NAME, blob);
-	if (!attr)
+	if (!stream)
 		goto err_nomem;
 
-	prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
 	return 0;
 
 err_nomem:
@@ -932,7 +932,7 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 {
 	wchar_t *stream_name;
 	size_t stream_name_nchars;
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 	wchar_t *stream_path;
 	struct blob_descriptor *blob;
 
@@ -946,7 +946,7 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 	stream_name[stream_name_nchars] = L'\0';
 
 	if (!stream_name_nchars &&
-	    (inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED))
+	    (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
 	{
 		/* Ignore unnamed data stream of encrypted file  */
 		return 0;
@@ -975,14 +975,14 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 		blob->file_inode = inode;
 	}
 
-	attr = inode_add_attribute_utf16le_with_blob(inode, ATTR_DATA,
+	stream = inode_add_stream_utf16le_with_blob(inode, STREAM_TYPE_DATA,
 						     stream_name, blob);
-	if (!attr) {
+	if (!stream) {
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
 
-	prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
 	return 0;
 }
 
@@ -1089,7 +1089,7 @@ winnt_scan_data_streams(HANDLE h, const wchar_t *path, size_t path_nchars,
 unnamed_only:
 	/* The volume does not support named streams.  Only capture the unnamed
 	 * data stream.  */
-	if (inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
+	if (inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 				   FILE_ATTRIBUTE_REPARSE_POINT))
 	{
 		ret = 0;
@@ -1289,7 +1289,7 @@ retry_open:
 		goto out_progress;
 	}
 
-	inode->i_file_flags = file_info.BasicInformation.FileAttributes;
+	inode->i_attributes = file_info.BasicInformation.FileAttributes;
 	inode->i_creation_time = file_info.BasicInformation.CreationTime.QuadPart;
 	inode->i_last_write_time = file_info.BasicInformation.LastWriteTime.QuadPart;
 	inode->i_last_access_time = file_info.BasicInformation.LastAccessTime.QuadPart;
@@ -1312,7 +1312,7 @@ retry_open:
 	}
 
 	/* If this is a reparse point, load the reparse data.  */
-	if (unlikely(inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT)) {
+	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
 		u8 *rpbuf;
 		u16 rpbuflen;
 
@@ -1330,9 +1330,9 @@ retry_open:
 			goto out;
 		}
 		inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
-		if (!inode_add_attribute_with_data(inode, ATTR_REPARSE_POINT, NO_NAME,
-						   rpbuf + 8, rpbuflen - 8,
-						   params->blob_table))
+		if (!inode_add_stream_with_data(inode, STREAM_TYPE_REPARSE_POINT, NO_NAME,
+						rpbuf + 8, rpbuflen - 8,
+						params->blob_table))
 		{
 			ret = WIMLIB_ERR_NOMEM;
 			goto out;
@@ -1351,7 +1351,7 @@ retry_open:
 	if (ret)
 		goto out;
 
-	if (unlikely(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED)) {
+	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)) {
 		/* Load information about the raw encrypted data.  This is
 		 * needed for any directory or non-directory that has
 		 * FILE_ATTRIBUTE_ENCRYPTED set.
@@ -1368,7 +1368,7 @@ retry_open:
 			goto out;
 	}
 
-	if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY) {
+	if (inode_is_directory(inode)) {
 
 		/* Directory: recurse to children.  */
 

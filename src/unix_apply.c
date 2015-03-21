@@ -81,7 +81,7 @@ struct unix_apply_ctx {
 	 * the beginning of the array.  */
 	unsigned num_open_fds;
 
-	/* Buffer for reading reparse point attributes into memory  */
+	/* Buffer for reading reparse point data into memory  */
 	u8 reparse_data[REPARSE_DATA_MAX_SIZE];
 
 	/* Pointer to the next byte in @reparse_data to fill  */

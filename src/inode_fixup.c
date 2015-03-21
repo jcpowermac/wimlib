@@ -82,8 +82,8 @@ inode_table_insert(struct wim_dentry *dentry, void *_params)
 			params->num_inconsistent_inodes++;
 			continue;
 		}
-		if (unlikely((d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY) ||
-			     (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)))
+		if (unlikely((d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+			     (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)))
 		{
 			params->num_dir_hard_links++;
 			if (params->num_dir_hard_links <=

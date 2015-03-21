@@ -1300,7 +1300,7 @@ hash_unhashed_blob(struct blob_descriptor *blob, struct blob_table *blob_table,
 
 	wimlib_assert(blob->unhashed);
 
-	/* back_ptr must be saved because @back_inode and @back_attr_id are in
+	/* back_ptr must be saved because @back_inode and @back_stream_id are in
 	 * union with the SHA-1 message digest and will no longer be valid once
 	 * the SHA-1 has been calculated. */
 	back_ptr = retrieve_blob_pointer(blob);
@@ -1315,8 +1315,8 @@ hash_unhashed_blob(struct blob_descriptor *blob, struct blob_table *blob_table,
 	if (duplicate_blob) {
 		/* We have a duplicate blob.  Transfer the reference counts from
 		 * this blob to the duplicate and update the reference to this
-		 * blob (from an attribute) to point to the duplicate.  The
-		 * caller is responsible for freeing @blob if needed.  */
+		 * blob (from an stream) to point to the duplicate.  The caller
+		 * is responsible for freeing @blob if needed.  */
 		wimlib_assert(!(duplicate_blob->unhashed));
 		wimlib_assert(duplicate_blob->size == blob->size);
 		duplicate_blob->refcnt += blob->refcnt;

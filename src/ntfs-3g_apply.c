@@ -326,16 +326,16 @@ ntfs_3g_create_empty_named_data_streams(ntfs_inode *ni,
 					const struct wim_inode *inode,
 					const struct ntfs_3g_apply_ctx *ctx)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 
-		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
+		const struct wim_inode_stream *stream = &inode->i_streams[i];
 
-		if (!attribute_is_named_data_stream(attr) ||
-		    attribute_blob_resolved(attr) != NULL)
+		if (!stream_is_named_data_stream(stream) ||
+		    stream_blob_resolved(stream) != NULL)
 			continue;
 
-		if (ntfs_attr_add(ni, AT_DATA, attr->attr_name,
-				  utf16le_len_chars(attr->attr_name),
+		if (ntfs_attr_add(ni, AT_DATA, stream->stream_name,
+				  utf16le_len_chars(stream->stream_name),
 				  NULL, 0))
 		{
 			ERROR_WITH_ERRNO("Failed to create named data stream "
@@ -364,7 +364,7 @@ ntfs_3g_set_metadata(ntfs_inode *ni, const struct wim_inode *inode,
 
 	/* Attributes  */
 	if (!(extract_flags & WIMLIB_EXTRACT_FLAG_NO_ATTRIBUTES)) {
-		u32 attrib = inode->i_file_flags;
+		u32 attrib = inode->i_attributes;
 
 		attrib &= ~(FILE_ATTRIBUTE_SPARSE_FILE |
 			    FILE_ATTRIBUTE_ENCRYPTED);
@@ -427,7 +427,7 @@ ntfs_3g_create_dirs_recursive(ntfs_inode *dir_ni, struct wim_dentry *dir,
 		ntfs_inode *ni;
 		int ret;
 
-		if (!(child->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY))
+		if (!(child->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY))
 			continue;
 		if (!will_extract_dentry(child))
 			continue;
@@ -493,7 +493,7 @@ ntfs_3g_create_directories(struct wim_dentry *root,
 
 	/* Set the DOS name of any directory that has one.  */
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
-		if (!(dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY))
+		if (!(dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY))
 			continue;
 		if (!dentry_has_short_name(dentry))
 			continue;
@@ -641,7 +641,7 @@ ntfs_3g_create_nondirectory(struct wim_inode *inode,
 	if (ret)
 		goto out_close_ni;
 
-	ret = ntfs_3g_create_any_empty_ads(ni, inode, ctx);
+	ret = ntfs_3g_create_empty_named_data_streams(ni, inode, ctx);
 
 out_close_ni:
 	/* Close the inode.  */
@@ -667,7 +667,7 @@ ntfs_3g_create_nondirectories(struct list_head *dentry_list,
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 		inode = dentry->d_inode;
-		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
+		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
 			continue;
 		if (dentry == inode_first_extraction_dentry(inode)) {
 			ret = ntfs_3g_create_nondirectory(inode, ctx);
@@ -685,16 +685,16 @@ static int
 ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 				    ntfs_inode *ni,
 				    struct wim_inode *inode,
-				    const struct wim_inode_attribute *attr,
+				    const struct wim_inode_stream *stream,
 				    struct ntfs_3g_apply_ctx *ctx)
 {
 	struct wim_dentry *one_dentry = inode_first_extraction_dentry(inode);
-	size_t attr_name_nchars;
+	size_t stream_name_nchars;
 	ntfs_attr *dest_attr;
 
-	if (unlikely(attr->attr_type != ATTR_DATA)) {
-		if ((inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) &&
-		    (attr->attr_type == ATTR_REPARSE_POINT))
+	if (unlikely(stream->stream_type != STREAM_TYPE_DATA)) {
+		if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+		    (stream->stream_type == STREAM_TYPE_REPARSE_POINT))
 		{
 			if (blob->size > REPARSE_DATA_MAX_SIZE) {
 				ERROR("Reparse data of \"%s\" has size "
@@ -715,10 +715,10 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 		return 0;
 	}
 
-	attr_name_nchars = utf16le_len_chars(attr->attr_name);
+	stream_name_nchars = utf16le_len_chars(stream->stream_name);
 
-	if (attr_name_nchars &&
-	    (ntfs_attr_add(ni, AT_DATA, attr->attr_name, attr_name_nchars,
+	if (stream_name_nchars &&
+	    (ntfs_attr_add(ni, AT_DATA, stream->stream_name, stream_name_nchars,
 			   NULL, 0)))
 	{
 		ERROR_WITH_ERRNO("Failed to create named data stream of \"%s\"",
@@ -729,8 +729,8 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 	/* This should be ensured by extract_blob_list()  */
 	wimlib_assert(ctx->num_open_attrs < MAX_OPEN_FILES);
 
-	dest_attr = ntfs_attr_open(ni, AT_DATA, attr->attr_name,
-				   attr_name_nchars);
+	dest_attr = ntfs_attr_open(ni, AT_DATA, stream->stream_name,
+				   stream_name_nchars);
 	if (!dest_attr) {
 		ERROR_WITH_ERRNO("Failed to open data stream of \"%s\"",
 				 dentry_full_path(one_dentry));
@@ -810,7 +810,7 @@ ntfs_3g_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 
 		ret = ntfs_3g_begin_extract_blob_instance(blob, ni,
 							  targets[i].inode,
-							  targets[i].attr, ctx);
+							  targets[i].stream, ctx);
 		if (ret)
 			goto out_cleanup;
 	}
@@ -891,7 +891,7 @@ ntfs_3g_count_dentries(const struct list_head *dentry_list)
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 		count++;
-		if ((dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY) &&
+		if ((dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) &&
 		    dentry_has_short_name(dentry))
 		{
 			count++;

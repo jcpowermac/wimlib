@@ -68,7 +68,7 @@ struct win32_apply_ctx {
 	UNICODE_STRING pathbuf;
 
 	/* Object attributes to reuse for opening files in the target directory.
-	 * (attr.ObjectName == &pathbuf) and (attr.RootDirectory == h_target).
+	 * (stream.ObjectName == &pathbuf) and (stream.RootDirectory == h_target).
 	 */
 	OBJECT_ATTRIBUTES attr;
 
@@ -288,7 +288,7 @@ load_prepopulate_pats(struct win32_apply_ctx *ctx)
 
 	dentry = get_dentry(ctx->common.wim, path, WIMLIB_CASE_INSENSITIVE);
 	if (!dentry ||
-	    (dentry->d_inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
+	    (dentry->d_inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 					      FILE_ATTRIBUTE_REPARSE_POINT |
 					      FILE_ATTRIBUTE_ENCRYPTED)) ||
 	    !(blob = inode_get_blob_for_unnamed_data_stream(dentry->d_inode,
@@ -387,7 +387,7 @@ will_externally_back_inode(struct wim_inode *inode, struct win32_apply_ctx *ctx,
 	 * unknown/no/yes).  But most files can be externally backed, so this
 	 * way is fine.  */
 
-	if (inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
+	if (inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 				   FILE_ATTRIBUTE_REPARSE_POINT |
 				   FILE_ATTRIBUTE_ENCRYPTED))
 		return WIM_BACKING_NOT_POSSIBLE;
@@ -631,11 +631,11 @@ static size_t
 inode_longest_named_data_stream_spec(const struct wim_inode *inode)
 {
 	size_t max = 0;
-	for (size_t i = 0; i < inode->i_num_attrs; i++) {
-		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
-		if (!attribute_is_named_data_stream(attr))
+	for (size_t i = 0; i < inode->i_num_streams; i++) {
+		const struct wim_inode_stream *stream = &inode->i_streams[i];
+		if (!stream_is_named_data_stream(stream))
 			continue;
-		size_t len = utf16le_len_bytes(attr->attr_name);
+		size_t len = utf16le_len_bytes(stream->stream_name);
 		if (len > max)
 			max = len;
 	}
@@ -880,7 +880,7 @@ static int
 adjust_compression_attribute(HANDLE h, const struct wim_dentry *dentry,
 			     struct win32_apply_ctx *ctx)
 {
-	const bool compressed = (dentry->d_inode->i_file_flags &
+	const bool compressed = (dentry->d_inode->i_attributes &
 				 FILE_ATTRIBUTE_COMPRESSED);
 
 	if (ctx->common.extract_flags & WIMLIB_EXTRACT_FLAG_NO_ATTRIBUTES)
@@ -1318,18 +1318,18 @@ create_empty_named_data_streams(const struct wim_dentry *dentry,
 	if (!ctx->common.supported_features.named_data_streams)
 		return 0;
 
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		const struct wim_inode_stream *stream = &inode->i_streams[i];
 		HANDLE h;
 
 		/* Not named?  */
-		if (!attribute_is_named_data_stream(attr) ||
-		    attribute_blob_resolved(attr))
+		if (!stream_is_named_data_stream(stream) ||
+		    stream_blob_resolved(stream))
 			continue;
 
 		build_extraction_path_with_ads(dentry, ctx,
-					       attr->attr_name,
-					       utf16le_len_chars(attr->attr_name));
+					       stream->stream_name,
+					       utf16le_len_chars(stream->stream_name));
 		path_modified = true;
 		ret = supersede_file_or_stream(ctx, &h);
 		if (ret)
@@ -1415,7 +1415,7 @@ create_directories(struct list_head *dentry_list,
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 
-		if (!(dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY))
+		if (!(dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY))
 			continue;
 
 		/* Note: Here we include files with
@@ -1597,7 +1597,7 @@ create_nondirectories(struct list_head *dentry_list, struct win32_apply_ctx *ctx
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
 		inode = dentry->d_inode;
-		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
+		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
 			continue;
 		/* Call create_nondirectory() only once per inode  */
 		if (dentry == inode_first_extraction_dentry(inode)) {
@@ -1646,17 +1646,17 @@ prepare_data_buffer(struct win32_apply_ctx *ctx, u64 blob_size)
 static int
 begin_extract_blob_instance(const struct blob_descriptor *blob,
 			    struct wim_dentry *dentry,
-			    const struct wim_inode_attribute *attr,
+			    const struct wim_inode_stream *stream,
 			    struct win32_apply_ctx *ctx)
 {
-	const u32 file_flags = dentry->d_inode->i_file_flags;
+	const u32 attributes = dentry->d_inode->i_attributes;
 	FILE_ALLOCATION_INFORMATION alloc_info;
 	HANDLE h;
 	NTSTATUS status;
 
-	if (unlikely(attr->attr_type != ATTR_DATA)) {
-		if ((attr->attr_type == ATTR_REPARSE_POINT) &&
-		    (file_flags & FILE_ATTRIBUTE_REPARSE_POINT)) {
+	if (unlikely(stream->stream_type != STREAM_TYPE_DATA)) {
+		if ((stream->stream_type == STREAM_TYPE_REPARSE_POINT) &&
+		    (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
 
 			/* We can't write the reparse point attribute directly;
 			 * we must set it with FSCTL_SET_REPARSE_POINT, which
@@ -1672,16 +1672,16 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 			return 0;
 		}
 
-		/* Ignore unrecognized attributes  */
+		/* Ignore unrecognized stream types  */
 		return 0;
 	}
 
-	/* It's a data attribute.  */
+	/* It's a data stream.  */
 
 
 	/* Encrypted file?  */
-	if (unlikely(file_flags & FILE_ATTRIBUTE_ENCRYPTED) &&
-	    !attribute_is_named(attr))
+	if (unlikely(attributes & FILE_ATTRIBUTE_ENCRYPTED) &&
+	    !stream_is_named(stream))
 	{
 		if (!ctx->common.supported_features.encrypted_files)
 			return 0;
@@ -1714,10 +1714,10 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 	}
 
 
-	if (unlikely(attribute_is_named(attr))) {
+	if (unlikely(stream_is_named(stream))) {
 		build_extraction_path_with_ads(dentry, ctx,
-					       attr->attr_name,
-					       utf16le_len_chars(attr->attr_name));
+					       stream->stream_name,
+					       utf16le_len_chars(stream->stream_name));
 	} else {
 		build_extraction_path(dentry, ctx);
 	}
@@ -1983,7 +1983,7 @@ extract_encrypted_file(const struct wim_dentry *dentry,
 	build_win32_extraction_path(dentry, ctx);
 
 	flags = CREATE_FOR_IMPORT | OVERWRITE_HIDDEN;
-	if (dentry->d_inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
+	if (dentry->d_inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
 		flags |= CREATE_FOR_DIR;
 
 	retried = false;
@@ -2036,14 +2036,14 @@ begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
 		const struct wim_inode *inode = targets[i].inode;
-		const struct wim_inode_attribute *attr = targets[i].attr;
+		const struct wim_inode_stream *stream = targets[i].stream;
 		struct wim_dentry *dentry;
 
 		/* A copy of the blob needs to be extracted to @inode.  */
 
 		if (ctx->common.supported_features.hard_links) {
 			dentry = inode_first_extraction_dentry(inode);
-			ret = begin_extract_blob_instance(blob, dentry, attr, ctx);
+			ret = begin_extract_blob_instance(blob, dentry, stream, ctx);
 			ret = check_apply_error(dentry, ctx, ret);
 			if (ret)
 				goto fail;
@@ -2056,7 +2056,7 @@ begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 			do {
 				dentry = list_entry(next, struct wim_dentry,
 						    d_extraction_alias_node);
-				ret = begin_extract_blob_instance(blob, dentry, attr, ctx);
+				ret = begin_extract_blob_instance(blob, dentry, stream, ctx);
 				ret = check_apply_error(dentry, ctx, ret);
 				if (ret)
 					goto fail;
@@ -2135,9 +2135,9 @@ end_extract_blob(struct blob_descriptor *blob, int status, void *_ctx)
 			ret = WIMLIB_ERR_INVALID_REPARSE_DATA;
 			return check_apply_error(dentry, ctx, ret);
 		}
-		/* In the WIM format, reparse point attributes are just the
-		 * reparse data and omit the header.  But we can reconstruct the
-		 * header.  */
+		/* In the WIM format, reparse point streams are just the reparse
+		 * data and omit the header.  But we can reconstruct the header.
+		 */
 		memcpy(ctx->rpbuf.rpdata, ctx->data_buffer, blob->size);
 		ctx->rpbuf.rpdatalen = blob->size;
 		ctx->rpbuf.rpreserved = 0;
@@ -2352,7 +2352,7 @@ do_apply_metadata_to_file(HANDLE h, const struct wim_inode *inode,
 	if (ctx->common.extract_flags & WIMLIB_EXTRACT_FLAG_NO_ATTRIBUTES) {
 		info.FileAttributes = FILE_ATTRIBUTE_NORMAL;
 	} else {
-		info.FileAttributes = inode->i_file_flags & ~SPECIAL_ATTRIBUTES;
+		info.FileAttributes = inode->i_attributes & ~SPECIAL_ATTRIBUTES;
 		if (info.FileAttributes == 0)
 			info.FileAttributes = FILE_ATTRIBUTE_NORMAL;
 	}

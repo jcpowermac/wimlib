@@ -62,7 +62,7 @@ new_timeless_inode(void)
 	if (inode) {
 		inode->i_security_id = -1;
 		/*inode->i_nlink = 0;*/
-		inode->i_next_attr_id = 1;
+		inode->i_next_stream_id = 1;
 		inode->i_not_rpfixed = 1;
 		INIT_LIST_HEAD(&inode->i_list);
 		INIT_LIST_HEAD(&inode->i_dentry);
@@ -73,11 +73,11 @@ new_timeless_inode(void)
 static void
 free_inode(struct wim_inode *inode)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_name != NO_NAME)
-			FREE(inode->i_attrs[i].attr_name);
-	if (inode->i_attrs != inode->i_embedded_attrs)
-		FREE(inode->i_attrs);
+	for (unsigned i = 0; i < inode->i_num_streams; i++)
+		if (inode->i_streams[i].stream_name != NO_NAME)
+			FREE(inode->i_streams[i].stream_name);
+	if (inode->i_streams != inode->i_embedded_streams)
+		FREE(inode->i_streams);
 	if (unlikely(inode->i_extra))
 		FREE(inode->i_extra);
 	/* HACK: This may instead delete the inode from i_list, but hlist_del()
@@ -146,195 +146,195 @@ inode_dec_num_opened_fds(struct wim_inode *inode)
 }
 #endif
 
-struct wim_inode_attribute *
-inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
-			    const utf16lechar *attr_name)
+struct wim_inode_stream *
+inode_get_stream_utf16le(const struct wim_inode *inode, int stream_type,
+			 const utf16lechar *stream_name)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_type == attr_type &&
-		    !cmp_utf16le_strings_z(inode->i_attrs[i].attr_name, attr_name,
+	for (unsigned i = 0; i < inode->i_num_streams; i++)
+		if (inode->i_streams[i].stream_type == stream_type &&
+		    !cmp_utf16le_strings_z(inode->i_streams[i].stream_name, stream_name,
 					   default_ignore_case))
-			return &inode->i_attrs[i];
+			return &inode->i_streams[i];
 	return NULL;
 }
 
-struct wim_inode_attribute *
-inode_get_unnamed_data_attribute(const struct wim_inode *inode)
+struct wim_inode_stream *
+inode_get_unnamed_data_stream(const struct wim_inode *inode)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_type == ATTR_DATA &&
-		    !*inode->i_attrs[i].attr_name)
-			return &inode->i_attrs[i];
+	for (unsigned i = 0; i < inode->i_num_streams; i++)
+		if (inode->i_streams[i].stream_type == STREAM_TYPE_DATA &&
+		    !*inode->i_streams[i].stream_name)
+			return &inode->i_streams[i];
 	return NULL;
 }
 
-struct wim_inode_attribute *
-inode_get_attribute(const struct wim_inode *inode, int attr_type,
-		    const tchar *attr_name)
+struct wim_inode_stream *
+inode_get_stream(const struct wim_inode *inode, int stream_type,
+		 const tchar *stream_name)
 {
 	const utf16lechar *ustr;
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 
-	if (tstr_get_utf16le(attr_name, &ustr))
+	if (tstr_get_utf16le(stream_name, &ustr))
 		return NULL;
 
-	attr = inode_get_attribute_utf16le(inode, attr_type, ustr);
+	stream = inode_get_stream_utf16le(inode, stream_type, ustr);
 
 	tstr_put_utf16le(ustr);
 
-	return attr;
+	return stream;
 }
 
-struct wim_inode_attribute *
-inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
-			    const utf16lechar *attr_name)
+struct wim_inode_stream *
+inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
+			 const utf16lechar *stream_name)
 {
-	struct wim_inode_attribute *attrs;
-	struct wim_inode_attribute *new_attr;
+	struct wim_inode_stream *streams;
+	struct wim_inode_stream *new_stream;
 
-	if (inode->i_num_attrs < INODE_NUM_EMBEDDED_ATTRS) {
-		attrs = inode->i_embedded_attrs;
+	if (inode->i_num_streams < ARRAY_LEN(inode->i_embedded_streams)) {
+		streams = inode->i_embedded_streams;
 	} else {
-		if (inode->i_num_attrs == INODE_NUM_EMBEDDED_ATTRS) {
-			attrs = MALLOC((INODE_NUM_EMBEDDED_ATTRS + 1) *
-				       sizeof(inode->i_attrs[0]));
-			if (!attrs)
+		if (inode->i_num_streams == ARRAY_LEN(inode->i_embedded_streams)) {
+			streams = MALLOC((ARRAY_LEN(inode->i_embedded_streams) + 1) *
+				       sizeof(inode->i_streams[0]));
+			if (!streams)
 				return NULL;
-			memcpy(attrs, inode->i_embedded_attrs,
-			       (INODE_NUM_EMBEDDED_ATTRS * sizeof(inode->i_attrs[0])));
+			memcpy(streams, inode->i_embedded_streams,
+			       (ARRAY_LEN(inode->i_embedded_streams) * sizeof(inode->i_streams[0])));
 		} else {
-			attrs = REALLOC(inode->i_attrs,
-					(inode->i_num_attrs + 1) * sizeof(inode->i_attrs[0]));
-			if (!attrs)
+			streams = REALLOC(inode->i_streams,
+					(inode->i_num_streams + 1) * sizeof(inode->i_streams[0]));
+			if (!streams)
 				return NULL;
-			inode->i_attrs = attrs;
+			inode->i_streams = streams;
 		}
 	}
-	new_attr = &attrs[inode->i_num_attrs];
+	new_stream = &streams[inode->i_num_streams];
 
-	memset(new_attr, 0, sizeof(*new_attr));
+	memset(new_stream, 0, sizeof(*new_stream));
 
-	new_attr->attr_type = attr_type;
-	if (!*attr_name) {
-		/* Unnamed attribute  */
-		new_attr->attr_name = (utf16lechar *)NO_NAME;
+	new_stream->stream_type = stream_type;
+	if (!*stream_name) {
+		/* Unnamed stream  */
+		new_stream->stream_name = (utf16lechar *)NO_NAME;
 	} else {
-		/* Named attribute  */
-		new_attr->attr_name = utf16le_dup(attr_name);
-		if (!new_attr->attr_name)
+		/* Named stream  */
+		new_stream->stream_name = utf16le_dup(stream_name);
+		if (!new_stream->stream_name)
 			return NULL;
 	}
-	new_attr->attr_id = inode->i_next_attr_id++;
+	new_stream->stream_id = inode->i_next_stream_id++;
 
-	inode->i_attrs = attrs;
-	inode->i_num_attrs++;
+	inode->i_streams = streams;
+	inode->i_num_streams++;
 
-	return new_attr;
+	return new_stream;
 }
 
-struct wim_inode_attribute *
-inode_add_attribute(struct wim_inode *inode, int attr_type,
-		    const tchar *attr_name)
+struct wim_inode_stream *
+inode_add_stream(struct wim_inode *inode, int stream_type,
+		 const tchar *stream_name)
 {
 	const utf16lechar *ustr;
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 
-	if (tstr_get_utf16le(attr_name, &ustr))
+	if (tstr_get_utf16le(stream_name, &ustr))
 		return NULL;
 
-	attr = inode_add_attribute_utf16le(inode, attr_type, ustr);
+	stream = inode_add_stream_utf16le(inode, stream_type, ustr);
 
 	tstr_put_utf16le(ustr);
 
-	return attr;
+	return stream;
 }
 
 void
-inode_remove_attribute(struct wim_inode *inode, struct wim_inode_attribute *attr,
-		       struct blob_table *blob_table)
+inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *stream,
+		    struct blob_table *blob_table)
 {
 	struct blob_descriptor *blob;
-	unsigned idx = attr - inode->i_attrs;
+	unsigned idx = stream - inode->i_streams;
 
-	wimlib_assert(idx < inode->i_num_attrs);
-	wimlib_assert(attr->attr_resolved);
+	wimlib_assert(idx < inode->i_num_streams);
+	wimlib_assert(stream->stream_resolved);
 
-	blob = attribute_blob(attr, blob_table);
+	blob = stream_blob(stream, blob_table);
 	if (blob)
 		blob_decrement_refcnt(blob, blob_table);
 
-	FREE(attr->attr_name);
+	FREE(stream->stream_name);
 
-	memmove(&inode->i_attrs[idx],
-		&inode->i_attrs[idx + 1],
-		(inode->i_num_attrs - idx - 1) * sizeof(inode->i_attrs[0]));
-	inode->i_num_attrs--;
+	memmove(&inode->i_streams[idx],
+		&inode->i_streams[idx + 1],
+		(inode->i_num_streams - idx - 1) * sizeof(inode->i_streams[0]));
+	inode->i_num_streams--;
 }
 
-struct wim_inode_attribute *
-inode_add_attribute_utf16le_with_blob(struct wim_inode *inode,
-				      int attr_type,
-				      const utf16lechar *attr_name,
-				      struct blob_descriptor *blob)
+struct wim_inode_stream *
+inode_add_stream_utf16le_with_blob(struct wim_inode *inode,
+				   int stream_type,
+				   const utf16lechar *stream_name,
+				   struct blob_descriptor *blob)
 {
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 
-	attr = inode_add_attribute_utf16le(inode, attr_type, attr_name);
-	if (attr)
-		attribute_set_blob(attr, blob);
-	return attr;
+	stream = inode_add_stream_utf16le(inode, stream_type, stream_name);
+	if (stream)
+		stream_set_blob(stream, blob);
+	return stream;
 }
 
-struct wim_inode_attribute *
-inode_add_attribute_with_blob(struct wim_inode *inode,
-			      int attr_type, const tchar *attr_name,
-			      struct blob_descriptor *blob)
+struct wim_inode_stream *
+inode_add_stream_with_blob(struct wim_inode *inode,
+			   int stream_type, const tchar *stream_name,
+			   struct blob_descriptor *blob)
 {
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 
-	attr = inode_add_attribute(inode, attr_type, attr_name);
-	if (attr)
-		attribute_set_blob(attr, blob);
-	return attr;
+	stream = inode_add_stream(inode, stream_type, stream_name);
+	if (stream)
+		stream_set_blob(stream, blob);
+	return stream;
 }
 
-struct wim_inode_attribute *
-inode_add_attribute_with_data(struct wim_inode *inode,
-			      int attr_type, const tchar *attr_name,
-			      const void *data, size_t size,
-			      struct blob_table *blob_table)
+struct wim_inode_stream *
+inode_add_stream_with_data(struct wim_inode *inode,
+			   int stream_type, const tchar *stream_name,
+			   const void *data, size_t size,
+			   struct blob_table *blob_table)
 {
 	struct blob_descriptor *blob;
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 
 	blob = new_blob_from_data_buffer(data, size, blob_table);
 	if (!blob)
 		return NULL;
 
-	attr = inode_add_attribute_with_blob(inode, attr_type, attr_name, blob);
+	stream = inode_add_stream_with_blob(inode, stream_type, stream_name, blob);
 
-	if (!attr)
+	if (!stream)
 		blob_decrement_refcnt(blob, blob_table);
 
-	return attr;;
+	return stream;;
 }
 
 bool
 inode_has_named_data_stream(const struct wim_inode *inode)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_type == ATTR_DATA &&
-		    *inode->i_attrs[i].attr_name)
+	for (unsigned i = 0; i < inode->i_num_streams; i++)
+		if (inode->i_streams[i].stream_type == STREAM_TYPE_DATA &&
+		    *inode->i_streams[i].stream_name)
 			return true;
 	return false;
 }
 
 /*
- * Resolve an inode's attributes.
+ * Resolve an inode's streams.
  *
- * For each attribute, this replaces the SHA-1 message digest of the blob data
- * with a pointer to the 'struct blob_descriptor' for the blob.  Blob
- * descriptors are looked up in @table.
+ * For each stream, this replaces the SHA-1 message digest of the blob data with
+ * a pointer to the 'struct blob_descriptor' for the blob.  Blob descriptors are
+ * looked up in @table.
  *
  * If @force is %false:
  *	If any of the needed blobs do not exist in @table, return
@@ -350,17 +350,17 @@ inode_has_named_data_stream(const struct wim_inode *inode)
  * referenced by the inode was missing.
  */
 int
-inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
+inode_resolve_streams(struct wim_inode *inode, struct blob_table *table,
 			 bool force)
 {
-	struct blob_descriptor *blobs[inode->i_num_attrs];
+	struct blob_descriptor *blobs[inode->i_num_streams];
 
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 
-		if (inode->i_attrs[i].attr_resolved)
+		if (inode->i_streams[i].stream_resolved)
 			continue;
 
-		const u8 *hash = attribute_hash(&inode->i_attrs[i]);
+		const u8 *hash = stream_hash(&inode->i_streams[i]);
 		struct blob_descriptor *blob = NULL;
 
 		if (!is_zero_hash(hash)) {
@@ -378,28 +378,28 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 		blobs[i] = blob;
 	}
 
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		if (inode->i_attrs[i].attr_resolved)
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		if (inode->i_streams[i].stream_resolved)
 			continue;
-		attribute_set_blob(&inode->i_attrs[i], blobs[i]);
+		stream_set_blob(&inode->i_streams[i], blobs[i]);
 	}
 	return 0;
 }
 
 /*
- * Undo the effects of inode_resolve_attributes().
+ * Undo the effects of inode_resolve_streams().
  */
 void
-inode_unresolve_attributes(struct wim_inode *inode)
+inode_unresolve_streams(struct wim_inode *inode)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 
-		if (!inode->i_attrs[i].attr_resolved)
+		if (!inode->i_streams[i].stream_resolved)
 			continue;
 
-		copy_hash(inode->i_attrs[i]._attr_hash,
-			  attribute_hash(&inode->i_attrs[i]));
-		inode->i_attrs[i].attr_resolved = 0;
+		copy_hash(inode->i_streams[i]._stream_hash,
+			  stream_hash(&inode->i_streams[i]));
+		inode->i_streams[i].stream_resolved = 0;
 	}
 }
 
@@ -420,23 +420,23 @@ blob_not_found_error(const struct wim_inode *inode, const u8 *hash)
 }
 
 struct blob_descriptor *
-attribute_blob(const struct wim_inode_attribute *attr, const struct blob_table *table)
+stream_blob(const struct wim_inode_stream *stream, const struct blob_table *table)
 {
-	if (attr->attr_resolved)
-		return attr->_attr_blob;
+	if (stream->stream_resolved)
+		return stream->_stream_blob;
 	else
-		return lookup_blob(table, attr->_attr_hash);
+		return lookup_blob(table, stream->_stream_hash);
 }
 
-/* Return the SHA-1 message digest of the data of the specified attribute, or a
- * void SHA-1 of all zeroes if the specified attribute is empty.   */
+/* Return the SHA-1 message digest of the data of the specified stream, or a
+ * void SHA-1 of all zeroes if the specified stream is empty.   */
 const u8 *
-attribute_hash(const struct wim_inode_attribute *attr)
+stream_hash(const struct wim_inode_stream *stream)
 {
-	if (attr->attr_resolved)
-		return attr->_attr_blob ? attr->_attr_blob->hash : zero_hash;
+	if (stream->stream_resolved)
+		return stream->_stream_blob ? stream->_stream_blob->hash : zero_hash;
 	else
-		return attr->_attr_hash;
+		return stream->_stream_hash;
 }
 
 /*
@@ -447,13 +447,13 @@ struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 				       const struct blob_table *blob_table)
 {
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 
-	attr = inode_get_unnamed_data_attribute(inode);
-	if (!attr)
+	stream = inode_get_unnamed_data_stream(inode);
+	if (!stream)
 		return NULL;
 
-	return attribute_blob(attr, blob_table);
+	return stream_blob(stream, blob_table);
 }
 
 /* Return the SHA-1 message digest of the unnamed data stream of the inode, or a
@@ -461,26 +461,26 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 {
-	const struct wim_inode_attribute *attr;
+	const struct wim_inode_stream *stream;
 
-	attr = inode_get_unnamed_data_attribute(inode);
-	if (!attr)
+	stream = inode_get_unnamed_data_stream(inode);
+	if (!stream)
 		return zero_hash;
 
-	return attribute_hash(attr);
+	return stream_hash(stream);
 }
 
 /* Acquire another reference to each blob referenced by this inode.  This is
  * necessary when creating a hard link to this inode.
  *
- * All attributes of the inode must be resolved.  */
+ * All streams of the inode must be resolved.  */
 void
-inode_ref_attributes(struct wim_inode *inode)
+inode_ref_streams(struct wim_inode *inode)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		struct blob_descriptor *blob;
 
-		blob = attribute_blob_resolved(&inode->i_attrs[i]);
+		blob = stream_blob_resolved(&inode->i_streams[i]);
 		if (blob)
 			blob->refcnt++;
 	}
@@ -489,25 +489,25 @@ inode_ref_attributes(struct wim_inode *inode)
 /* Drop a reference to each blob referenced by this inode.  This is necessary
  * when deleting a hard link to this inode.  */
 void
-inode_unref_attributes(struct wim_inode *inode, struct blob_table *blob_table)
+inode_unref_streams(struct wim_inode *inode, struct blob_table *blob_table)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		struct blob_descriptor *blob;
 
-		blob = attribute_blob(&inode->i_attrs[i], blob_table);
+		blob = stream_blob(&inode->i_streams[i], blob_table);
 		if (blob)
 			blob_decrement_refcnt(blob, blob_table);
 	}
 }
 
 /*
- * Given a blob descriptor, return the pointer contained in the attribute that
+ * Given a blob descriptor, return the pointer contained in the stream that
  * references it.
  *
  * This is only possible for "unhashed" blobs, which are guaranteed to have only
- * one referencing attribute, and that reference is guaranteed to be in a
- * resolved attribute.  (It can't be in an unresolved attribute, since that
- * would imply the hash is known!)
+ * one referencing stream, and that reference is guaranteed to be in a resolved
+ * stream.  (It can't be in an unresolved stream, since that would imply the
+ * hash is known!)
  */
 struct blob_descriptor **
 retrieve_blob_pointer(struct blob_descriptor *blob)
@@ -515,9 +515,9 @@ retrieve_blob_pointer(struct blob_descriptor *blob)
 	wimlib_assert(blob->unhashed);
 
 	struct wim_inode *inode = blob->back_inode;
-	for (unsigned i = 0; i < inode->i_num_attrs; i++)
-		if (inode->i_attrs[i].attr_id == blob->back_attr_id)
-			return &inode->i_attrs[i]._attr_blob;
+	for (unsigned i = 0; i < inode->i_num_streams; i++)
+		if (inode->i_streams[i].stream_id == blob->back_stream_id)
+			return &inode->i_streams[i]._stream_blob;
 
 	wimlib_assert(0);
 	return NULL;

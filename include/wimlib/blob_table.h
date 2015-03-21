@@ -59,7 +59,7 @@ enum blob_location {
  * targets.  */
 struct blob_extraction_target {
 	struct wim_inode *inode;
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 };
 
 /*
@@ -118,7 +118,7 @@ struct blob_descriptor {
 		 * blobs after they have been hashed.  */
 		struct {
 			struct wim_inode *back_inode;
-			u32 back_attr_id;
+			u32 back_stream_id;
 		};
 	};
 
@@ -395,14 +395,14 @@ retrieve_blob_pointer(struct blob_descriptor *blob);
 static inline void
 prepare_unhashed_blob(struct blob_descriptor *blob,
 		      struct wim_inode *back_inode,
-		      u32 attr_id,
+		      u32 stream_id,
 		      struct list_head *unhashed_blobs)
 {
 	if (!blob)
 		return;
 	blob->unhashed = 1;
 	blob->back_inode = back_inode;
-	blob->back_attr_id = attr_id;
+	blob->back_stream_id = stream_id;
 	list_add_tail(&blob->unhashed_list, unhashed_blobs);
 }
 

@@ -153,16 +153,16 @@ out:
 }
 
 static int
-ntfs_3g_attr_type_to_wimlib_attr_type(ATTR_TYPES type)
+ntfs_3g_attr_type_to_wimlib_stream_type(ATTR_TYPES type)
 {
 	switch (type) {
 	case AT_DATA:
-		return ATTR_DATA;
+		return STREAM_TYPE_DATA;
 	case AT_REPARSE_POINT:
-		return ATTR_REPARSE_POINT;
+		return STREAM_TYPE_REPARSE_POINT;
 	default:
 		wimlib_assert(0);
-		return -1;
+		return STREAM_TYPE_UNKNOWN;
 	}
 }
 
@@ -197,8 +197,8 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 	{
 		u64 data_size = ntfs_get_attribute_value_length(actx->attr);
 		size_t name_nchars = actx->attr->name_length;
-		struct wim_inode_attribute *attr;
-		const utf16lechar *wimlib_attr_name = NO_NAME;
+		struct wim_inode_stream *stream;
+		const utf16lechar *stream_name = NO_NAME;
 
 		if (data_size == 0) {
 			/* Empty attribute.  No blob is needed. */
@@ -226,7 +226,7 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 					goto out_free_ntfs_loc;
 				}
 				ntfs_loc->attr_name_nchars = name_nchars;
-				wimlib_attr_name = ntfs_loc->attr_name;
+				stream_name = ntfs_loc->attr_name;
 			}
 
 			blob = new_blob_descriptor();
@@ -254,16 +254,16 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 			}
 		}
 
-		attr = inode_add_attribute_utf16le_with_blob(
+		stream = inode_add_stream_utf16le_with_blob(
 				     inode,
-				     ntfs_3g_attr_type_to_wimlib_attr_type(type),
-				     wimlib_attr_name,
+				     ntfs_3g_attr_type_to_wimlib_stream_type(type),
+				     stream_name,
 				     blob);
-		if (!attr) {
+		if (!stream) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_free_blob;
 		}
-		prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
+		prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
 	}
 	if (errno == ENOENT) {
 		ret = 0;
@@ -562,10 +562,10 @@ build_dentry_tree_ntfs_recursive(struct wim_dentry **root_ret,
 	inode->i_creation_time    = le64_to_cpu(ni->creation_time);
 	inode->i_last_write_time  = le64_to_cpu(ni->last_data_change_time);
 	inode->i_last_access_time = le64_to_cpu(ni->last_access_time);
-	inode->i_file_flags       = attributes;
+	inode->i_attributes       = attributes;
 
-	if (attributes & FILE_ATTR_REPARSE_POINT) {
-		/* Capture reparse point attribute  */
+	if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+		/* Capture reparse point stream  */
 		ret = capture_ntfs_attrs_with_type(inode, ni, path, path_len,
 						   params->unhashed_blobs,
 						   vol, AT_REPARSE_POINT);

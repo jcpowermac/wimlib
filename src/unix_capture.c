@@ -104,9 +104,9 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		       struct list_head *unhashed_blobs)
 {
 	struct blob_descriptor *blob = NULL;
-	struct wim_inode_attribute *attr;
+	struct wim_inode_stream *stream;
 
-	inode->i_file_flags = FILE_ATTRIBUTE_NORMAL;
+	inode->i_attributes = FILE_ATTRIBUTE_NORMAL;
 
 	if (size) {
 		char *file_on_disk = STRDUP(path);
@@ -123,13 +123,13 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		blob->size = size;
 	}
 
-	attr = inode_add_attribute_utf16le_with_blob(inode, ATTR_DATA,
+	stream = inode_add_stream_utf16le_with_blob(inode, STREAM_TYPE_DATA,
 						     NO_NAME, blob);
-	if (!attr) {
+	if (!stream) {
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
-	prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, stream->stream_id, unhashed_blobs);
 	return 0;
 }
 
@@ -156,7 +156,7 @@ unix_scan_directory(struct wim_dentry *dir_dentry,
 		return WIMLIB_ERR_OPENDIR;
 	}
 
-	dir_dentry->d_inode->i_file_flags = FILE_ATTRIBUTE_DIRECTORY;
+	dir_dentry->d_inode->i_attributes = FILE_ATTRIBUTE_DIRECTORY;
 	dir = my_fdopendir(&dirfd);
 	if (!dir) {
 		ERROR_WITH_ERRNO("\"%s\": Can't open directory", full_path);
@@ -262,7 +262,7 @@ unix_scan_symlink(const char *full_path, int dirfd, const char *relpath,
 	char *dest;
 	int ret;
 
-	inode->i_file_flags = FILE_ATTRIBUTE_REPARSE_POINT;
+	inode->i_attributes = FILE_ATTRIBUTE_REPARSE_POINT;
 	inode->i_reparse_tag = WIM_IO_REPARSE_TAG_SYMLINK;
 
 	/* The idea here is to call readlink() to get the UNIX target of the
@@ -322,7 +322,7 @@ unix_scan_symlink(const char *full_path, int dirfd, const char *relpath,
 	struct stat stbuf;
 	if (my_fstatat(full_path, dirfd, relpath, &stbuf, 0) == 0 &&
 	    S_ISDIR(stbuf.st_mode))
-		inode->i_file_flags |= FILE_ATTRIBUTE_DIRECTORY;
+		inode->i_attributes |= FILE_ATTRIBUTE_DIRECTORY;
 	return 0;
 }
 

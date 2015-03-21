@@ -50,21 +50,21 @@ inode_metadata_consistent(const struct wim_inode *inode,
 	if (inode->i_last_access_time < template_inode->i_last_access_time)
 		return false;
 
-	/* Must have same number of attributes.  */
-	if (inode->i_num_attrs != template_inode->i_num_attrs)
+	/* Must have same number of streams.  */
+	if (inode->i_num_streams != template_inode->i_num_streams)
 		return false;
 
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		const struct blob_descriptor *blob, *template_blob;
 
-		/* If the attributes for the inode are for some reason not
+		/* If the streams for the inode are for some reason not
 		 * resolved, then the hashes are already available and the point
 		 * of this function is defeated.  */
-		if (!inode->i_attrs[i].attr_resolved)
+		if (!inode->i_streams[i].stream_resolved)
 			return false;
 
-		blob = attribute_blob_resolved(&inode->i_attrs[i]);
-		template_blob = attribute_blob(&template_inode->i_attrs[i],
+		blob = stream_blob_resolved(&inode->i_streams[i]);
+		template_blob = stream_blob(&template_inode->i_streams[i],
 					       template_blob_table);
 
 		/* Compare blob sizes.  */
@@ -95,7 +95,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
  * inode @template_inode in either the same WIM or another WIM, retrieve some
  * useful information (e.g. checksums) from @template_inode.
  *
- * This assumes that the attributes for @inode have been resolved (to point
+ * This assumes that the streams for @inode have been resolved (to point
  * directly to the appropriate `struct blob_descriptor's)  but do not
  * necessarily have checksum information filled in.
  */
@@ -105,12 +105,12 @@ inode_copy_checksums(struct wim_inode *inode,
 		     WIMStruct *wim,
 		     WIMStruct *template_wim)
 {
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		struct blob_descriptor *blob, *template_blob;
 		struct blob_descriptor *replace_blob;
 
-		blob = attribute_blob_resolved(&inode->i_attrs[i]);
-		template_blob = attribute_blob(&template_inode->i_attrs[i],
+		blob = stream_blob_resolved(&inode->i_streams[i]);
+		template_blob = stream_blob(&template_inode->i_streams[i],
 					       template_wim->blob_table);
 
 		/* Only take action if both entries exist, the entry for @inode
@@ -146,7 +146,7 @@ inode_copy_checksums(struct wim_inode *inode,
 			replace_blob = blob;
 		}
 
-		attribute_set_blob(&inode->i_attrs[i], replace_blob);
+		stream_set_blob(&inode->i_streams[i], replace_blob);
 		replace_blob->refcnt += inode->i_nlink;
 	}
 	return 0;

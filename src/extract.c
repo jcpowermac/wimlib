@@ -143,15 +143,15 @@ dentry_is_supported(struct wim_dentry *dentry,
 {
 	struct wim_inode *inode = dentry->d_inode;
 
-	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
 		if (!(supported_features->reparse_points ||
 		      (inode_is_symlink(inode) &&
 		       supported_features->symlink_reparse_points)))
 			return false;
 	}
 
-	if (inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED) {
-		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY) {
+	if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) {
+		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) {
 			if (!supported_features->encrypted_directories)
 				return false;
 		} else {
@@ -579,7 +579,7 @@ extract_dentry_to_stdout(struct wim_dentry *dentry,
 	struct blob_descriptor *blob;
 	struct filedes _stdout;
 
-	if (inode->i_file_flags & (FILE_ATTRIBUTE_REPARSE_POINT |
+	if (inode->i_attributes & (FILE_ATTRIBUTE_REPARSE_POINT |
 				   FILE_ATTRIBUTE_DIRECTORY))
 	{
 		ERROR("\"%"TS"\" is not a regular file and therefore cannot be "
@@ -964,7 +964,7 @@ dentry_list_calculate_extraction_names(struct list_head *dentry_list,
 }
 
 static int
-dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
+dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
 			  struct blob_table *blob_table)
 {
 	struct wim_inode *inode = dentry->d_inode;
@@ -973,18 +973,18 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 	bool force = false;
 
 	/* Special case:  when extracting from a pipe, the WIM blob table is
-	 * initially empty, so "resolving" an inode's attributes is initially
-	 * not possible.  However, we still need to keep track of which blobs,
+	 * initially empty, so "resolving" an inode's streams is initially not
+	 * possible.  However, we still need to keep track of which blobs,
 	 * identified by SHA-1 message digests, need to be extracted, so we
-	 * "resolve" the inode's attributes anyway by allocating a 'struct blob_descriptor'
-	 * for each one.  */
+	 * "resolve" the inode's streams anyway by allocating a 'struct
+	 * blob_descriptor' for each one.  */
 	if (extract_flags & WIMLIB_EXTRACT_FLAG_FROM_PIPE)
 		force = true;
-	ret = inode_resolve_attributes(inode, blob_table, force);
+	ret = inode_resolve_streams(inode, blob_table, force);
 	if (ret)
 		return ret;
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		blob = attribute_blob_resolved(&inode->i_attrs[i]);
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		blob = stream_blob_resolved(&inode->i_streams[i]);
 		if (blob)
 			blob->out_refcnt = 0;
 	}
@@ -992,22 +992,22 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 }
 
 /*
- * For each dentry to be extracted, resolve all attributes in the corresponding
+ * For each dentry to be extracted, resolve all streams in the corresponding
  * inode and set 'out_refcnt' in all referenced 'struct blob_descriptor' to 0.
  *
  * Possible error codes: WIMLIB_ERR_RESOURCE_NOT_FOUND, WIMLIB_ERR_NOMEM.
  */
 static int
-dentry_list_resolve_attributes(struct list_head *dentry_list,
-			       struct apply_ctx *ctx)
+dentry_list_resolve_streams(struct list_head *dentry_list,
+			    struct apply_ctx *ctx)
 {
 	struct wim_dentry *dentry;
 	int ret;
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
-		ret = dentry_resolve_attributes(dentry,
-						ctx->extract_flags,
-						ctx->wim->blob_table);
+		ret = dentry_resolve_streams(dentry,
+					     ctx->extract_flags,
+					     ctx->wim->blob_table);
 		if (ret)
 			return ret;
 	}
@@ -1015,17 +1015,17 @@ dentry_list_resolve_attributes(struct list_head *dentry_list,
 }
 
 static int
-ref_attribute(struct wim_inode_attribute *attr,
-	      struct wim_dentry *dentry, struct apply_ctx *ctx)
+ref_stream(struct wim_inode_stream *stream,
+	   struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct blob_descriptor *blob = attribute_blob_resolved(attr);
+	struct blob_descriptor *blob = stream_blob_resolved(stream);
 	struct blob_extraction_target *targets;
 
 	if (!blob)
 		return 0;
 
-	/* Tally the size only for each actual extraction of the attribute (not
+	/* Tally the size only for each actual extraction of the stream (not
 	 * additional hard links to the inode).  */
 	if (inode->i_visited && ctx->supported_features.hard_links)
 		 return 0;
@@ -1043,7 +1043,7 @@ ref_attribute(struct wim_inode_attribute *attr,
 		ctx->num_blobs_remaining++;
 	}
 
-	/* Set this attribute as an extraction target of 'blob'.  */
+	/* Set this stream as an extraction target of 'blob'.  */
 
 	if (blob->out_refcnt < ARRAY_LEN(blob->inline_blob_extraction_targets)) {
 		targets = blob->inline_blob_extraction_targets;
@@ -1077,19 +1077,19 @@ ref_attribute(struct wim_inode_attribute *attr,
 		targets = blob->blob_extraction_targets;
 	}
 	targets[blob->out_refcnt].inode = inode;
-	targets[blob->out_refcnt].attr = attr;
+	targets[blob->out_refcnt].stream = stream;
 	blob->out_refcnt++;
 	return 0;
 }
 
 static int
-dentry_ref_data_attribute(struct wim_inode_attribute *attr,
-			  struct wim_dentry *dentry, struct apply_ctx *ctx)
+dentry_ref_data_stream(struct wim_inode_stream *stream,
+		       struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
-	if (unlikely(attribute_is_named(attr))) {
+	if (unlikely(stream_is_named(stream))) {
 		/* Named data stream  */
 		if (ctx->supported_features.named_data_streams)
-			return ref_attribute(attr, dentry, ctx);
+			return ref_stream(stream, dentry, ctx);
 	} else {
 		/* Unnamed data stream  */
 		if (ctx->apply_ops->will_externally_back) {
@@ -1102,26 +1102,26 @@ dentry_ref_data_attribute(struct wim_inode_attribute *attr,
 			}
 			/* Won't externally back */
 		}
-		return ref_attribute(attr, dentry, ctx);
+		return ref_stream(stream, dentry, ctx);
 	}
 	return 0;
 }
 
 static int
-dentry_ref_attributes(struct wim_dentry *dentry, struct apply_ctx *ctx)
+dentry_ref_streams(struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	int ret;
 
-	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		struct wim_inode_attribute *attr = &inode->i_attrs[i];
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		struct wim_inode_stream *stream = &inode->i_streams[i];
 		ret = 0;
-		switch (attr->attr_type) {
-		case ATTR_DATA:
-			ret = dentry_ref_data_attribute(attr, dentry, ctx);
+		switch (stream->stream_type) {
+		case STREAM_TYPE_DATA:
+			ret = dentry_ref_data_stream(stream, dentry, ctx);
 			break;
-		case ATTR_REPARSE_POINT:
-			ret = ref_attribute(attr, dentry, ctx);
+		case STREAM_TYPE_REPARSE_POINT:
+			ret = ref_stream(stream, dentry, ctx);
 			break;
 		default:
 			break;
@@ -1136,8 +1136,8 @@ dentry_ref_attributes(struct wim_dentry *dentry, struct apply_ctx *ctx)
 
 /*
  * Given a list of dentries to be extracted, build the list of blobs that need
- * to be extracted, and for each blob determine the attributes to which that
- * blob will be extracted.
+ * to be extracted, and for each blob determine the streams to which that blob
+ * will be extracted.
  *
  * This also initializes the extract progress info with byte and blob
  * information.
@@ -1147,13 +1147,13 @@ dentry_ref_attributes(struct wim_dentry *dentry, struct apply_ctx *ctx)
  * Possible error codes: WIMLIB_ERR_NOMEM.
  */
 static int
-dentry_list_ref_attributes(struct list_head *dentry_list, struct apply_ctx *ctx)
+dentry_list_ref_streams(struct list_head *dentry_list, struct apply_ctx *ctx)
 {
 	struct wim_dentry *dentry;
 	int ret;
 
 	list_for_each_entry(dentry, dentry_list, d_extraction_list_node) {
-		ret = dentry_ref_attributes(dentry, ctx);
+		ret = dentry_ref_streams(dentry, ctx);
 		if (ret)
 			return ret;
 	}
@@ -1184,27 +1184,27 @@ static void
 inode_tally_features(const struct wim_inode *inode,
 		     struct wim_features *features)
 {
-	if (inode->i_file_flags & FILE_ATTRIBUTE_ARCHIVE)
+	if (inode->i_attributes & FILE_ATTRIBUTE_ARCHIVE)
 		features->archive_files++;
-	if (inode->i_file_flags & FILE_ATTRIBUTE_HIDDEN)
+	if (inode->i_attributes & FILE_ATTRIBUTE_HIDDEN)
 		features->hidden_files++;
-	if (inode->i_file_flags & FILE_ATTRIBUTE_SYSTEM)
+	if (inode->i_attributes & FILE_ATTRIBUTE_SYSTEM)
 		features->system_files++;
-	if (inode->i_file_flags & FILE_ATTRIBUTE_COMPRESSED)
+	if (inode->i_attributes & FILE_ATTRIBUTE_COMPRESSED)
 		features->compressed_files++;
-	if (inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED) {
-		if (inode->i_file_flags & FILE_ATTRIBUTE_DIRECTORY)
+	if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) {
+		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)
 			features->encrypted_directories++;
 		else
 			features->encrypted_files++;
 	}
-	if (inode->i_file_flags & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
+	if (inode->i_attributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
 		features->not_context_indexed_files++;
-	if (inode->i_file_flags & FILE_ATTRIBUTE_SPARSE_FILE)
+	if (inode->i_attributes & FILE_ATTRIBUTE_SPARSE_FILE)
 		features->sparse_files++;
 	if (inode_has_named_data_stream(inode))
 		features->named_data_streams++;
-	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
+	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
 		features->reparse_points++;
 		if (inode_is_symlink(inode))
 			features->symlink_reparse_points++;
@@ -1476,13 +1476,13 @@ extract_trees(WIMStruct *wim, struct wim_dentry **trees, size_t num_trees,
 		goto out_cleanup;
 	}
 
-	ret = dentry_list_resolve_attributes(&dentry_list, ctx);
+	ret = dentry_list_resolve_streams(&dentry_list, ctx);
 	if (ret)
 		goto out_cleanup;
 
 	dentry_list_build_inode_alias_lists(&dentry_list);
 
-	ret = dentry_list_ref_attributes(&dentry_list, ctx);
+	ret = dentry_list_ref_streams(&dentry_list, ctx);
 	if (ret)
 		goto out_cleanup;
 

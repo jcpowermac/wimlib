@@ -14,46 +14,46 @@ struct wim_security_data;
 struct wimfs_fd;
 
 enum {
-	/* Data attribute, may be unnamed (usual case) or named  */
-	ATTR_DATA,
+	/* Data stream, may be unnamed (usual case) or named  */
+	STREAM_TYPE_DATA,
 
-	/* Reparse point attribute, always unnamed.  */
-	ATTR_REPARSE_POINT,
+	/* Reparse point stream, always unnamed.  */
+	STREAM_TYPE_REPARSE_POINT,
 
-	/* Attribute type could not be determined.  */
-	ATTR_UNKNOWN,
+	/* Stream type could not be determined.  */
+	STREAM_TYPE_UNKNOWN,
 };
 
 extern const utf16lechar NO_NAME[1];
 
 /*
- * 'struct wim_inode_attribute' represents an NTFS-style attribute, which is a
- * blob of data associated with an inode.  Each attribute has a type and
- * optionally a name.
+ * 'struct wim_inode_stream' represents an NTFS-style stream, which is a blob of
+ * data associated with an inode.  Each stream has a type and optionally a name.
  */
-struct wim_inode_attribute {
-	/* The name of the attribute, or NO_NAME if the attribute is unnamed.
+struct wim_inode_stream {
+	/* The name of the stream, or NO_NAME if the stream is unnamed.
 	 */
-	utf16lechar *attr_name;
+	utf16lechar *stream_name;
 
-	/* If attr_resolved = 0, the SHA-1 message digest of the uncompressed
-	 * data of this attribute, or all zeroes if this attribute is empty;
-	 * If attr_resolved = 1, a pointer directly to the blob descriptor for
-	 * this blob, or NULL if this attribute is empty.  */
+	/* If stream_resolved = 0, the SHA-1 message digest of the uncompressed
+	 * data of this stream, or all zeroes if this stream is empty; If
+	 * stream_resolved = 1, a pointer directly to the blob descriptor for
+	 * this blob, or NULL if this stream is empty.  */
 	union {
-		u8 _attr_hash[SHA1_HASH_SIZE];
-		struct blob_descriptor *_attr_blob;
+		u8 _stream_hash[SHA1_HASH_SIZE];
+		struct blob_descriptor *_stream_blob;
 	};
-	/* attr_resolved determines whether attr_hash or attr_blob is valid as
-	 * described above.  */
-	u32 attr_resolved : 1;
+	/* stream_resolved determines whether stream_hash or stream_blob is
+	 * valid as described above.  */
+	u32 stream_resolved : 1;
 
-	/* TODO: a unique identifier for this attribute within the context of
-	 * its inode   */
-	u32 attr_id : 27;
+	/* A unique identifier for this stream within the context of its inode
+	 * TODOesn
+	 * */
+	u32 stream_id : 27;
 
-	/* The type of this attribute as one of the ATTR_* values  */
-	u32 attr_type : 4;
+	/* The type of this stream as one of the STREAM_TYPE_* values  */
+	u32 stream_type : 4;
 };
 
 /*
@@ -67,18 +67,16 @@ struct wim_inode_attribute {
 struct wim_inode {
 
 	/*
-	 * The NTFS-style collection of attributes for this inode.  If
-	 * i_num_attrs == 1, then i_attrs points to i_embedded_attr.  Otherwise,
-	 * i_attrs points to an allocated array.
+	 * The NTFS-style collection of streams for this inode.  If
+	 * i_num_streams == 1, then i_streams points to i_embedded_streams.
+	 * Otherwise, i_streams points to an allocated array.
 	 */
-	struct wim_inode_attribute *i_attrs;
-#define INODE_NUM_EMBEDDED_ATTRS 1
-	struct wim_inode_attribute i_embedded_attrs[INODE_NUM_EMBEDDED_ATTRS];
-	u32 i_num_attrs;
+	struct wim_inode_stream *i_streams;
+	struct wim_inode_stream i_embedded_streams[1];
+	u32 i_num_streams;
 
-	/* Windows file attribute flags (FILE_ATTRIBUTE_*).  Not to be confused
-	 * with i_attrs, which are the NTFS-style attributes.  */
-	u32 i_file_flags;
+	/* Windows file attribute flags (FILE_ATTRIBUTE_*).  */
+	u32 i_attributes;
 
 	/* Root of a balanced binary search tree storing the child directory
 	 * entries of this inode, if any.  Keyed by wim_dentry->file_name, case
@@ -195,9 +193,9 @@ struct wim_inode {
 
 		/* Used during WIM writing with
 		 * WIMLIB_WRITE_FLAG_SEND_DONE_WITH_FILE_MESSAGES:  the number
-		 * of attributes this inode has that have not yet been fully
-		 * read.  */
-		u32 num_remaining_attrs;
+		 * of streams this inode has that have not yet been fully read.
+		 * */
+		u32 num_remaining_streams;
 
 #ifdef WITH_FUSE
 		struct {
@@ -219,8 +217,8 @@ struct wim_inode {
 	u16 i_num_allocated_fds;
 #endif
 
-	/* Next attribute ID to be assigned  */
-	u32 i_next_attr_id;
+	/* Next stream ID to be assigned  */
+	u32 i_next_stream_id;
 };
 
 /*
@@ -292,7 +290,7 @@ inode_dec_num_opened_fds(struct wim_inode *inode);
 static inline bool
 inode_is_directory(const struct wim_inode *inode)
 {
-	return (inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
+	return (inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 				       FILE_ATTRIBUTE_REPARSE_POINT))
 			== FILE_ATTRIBUTE_DIRECTORY;
 }
@@ -303,7 +301,7 @@ inode_is_directory(const struct wim_inode *inode)
 static inline bool
 inode_is_encrypted_directory(const struct wim_inode *inode)
 {
-	return ((inode->i_file_flags & (FILE_ATTRIBUTE_DIRECTORY |
+	return ((inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
 					FILE_ATTRIBUTE_ENCRYPTED))
 		== (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_ENCRYPTED));
 }
@@ -314,7 +312,7 @@ inode_is_encrypted_directory(const struct wim_inode *inode)
 static inline bool
 inode_is_symlink(const struct wim_inode *inode)
 {
-	return (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT)
+	return (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
 		&& (inode->i_reparse_tag == WIM_IO_REPARSE_TAG_SYMLINK ||
 		    inode->i_reparse_tag == WIM_IO_REPARSE_TAG_MOUNT_POINT);
 }
@@ -329,87 +327,87 @@ inode_has_children(const struct wim_inode *inode)
 	return inode->i_children != NULL;
 }
 
-extern struct wim_inode_attribute *
-inode_get_attribute_utf16le(const struct wim_inode *inode, int attr_type,
-			    const utf16lechar *attr_name);
+extern struct wim_inode_stream *
+inode_get_stream_utf16le(const struct wim_inode *inode, int stream_type,
+			    const utf16lechar *stream_name);
 
-extern struct wim_inode_attribute *
-inode_get_attribute(const struct wim_inode *inode, int attr_type,
-		    const tchar *attr_name);
+extern struct wim_inode_stream *
+inode_get_stream(const struct wim_inode *inode, int stream_type,
+		    const tchar *stream_name);
 
-extern struct wim_inode_attribute *
-inode_get_unnamed_data_attribute(const struct wim_inode *inode);
+extern struct wim_inode_stream *
+inode_get_unnamed_data_stream(const struct wim_inode *inode);
 
-extern struct wim_inode_attribute *
-inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
-			    const utf16lechar *attr_name);
+extern struct wim_inode_stream *
+inode_add_stream_utf16le(struct wim_inode *inode, int stream_type,
+			    const utf16lechar *stream_name);
 
-extern struct wim_inode_attribute *
-inode_add_attribute(struct wim_inode *inode, int attr_type,
-		    const tchar *attr_name);
+extern struct wim_inode_stream *
+inode_add_stream(struct wim_inode *inode, int stream_type,
+		    const tchar *stream_name);
 
 extern void
-inode_remove_attribute(struct wim_inode *inode, struct wim_inode_attribute *attr,
+inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *stream,
 		       struct blob_table *blob_table);
 
-extern struct wim_inode_attribute *
-inode_add_attribute_utf16le_with_blob(struct wim_inode *inode,
-				      int attr_type,
-				      const utf16lechar *attr_name,
+extern struct wim_inode_stream *
+inode_add_stream_utf16le_with_blob(struct wim_inode *inode,
+				      int stream_type,
+				      const utf16lechar *stream_name,
 				      struct blob_descriptor *blob);
 
-extern struct wim_inode_attribute *
-inode_add_attribute_with_blob(struct wim_inode *inode,
-			      int attr_type, const tchar *attr_name,
+extern struct wim_inode_stream *
+inode_add_stream_with_blob(struct wim_inode *inode,
+			      int stream_type, const tchar *stream_name,
 			      struct blob_descriptor *blob);
 
-extern struct wim_inode_attribute *
-inode_add_attribute_with_data(struct wim_inode *inode, int attr_type,
-			      const tchar *attr_name,
+extern struct wim_inode_stream *
+inode_add_stream_with_data(struct wim_inode *inode, int stream_type,
+			      const tchar *stream_name,
 			      const void *data, size_t size,
 			      struct blob_table *blob_table);
 
 static inline struct blob_descriptor *
-attribute_blob_resolved(const struct wim_inode_attribute *attr)
+stream_blob_resolved(const struct wim_inode_stream *stream)
 {
-	wimlib_assert(attr->attr_resolved);
-	return attr->_attr_blob;
+	wimlib_assert(stream->stream_resolved);
+	return stream->_stream_blob;
 }
 
 static inline void
-attribute_set_blob(struct wim_inode_attribute *attr, struct blob_descriptor *blob)
+stream_set_blob(struct wim_inode_stream *stream, struct blob_descriptor *blob)
 {
-	attr->_attr_blob = blob;
-	attr->attr_resolved = 1;
+	stream->_stream_blob = blob;
+	stream->stream_resolved = 1;
 }
 
 static inline bool
-attribute_is_named(const struct wim_inode_attribute *attr)
+stream_is_named(const struct wim_inode_stream *stream)
 {
-	return attr->attr_name != NO_NAME;
+	return stream->stream_name != NO_NAME;
 }
 
 static inline bool
-attribute_is_named_data_stream(const struct wim_inode_attribute *attr)
+stream_is_named_data_stream(const struct wim_inode_stream *stream)
 {
-	return attr->attr_type == ATTR_DATA && attribute_is_named(attr);
+	return stream->stream_type == STREAM_TYPE_DATA && stream_is_named(stream);
 }
 
 extern bool
 inode_has_named_data_stream(const struct wim_inode *inode);
 
 extern int
-inode_resolve_attributes(struct wim_inode *inode,
-			 struct blob_table *table, bool force);
+inode_resolve_streams(struct wim_inode *inode,
+		      struct blob_table *table, bool force);
 
 extern void
-inode_unresolve_attributes(struct wim_inode *inode);
+inode_unresolve_streams(struct wim_inode *inode);
 
 extern int
 blob_not_found_error(const struct wim_inode *inode, const u8 *hash);
 
 extern struct blob_descriptor *
-attribute_blob(const struct wim_inode_attribute *attr,
+stream_blob(const struct wim_inode_stream *stream,
 	       const struct blob_table *table);
 
 extern struct blob_descriptor *
@@ -417,16 +415,16 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 				       const struct blob_table *blob_table);
 
 extern const u8 *
-attribute_hash(const struct wim_inode_attribute *attr);
+stream_hash(const struct wim_inode_stream *stream);
 
 extern const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode);
 
 extern void
-inode_ref_attributes(struct wim_inode *inode);
+inode_ref_streams(struct wim_inode *inode);
 
 extern void
-inode_unref_attributes(struct wim_inode *inode,
+inode_unref_streams(struct wim_inode *inode,
 		       struct blob_table *blob_table);
 
 /* inode_fixup.c  */
