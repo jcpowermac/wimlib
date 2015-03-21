@@ -73,9 +73,10 @@ do_capture_progress(struct capture_params *params, int status,
 
 		/* Tally size of all attributes.  */
 		for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-			if (inode->i_attrs[i].attr_blob)
-				params->progress.scan.num_bytes_scanned +=
-					inode->i_attrs[i].attr_blob->size;
+			const struct blob_descriptor *blob =
+				attribute_blob_resolved(&inode->i_attrs[i]);
+			if (blob)
+				params->progress.scan.num_bytes_scanned += blob->size;
 		}
 
 		/* Tally the file itself.  */

@@ -179,11 +179,13 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 
 		attr = inode_get_attribute_utf16le(inode, ATTR_REPARSE_POINT,
 						   NO_NAME);
-		if (!attr || !attr->attr_blob) {
+		blob = NULL;
+		if (attr)
+			blob = attribute_blob_resolved(attr);
+		if (!blob) {
 			ERROR("Reparse point has no reparse data!");
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
 		}
-		blob = attr->attr_blob;
 	} else {
 		blob = blob_override;
 	}

@@ -984,7 +984,7 @@ dentry_resolve_attributes(struct wim_dentry *dentry, int extract_flags,
 	if (ret)
 		return ret;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		blob = inode->i_attrs[i].attr_blob;
+		blob = attribute_blob_resolved(&inode->i_attrs[i]);
 		if (blob)
 			blob->out_refcnt = 0;
 	}
@@ -1019,7 +1019,7 @@ ref_attribute(struct wim_inode_attribute *attr,
 	      struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	struct blob_descriptor *blob = attr->attr_blob;
+	struct blob_descriptor *blob = attribute_blob_resolved(attr);
 	struct blob_extraction_target *targets;
 
 	if (!blob)

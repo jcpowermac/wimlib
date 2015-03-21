@@ -328,8 +328,8 @@ ntfs_3g_create_any_empty_ads(ntfs_inode *ni, const struct wim_inode *inode,
 
 		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
 
-		if (attr->attr_type != ATTR_DATA || !*attr->attr_name ||
-		    attr->attr_blob)
+		if (!attribute_is_named_data_stream(attr) ||
+		    attribute_blob_resolved(attr))
 			continue;
 
 		if (ntfs_attr_add(ni, AT_DATA, attr->attr_name,

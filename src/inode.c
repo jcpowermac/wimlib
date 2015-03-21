@@ -221,7 +221,7 @@ inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
 
 	new_attr->attr_type = attr_type;
 	if (attr_name == NO_NAME) {
-		new_attr->attr_name = NO_NAME;
+		new_attr->attr_name = (utf16lechar *)NO_NAME;
 	} else {
 		new_attr->attr_name = utf16le_dup(attr_name);
 		if (!new_attr->attr_name)
@@ -281,17 +281,18 @@ inode_add_attribute_with_data(struct wim_inode *inode,
 			      struct blob_table *blob_table)
 {
 	struct wim_inode_attribute *new_attr;
+	struct blob_descriptor *blob;
 
 	new_attr = inode_add_attribute(inode, attr_type, attr_name);
 	if (unlikely(!new_attr))
 		return NULL;
 
-	new_attr->attr_blob = new_blob_from_data_buffer(data, size, blob_table);
-	if (unlikely(!new_attr->attr_blob)) {
+	blob = new_blob_from_data_buffer(data, size, blob_table);
+	if (unlikely(!blob)) {
 		inode_remove_attribute(inode, new_attr, NULL);
 		return NULL;
 	}
-	new_attr->attr_resolved = 1;
+	attribute_set_blob(new_attr, blob);
 	return new_attr;
 }
 
@@ -336,7 +337,7 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 		if (inode->i_attrs[i].attr_resolved)
 			continue;
 
-		const u8 *hash = inode->i_attrs[i].attr_hash;
+		const u8 *hash = attribute_hash(&inode->i_attrs[i]);
 		struct blob_descriptor *blob = NULL;
 
 		if (!is_zero_hash(hash)) {
@@ -357,8 +358,7 @@ inode_resolve_attributes(struct wim_inode *inode, struct blob_table *table,
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
 		if (inode->i_attrs[i].attr_resolved)
 			continue;
-		inode->i_attrs[i].attr_blob = blobs[i];
-		inode->i_attrs[i].attr_resolved = 1;
+		attribute_set_blob(&inode->i_attrs[i], blobs[i]);
 	}
 	return 0;
 }
@@ -374,11 +374,8 @@ inode_unresolve_attributes(struct wim_inode *inode)
 		if (!inode->i_attrs[i].attr_resolved)
 			continue;
 
-		if (inode->i_attrs[i].attr_blob)
-			copy_hash(inode->i_attrs[i].attr_hash,
-				  inode->i_attrs[i].attr_blob->hash);
-		else
-			zero_out_hash(inode->i_attrs[i].attr_hash);
+		copy_hash(inode->i_attrs[i]._attr_hash,
+			  attribute_hash(&inode->i_attrs[i]));
 		inode->i_attrs[i].attr_resolved = 0;
 	}
 }
@@ -403,9 +400,9 @@ struct blob_descriptor *
 attribute_blob(const struct wim_inode_attribute *attr, const struct blob_table *table)
 {
 	if (attr->attr_resolved)
-		return attr->attr_blob;
+		return attr->_attr_blob;
 	else
-		return lookup_blob(table, attr->attr_hash);
+		return lookup_blob(table, attr->_attr_hash);
 }
 
 /* Return the SHA-1 message digest of the data of the specified attribute, or a
@@ -414,9 +411,9 @@ const u8 *
 attribute_hash(const struct wim_inode_attribute *attr)
 {
 	if (attr->attr_resolved)
-		return attr->attr_blob ? attr->attr_blob->hash : zero_hash;
+		return attr->_attr_blob ? attr->_attr_blob->hash : zero_hash;
 	else
-		return attr->attr_hash;
+		return attr->_attr_hash;
 }
 
 /*
@@ -433,7 +430,7 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 	if (!attr)
 		return NULL;
 
-	return attribute_blob(attr, table);
+	return attribute_blob(attr, blob_table);
 }
 
 /* Return the SHA-1 message digest of the unnamed data stream of the inode, or a
@@ -458,9 +455,11 @@ void
 inode_ref_attributes(struct wim_inode *inode)
 {
 	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
-		wimlib_assert(inode->i_attrs[i].attr_resolved);
-		if (inode->i_attrs[i].attr_blob)
-			inode->i_attrs[i].attr_blob->refcnt++;
+		struct blob_descriptor *blob;
+		
+		blob = attribute_blob_resolved(&inode->i_attrs[i]);
+		if (blob)
+			blob->refcnt++;
 	}
 }
 
@@ -495,7 +494,7 @@ retrieve_blob_pointer(struct blob_descriptor *blob)
 	struct wim_inode *inode = blob->back_inode;
 	for (unsigned i = 0; i < inode->i_num_attrs; i++)
 		if (inode->i_attrs[i].attr_id == blob->back_attr_id)
-			return &inode->i_attrs[i].attr_blob;
+			return &inode->i_attrs[i]._attr_blob;
 
 	wimlib_assert(0);
 	return NULL;

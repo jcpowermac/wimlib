@@ -63,7 +63,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
 		if (!inode->i_attrs[i].attr_resolved)
 			return false;
 
-		blob = inode->i_attrs[i].attr_blob;
+		blob = attribute_blob_resolved(&inode->i_attrs[i]);
 		template_blob = attribute_blob(&template_inode->i_attrs[i],
 					       template_blob_table);
 
@@ -109,7 +109,7 @@ inode_copy_checksums(struct wim_inode *inode,
 		struct blob_descriptor *blob, *template_blob;
 		struct blob_descriptor *replace_blob;
 
-		blob = inode->i_attrs[i].attr_blob;
+		blob = attribute_blob_resolved(&inode->i_attrs[i]);
 		template_blob = attribute_blob(&template_inode->i_attrs[i],
 					       template_wim->blob_table);
 
@@ -146,7 +146,7 @@ inode_copy_checksums(struct wim_inode *inode,
 			replace_blob = blob;
 		}
 
-		inode->i_attrs[i].attr_blob = replace_blob;
+		attribute_set_blob(&inode->i_attrs[i], replace_blob);
 		replace_blob->refcnt += inode->i_nlink;
 	}
 	return 0;

@@ -58,6 +58,8 @@
 #  include "config.h"
 #endif
 
+#if 0
+
 #include <errno.h>
 
 #include "wimlib/assert.h"

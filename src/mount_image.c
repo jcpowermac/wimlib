@@ -57,6 +57,7 @@
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/blob_table.h"
+#include "wimlib/capture.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/progress.h"
@@ -278,15 +279,15 @@ alloc_wimfs_fd(struct wim_inode *inode,
 		return -ENOMEM;
 
 	fd->f_inode     = inode;
-	fd->f_blob      = attr->attr_blob;
+	fd->f_blob      = attribute_blob_resolved(attr);
 	filedes_invalidate(&fd->f_staging_fd);
 	fd->f_idx       = i;
 	fd->f_attr_id	= attr->attr_id;
 	*fd_ret         = fd;
 	inode->i_fds[i] = fd;
 	inode->i_num_opened_fds++;
-	if (attr->attr_blob)
-		attr->attr_blob->num_opened_fds++;
+	if (fd->f_blob)
+		fd->f_blob->num_opened_fds++;
 	wimfs_inc_num_open_fds();
 	inode->i_next_fd = i + 1;
 	return 0;
@@ -655,7 +656,7 @@ extract_blob_to_staging_dir(struct wim_inode *inode, struct wim_inode_attribute 
 	int result;
 	int ret;
 
-	old_blob = attr->attr_blob;
+	old_blob = attribute_blob_resolved(attr);
 
 	/* Create the staging file.  */
 	staging_fd = create_staging_file(ctx, &staging_file_name);
@@ -756,14 +757,13 @@ extract_blob_to_staging_dir(struct wim_inode *inode, struct wim_inode_attribute 
 	}
 
 	new_blob->refcnt            = inode->i_nlink;
-	new_blob->blob_location = BLOB_IN_STAGING_FILE;
+	new_blob->blob_location     = BLOB_IN_STAGING_FILE;
 	new_blob->staging_file_name = staging_file_name;
 	new_blob->staging_dir_fd    = ctx->staging_dir_fd;
 	new_blob->size              = size;
 
-	add_unhashed_blob(new_blob, inode, attr->attr_id,
-			  &wim_get_current_image_metadata(ctx->wim)->unhashed_blobs);
-	attr->attr_blob = new_blob;
+	prepare_unhashed_blob(new_blob, inode, attr,
+			      &wim_get_current_image_metadata(ctx->wim)->unhashed_blobs);
 	return 0;
 
 out_revert_fd_changes:
@@ -1264,7 +1264,7 @@ wimfs_getattr(const char *path, struct stat *stbuf)
 					&dentry, &attr);
 	if (ret)
 		return ret;
-	return inode_to_stbuf(dentry->d_inode, attr->attr_blob, stbuf);
+	return inode_to_stbuf(dentry->d_inode, attribute_blob_resolved(attr), stbuf);
 }
 
 static int
@@ -1344,7 +1344,7 @@ wimfs_getxattr(const char *path, const char *name, char *value,
 	if (!attr)
 		return (errno == ENOENT) ? -ENOATTR : -errno;
 
-	blob = attr->attr_blob;
+	blob = attribute_blob_resolved(attr);
 	if (!blob)
 		return 0;
 
@@ -1539,7 +1539,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 		return ret;
 
 	inode = dentry->d_inode;
-	blob = attr->attr_blob;
+	blob = attribute_blob_resolved(attr);
 
 	/* The data of the file being opened may be in the staging directory
 	 * (read-write mounts only) or in the WIM.  If it's in the staging
@@ -1877,7 +1877,7 @@ wimfs_truncate(const char *path, off_t size)
 	if (ret)
 		return ret;
 
-	blob = attr->attr_blob;
+	blob = attribute_blob_resolved(attr);
 
 	if (!blob && !size)
 		return 0;

@@ -115,7 +115,7 @@ blob_clone_if_new(struct blob_descriptor *blob, void *_info)
 	struct reference_info *info = _info;
 
 	if (need_blob(info, blob)) {
-		blob = clone_blob(blob);
+		blob = clone_blob_descriptor(blob);
 		if (unlikely(!blob))
 			return WIMLIB_ERR_NOMEM;
 		reference_blob(info, blob);

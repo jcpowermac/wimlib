@@ -2,6 +2,8 @@
 #define _WIMLIB_CAPTURE_H
 
 #include "wimlib.h"
+#include "wimlib/blob_table.h"
+#include "wimlib/inode.h"
 #include "wimlib/inode_table.h"
 #include "wimlib/list.h"
 #include "wimlib/progress.h"
@@ -121,6 +123,21 @@ report_capture_error(struct capture_params *params, int error_code,
 		     const tchar *path)
 {
 	return report_error(params->progfunc, params->progctx, error_code, path);
+}
+
+static inline void
+prepare_unhashed_blob(struct blob_descriptor *blob,
+		      struct wim_inode *back_inode,
+		      struct wim_inode_attribute *back_attr,
+		      struct list_head *unhashed_blobs)
+{
+	if (!blob)
+		return;
+	blob->unhashed = 1;
+	blob->back_inode = back_inode;
+	blob->back_attr_id = back_attr->attr_id;
+	attribute_set_blob(back_attr, blob);
+	list_add_tail(&blob->unhashed_list, unhashed_blobs);
 }
 
 #endif /* _WIMLIB_CAPTURE_H */

@@ -1,6 +1,7 @@
 #ifndef _WIMLIB_INODE_H
 #define _WIMLIB_INODE_H
 
+#include "wimlib/assert.h"
 #include "wimlib/list.h"
 #include "wimlib/sha1.h"
 #include "wimlib/types.h"
@@ -40,8 +41,8 @@ struct wim_inode_attribute {
 	 * If attr_resolved = 1, a pointer directly to the blob descriptor for
 	 * this blob, or NULL if this attribute is empty.  */
 	union {
-		u8 attr_hash[SHA1_HASH_SIZE];
-		struct blob_descriptor *attr_blob;
+		u8 _attr_hash[SHA1_HASH_SIZE];
+		struct blob_descriptor *_attr_blob;
 	};
 	/* attr_resolved determines whether attr_hash or attr_blob is valid as
 	 * described above.  */
@@ -356,6 +357,20 @@ inode_add_attribute_with_data(struct wim_inode *inode, int attr_type,
 			      const tchar *attr_name,
 			      const void *data, size_t size,
 			      struct blob_table *blob_table);
+
+static inline struct blob_descriptor *
+attribute_blob_resolved(const struct wim_inode_attribute *attr)
+{
+	wimlib_assert(attr->attr_resolved);
+	return attr->_attr_blob;
+}
+
+static inline void
+attribute_set_blob(struct wim_inode_attribute *attr, struct blob_descriptor *blob)
+{
+	attr->_attr_blob = blob;
+	attr->attr_resolved = 1;
+}
 
 static inline bool
 attribute_is_named(const struct wim_inode_attribute *attr)

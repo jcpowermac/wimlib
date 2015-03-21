@@ -384,22 +384,6 @@ extern struct blob_descriptor *
 new_blob_from_data_buffer(const void *buffer, size_t size,
 			  struct blob_table *blob_table);
 
-static inline void
-prepare_unhashed_blob(struct blob_descriptor *blob,
-		      struct wim_inode *back_inode,
-		      struct wim_inode_attribute *back_attr,
-		      struct list_head *unhashed_blobs)
-{
-	if (!blob)
-		return;
-	blob->unhashed = 1;
-	blob->back_inode = back_inode;
-	blob->back_attr_id = back_attr->attr_id;
-	back_attr->attr_blob = blob;
-	back_attr->attr_resolved = 1;
-	list_add_tail(&blob->unhashed_list, unhashed_blobs);
-}
-
 extern int
 hash_unhashed_blob(struct blob_descriptor *blob,
 		   struct blob_table *blob_table,
