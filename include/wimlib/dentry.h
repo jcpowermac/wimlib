@@ -13,7 +13,7 @@ struct blob_table;
 
 /* Base size of a WIM dentry in the on-disk format, up to and including the file
  * name length.  This does not include the variable-length file name, short
- * name, alternate data stream entries, and padding to 8-byte boundaries.  */
+ * name, extra stream entries, and padding to 8-byte boundaries.  */
 #define WIM_DENTRY_DISK_SIZE 102
 
 /*

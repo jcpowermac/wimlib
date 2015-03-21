@@ -116,8 +116,8 @@ struct wim_dentry_on_disk {
 	le64 last_write_time;
 
 	/*
-	 * Usually this is the SHA-1 message digest of the file's contents
-	 * (unnamed data stream).
+	 * Usually this is the SHA-1 message digest of the file's "contents"
+	 * (the unnamed data stream).
 	 *
 	 * If the file has FILE_ATTRIBUTE_REPARSE_POINT set, then this is
 	 * instead usually the SHA-1 message digest of the uncompressed reparse
@@ -205,16 +205,17 @@ struct wim_dentry_on_disk {
 
 } _packed_attribute;
 	/* If num_extra_streams != 0, then there are that many extra stream
-	 * entries following the dentry, on an 8-byte aligned boundary.  They
-	 * are not counted in the 'length' field of the dentry.  */
+	 * entries following the dentry, starting on the 8-byte aligned
+	 * boundary.  They are not counted in the 'length' field of the dentry.
+	 */
 
-/* On-disk format of an extra stream entry.  This represents an extra "stream"
- * associated with the file, such as a named data stream.  */
+/* On-disk format of an extra stream entry.  This represents an extra NTFS-style
+ * "stream" associated with the file, such as a named data stream.  */
 struct wim_inode_stream_on_disk {
 
-	/* Length of this structure, in bytes.  This includes all fixed-length
-	 * fields, plus the name and null terminator if present, and any needed
-	 * padding such that the length is a multiple of 8.  */
+	/* Length of this extra stream entry, in bytes.  This includes all
+	 * fixed-length fields, plus the name and null terminator if present,
+	 * and any needed padding such that the length is a multiple of 8.  */
 	le64 length;
 
 	/* Reserved field  */
@@ -373,8 +374,8 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 	/*
 	 * Extra stream entries:
 	 *
-	 * - One extra stream entry for each named data stream
-	 * - One extra stream entry for the unnamed data stream when there is either:
+	 * - Use one extra stream entry for each named data stream
+	 * - Use one extra stream entry for the unnamed data stream when there is either:
 	 * 	- a reparse point stream
 	 * 	- at least one named data stream (for Windows PE bug workaround)
 	 * 		- UNLESS it's an encrypted file
@@ -1312,8 +1313,8 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 	inode->i_next_stream_id = inode->i_num_streams;
 
 	/* Now, assign a type to each stream.  Unfortunately this requires
-	 * various hacks because stream types aren't explicitly annotated in the
-	 * WIM format.  */
+	 * various hacks because stream types aren't explicitly provided in the
+	 * WIM on-disk format.  */
 
 	if (likely(inode->i_num_streams == 1)) {
 		/* Just the unnamed data stream  */
@@ -1321,13 +1322,13 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 	} else {
 		bool found_reparse_point = false;
 		bool found_unnamed_data_stream = false;
-		struct wim_inode_stream *unnamed_zero_hash_stream = NULL;
+		struct wim_inode_stream *unnamed_stream_with_zero_hash = NULL;
 		for (unsigned i = 0; i < inode->i_num_streams; i++) {
 
 			struct wim_inode_stream *strm = &inode->i_streams[i];
 			if (stream_is_named(strm)) {
 				/* If a name is specified, assume it is a named
-				 * data stream . */
+				 * data stream. */
 				strm->stream_type = STREAM_TYPE_DATA;
 			} else if (!is_zero_hash(inode->i_streams[i]._stream_hash)) {
 				/* If no name is specified and the hash is
@@ -1351,13 +1352,14 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 				 * then remember this stream for later so that
 				 * we can assign it to the unnamed data stream
 				 * if we don't find a better candidate.  */
-				unnamed_zero_hash_stream = strm;
+				unnamed_stream_with_zero_hash = strm;
 				strm->stream_type = STREAM_TYPE_UNKNOWN;
 			}
 		}
 
-		if (!found_unnamed_data_stream && unnamed_zero_hash_stream != NULL)
-			unnamed_zero_hash_stream->stream_type = STREAM_TYPE_DATA;
+		if (!found_unnamed_data_stream &&
+		    unnamed_stream_with_zero_hash != NULL)
+			unnamed_stream_with_zero_hash->stream_type = STREAM_TYPE_DATA;
 	}
 
 	*offset_p += p - orig_p;
@@ -1782,12 +1784,11 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 			cpu_to_le64((inode->i_nlink == 1) ? 0 : inode->i_ino);
 	}
 
-	wimlib_assert(dentry_is_root(dentry) != dentry_has_long_name(dentry));
-
 	disk_dentry->short_name_nbytes = cpu_to_le16(dentry->short_name_nbytes);
 	disk_dentry->file_name_nbytes = cpu_to_le16(dentry->file_name_nbytes);
-
 	p += sizeof(struct wim_dentry_on_disk);
+
+	wimlib_assert(dentry_is_root(dentry) != dentry_has_long_name(dentry));
 
 	if (dentry_has_long_name(dentry))
 		p = mempcpy(p, dentry->file_name, (u32)dentry->file_name_nbytes + 2);
@@ -1832,7 +1833,9 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 				if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
 					need_extra_entry_for_unnamed_data_stream = true;
 			} else {
-				unnamed_data_stream_hash = stream_hash(strm);
+				const u8 *hash = stream_hash(strm);
+				if (!is_zero_hash(hash))
+					unnamed_data_stream_hash = hash;
 			}
 			break;
 		case STREAM_TYPE_REPARSE_POINT:
