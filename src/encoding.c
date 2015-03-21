@@ -582,7 +582,7 @@ cmp_utf16le_strings_z(const utf16lechar *s1, const utf16lechar *s2,
 	}
 }
 
-/* Duplicate a UTF16-LE string.  The input string might not be null terminated
+/* Duplicate a UTF-16LE string.  The input string might not be null terminated
  * and might be misaligned, but the returned string is guaranteed to be null
  * terminated and properly aligned.  */
 utf16lechar *
@@ -596,6 +596,7 @@ utf16le_dupz(const void *ustr, size_t usize)
 	return dup;
 }
 
+/* Duplicate a null-terminated UTF-16LE string.  */
 utf16lechar *
 utf16le_dup(const utf16lechar *ustr)
 {

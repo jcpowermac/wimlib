@@ -358,22 +358,6 @@ inode_get_stream(const struct wim_inode *inode, int stream_type,
 extern struct wim_inode_stream *
 inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type);
 
-static inline struct wim_inode_stream *
-inode_get_unnamed_data_stream(const struct wim_inode *inode)
-{
-	return inode_get_unnamed_stream(inode, STREAM_TYPE_DATA);
-}
-
-static inline struct wim_inode_stream *
-inode_get_reparse_point_stream(const struct wim_inode *inode)
-{
-	return inode_get_unnamed_stream(inode, STREAM_TYPE_REPARSE_POINT);
-}
-
-extern void
-inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
-		    struct blob_table *blob_table);
-
 extern struct wim_inode_stream *
 inode_add_stream(struct wim_inode *inode, int stream_type,
 		 const utf16lechar *stream_name, struct blob_descriptor *blob);
@@ -384,32 +368,9 @@ inode_add_stream_with_data(struct wim_inode *inode, int stream_type,
 			   const void *data, size_t size,
 			   struct blob_table *blob_table);
 
-//static inline struct wim_inode_stream *
-//inode_add_unnamed_stream_with_data(struct wim_inode *inode, int stream_type,
-				   //const void *data, size_t size,
-				   //struct blob_table *blob_table)
-//{
-	//return inode_add_stream_with_data(inode, stream_type, NO_STREAM_NAME,
-					  //data, size, blob_table);
-//}
-
-//static inline struct wim_inode_stream *
-//inode_add_unnamed_data_stream_with_data(struct wim_inode *inode,
-					//const void *data, size_t size,
-					//struct blob_table *blob_table)
-//{
-	//return inode_add_unnamed_stream_with_data(inode, STREAM_TYPE_DATA,
-						  //data, size, blob_table);
-//}
-
-//static inline struct wim_inode_stream *
-//inode_add_reparse_point_stream_with_data(struct wim_inode *inode,
-					 //const void *data, size_t size,
-					 //struct blob_table *blob_table)
-//{
-	//return inode_add_unnamed_stream_with_data(inode, STREAM_TYPE_REPARSE_POINT,
-						  //data, size, blob_table);
-//}
+extern void
+inode_remove_stream(struct wim_inode *inode, struct wim_inode_stream *strm,
+		    struct blob_table *blob_table);
 
 static inline struct blob_descriptor *
 stream_blob_resolved(const struct wim_inode_stream *strm)
