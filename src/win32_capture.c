@@ -852,11 +852,12 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	if (ret)
 		goto err;
 
-	attr = inode_add_attribute(inode, ATTR_DATA, NO_NAME);
+	attr = inode_add_attribute_utf16le_with_blob(inode, ATTR_DATA,
+						     NO_NAME, blob);
 	if (!attr)
 		goto err_nomem;
 
-	prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
 	return 0;
 
 err_nomem:
@@ -974,13 +975,14 @@ winnt_scan_stream(const wchar_t *path, size_t path_nchars,
 		blob->file_inode = inode;
 	}
 
-	attr = inode_add_attribute_utf16le(inode, ATTR_DATA, stream_name);
+	attr = inode_add_attribute_utf16le_with_blob(inode, ATTR_DATA,
+						     stream_name, blob);
 	if (!attr) {
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
 
-	prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
 	return 0;
 }
 

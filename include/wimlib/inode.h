@@ -353,6 +353,17 @@ inode_remove_attribute(struct wim_inode *inode, struct wim_inode_attribute *attr
 		       struct blob_table *blob_table);
 
 extern struct wim_inode_attribute *
+inode_add_attribute_utf16le_with_blob(struct wim_inode *inode,
+				      int attr_type,
+				      const utf16lechar *attr_name,
+				      struct blob_descriptor *blob);
+
+extern struct wim_inode_attribute *
+inode_add_attribute_with_blob(struct wim_inode *inode,
+			      int attr_type, const tchar *attr_name,
+			      struct blob_descriptor *blob);
+
+extern struct wim_inode_attribute *
 inode_add_attribute_with_data(struct wim_inode *inode, int attr_type,
 			      const tchar *attr_name,
 			      const void *data, size_t size,

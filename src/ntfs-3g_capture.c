@@ -59,12 +59,12 @@ open_ntfs_attr(ntfs_inode *ni, struct ntfs_location *loc)
 	ntfs_attr *na;
 
 	na = ntfs_attr_open(ni,
-			    loc->is_reparse_point ? AT_REPARSE_POINT : AT_DATA,
-			    loc->stream_name,
-			    loc->stream_name_nchars);
+			    (ATTR_TYPES)loc->ntfs_attr_type,
+			    loc->ntfs_attr_name,
+			    loc->ntfs_attr_name_nchars);
 	if (!na) {
 		ERROR_WITH_ERRNO("Failed to open attribute of \"%"TS"\" in "
-				 "NTFS volume", loc->path);
+				 "NTFS volume", loc->ntfs_inode_path);
 	}
 	return na;
 }
@@ -82,9 +82,10 @@ read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
 	int ret;
 	u8 buf[BUFFER_SIZE];
 
-	ni = ntfs_pathname_to_inode(vol, NULL, loc->path);
+	ni = ntfs_pathname_to_inode(vol, NULL, loc->ntfs_inode_path);
 	if (!ni) {
-		ERROR_WITH_ERRNO("Can't find NTFS inode for \"%"TS"\"", loc->path);
+		ERROR_WITH_ERRNO("Can't find NTFS inode for \"%"TS"\"",
+				 loc->ntfs_inode_path);
 		ret = WIMLIB_ERR_NTFS_3G;
 		goto out;
 	}
@@ -95,12 +96,13 @@ read_ntfs_file_prefix(const struct blob_descriptor *blob, u64 size,
 		goto out_close_ntfs_inode;
 	}
 
-	pos = (loc->is_reparse_point) ? 8 : 0;
+	pos = (loc->ntfs_attr_type == AT_REPARSE_POINT) ? 8 : 0;
 	bytes_remaining = size;
 	while (bytes_remaining) {
 		s64 to_read = min(bytes_remaining, sizeof(buf));
 		if (ntfs_attr_pread(na, pos, to_read, buf) != to_read) {
-			ERROR_WITH_ERRNO("Error reading \"%"TS"\"", loc->path);
+			ERROR_WITH_ERRNO("Error reading \"%"TS"\"",
+					 loc->ntfs_inode_path);
 			ret = WIMLIB_ERR_NTFS_3G;
 			goto out_close_ntfs_attr;
 		}
@@ -194,8 +196,9 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 				 CASE_SENSITIVE, 0, NULL, 0, actx))
 	{
 		u64 data_size = ntfs_get_attribute_value_length(actx->attr);
-		u64 name_length = actx->attr->name_length;
+		size_t name_nchars = actx->attr->name_length;
 		struct wim_inode_attribute *attr;
+		const utf16lechar *wimlib_attr_name = NO_NAME;
 
 		if (data_size == 0) {
 			/* Empty attribute.  No blob is needed. */
@@ -208,19 +211,22 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 				goto out_put_actx;
 			}
 			ntfs_loc->ntfs_vol = vol;
-			ntfs_loc->path = memdup(path, path_len + 1);
-			if (!ntfs_loc->path) {
+			ntfs_loc->ntfs_attr_type = type;
+			ntfs_loc->ntfs_inode_path = memdup(path, path_len + 1);
+			if (!ntfs_loc->ntfs_inode_path) {
 				ret = WIMLIB_ERR_NOMEM;
 				goto out_free_ntfs_loc;
 			}
-			if (name_length) {
-				ntfs_loc->stream_name = memdup(attr_record_name(actx->attr),
-							       name_length * 2);
-				if (!ntfs_loc->stream_name) {
+			if (name_nchars) {
+				ntfs_loc->ntfs_attr_name =
+					utf16le_dupz(attr_record_name(actx->attr),
+						     name_nchars * sizeof(ntfschar));
+				if (!ntfs_loc->ntfs_attr_name) {
 					ret = WIMLIB_ERR_NOMEM;
 					goto out_free_ntfs_loc;
 				}
-				ntfs_loc->stream_name_nchars = name_length;
+				ntfs_loc->ntfs_attr_name_nchars = name_nchars;
+				wimlib_attr_name = ntfs_loc->ntfs_attr_name;
 			}
 
 			blob = new_blob_descriptor();
@@ -230,34 +236,34 @@ capture_ntfs_attrs_with_type(struct wim_inode *inode,
 			}
 			blob->blob_location = BLOB_IN_NTFS_VOLUME;
 			blob->ntfs_loc = ntfs_loc;
+			blob->size = data_size;
 			ntfs_loc = NULL;
 			if (type == AT_REPARSE_POINT) {
 				if (data_size < 8) {
 					ERROR("Invalid reparse data on \"%s\" "
-					      "(only %u bytes)!", path, (unsigned)data_size);
+					      "(only %u bytes)!", path,
+					      (unsigned)data_size);
 					ret = WIMLIB_ERR_NTFS_3G;
 					goto out_free_blob;
 				}
-				blob->ntfs_loc->is_reparse_point = true;
-				blob->size = data_size - 8;
+				blob->size -= 8;
 				ret = read_reparse_tag(ni, blob->ntfs_loc,
 						       &inode->i_reparse_tag);
 				if (ret)
 					goto out_free_blob;
-			} else {
-				blob->ntfs_loc->is_reparse_point = false;
-				blob->size = data_size;
 			}
 		}
 
-		attr = inode_add_attribute_utf16le(inode,
-						   ntfs_3g_attr_type_to_wimlib_attr_type(type),
-						   attr_record_name(actx->attr));
+		attr = inode_add_attribute_utf16le_with_blob(
+				     inode,
+				     ntfs_3g_attr_type_to_wimlib_attr_type(type),
+				     wimlib_attr_name,
+				     blob);
 		if (!attr) {
 			ret = WIMLIB_ERR_NOMEM;
 			goto out_free_blob;
 		}
-		prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
+		prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
 	}
 	if (errno == ENOENT) {
 		ret = 0;
@@ -270,8 +276,8 @@ out_free_blob:
 	free_blob_descriptor(blob);
 out_free_ntfs_loc:
 	if (ntfs_loc) {
-		FREE(ntfs_loc->path);
-		FREE(ntfs_loc->stream_name);
+		FREE(ntfs_loc->ntfs_inode_path);
+		FREE(ntfs_loc->ntfs_attr_name);
 		FREE(ntfs_loc);
 	}
 out_put_actx:

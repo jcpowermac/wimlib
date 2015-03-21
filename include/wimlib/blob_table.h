@@ -392,4 +392,18 @@ hash_unhashed_blob(struct blob_descriptor *blob,
 extern struct blob_descriptor **
 retrieve_blob_pointer(struct blob_descriptor *blob);
 
+static inline void
+prepare_unhashed_blob(struct blob_descriptor *blob,
+		      struct wim_inode *back_inode,
+		      u32 attr_id,
+		      struct list_head *unhashed_blobs)
+{
+	if (!blob)
+		return;
+	blob->unhashed = 1;
+	blob->back_inode = back_inode;
+	blob->back_attr_id = attr_id;
+	list_add_tail(&blob->unhashed_list, unhashed_blobs);
+}
+
 #endif /* _WIMLIB_BLOB_TABLE_H */

@@ -152,16 +152,15 @@ clone_blob_descriptor(const struct blob_descriptor *old)
 			loc = memdup(old->ntfs_loc, sizeof(struct ntfs_location));
 			if (loc == NULL)
 				goto out_free;
-			loc->path = NULL;
-			loc->stream_name = NULL;
+			loc->ntfs_inode_path = NULL;
+			loc->ntfs_attr_name = NULL;
 			new->ntfs_loc = loc;
-			loc->path = STRDUP(old->ntfs_loc->path);
-			if (loc->path == NULL)
+			loc->ntfs_inode_path = STRDUP(old->ntfs_loc->ntfs_inode_path);
+			if (loc->ntfs_inode_path == NULL)
 				goto out_free;
-			if (loc->stream_name_nchars != 0) {
-				loc->stream_name = memdup(old->ntfs_loc->stream_name,
-							  loc->stream_name_nchars * 2);
-				if (loc->stream_name == NULL)
+			if (loc->ntfs_attr_name_nchars != 0) {
+				loc->ntfs_attr_name = utf16le_dup(old->ntfs_loc->ntfs_attr_name);
+				if (loc->ntfs_attr_name == NULL)
 					goto out_free;
 			}
 		}
@@ -204,8 +203,8 @@ blob_release_location(struct blob_descriptor *blob)
 #ifdef WITH_NTFS_3G
 	case BLOB_IN_NTFS_VOLUME:
 		if (blob->ntfs_loc) {
-			FREE(blob->ntfs_loc->path);
-			FREE(blob->ntfs_loc->stream_name);
+			FREE(blob->ntfs_loc->ntfs_inode_path);
+			FREE(blob->ntfs_loc->ntfs_attr_name);
 			FREE(blob->ntfs_loc);
 		}
 		break;
@@ -457,7 +456,8 @@ cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 		return tstrcmp(blob1->file_on_disk, blob2->file_on_disk);
 #ifdef WITH_NTFS_3G
 	case BLOB_IN_NTFS_VOLUME:
-		return tstrcmp(blob1->ntfs_loc->path, blob2->ntfs_loc->path);
+		return tstrcmp(blob1->ntfs_loc->ntfs_inode_path,
+			       blob2->ntfs_loc->ntfs_inode_path);
 #endif
 	default:
 		/* No additional sorting order defined for this resource

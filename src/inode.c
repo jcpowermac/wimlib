@@ -192,11 +192,6 @@ inode_add_attribute_utf16le(struct wim_inode *inode, int attr_type,
 	struct wim_inode_attribute *attrs;
 	struct wim_inode_attribute *new_attr;
 
-	if (inode_get_attribute_utf16le(inode, attr_type, attr_name)) {
-		errno = EEXIST;
-		return NULL;
-	}
-
 	if (inode->i_num_attrs < INODE_NUM_EMBEDDED_ATTRS) {
 		attrs = inode->i_embedded_attrs;
 	} else {
@@ -277,25 +272,51 @@ inode_remove_attribute(struct wim_inode *inode, struct wim_inode_attribute *attr
 }
 
 struct wim_inode_attribute *
+inode_add_attribute_utf16le_with_blob(struct wim_inode *inode,
+				      int attr_type,
+				      const utf16lechar *attr_name,
+				      struct blob_descriptor *blob)
+{
+	struct wim_inode_attribute *attr;
+
+	attr = inode_add_attribute_utf16le(inode, attr_type, attr_name);
+	if (attr)
+		attribute_set_blob(attr, blob);
+	return attr;
+}
+
+struct wim_inode_attribute *
+inode_add_attribute_with_blob(struct wim_inode *inode,
+			      int attr_type, const tchar *attr_name,
+			      struct blob_descriptor *blob)
+{
+	struct wim_inode_attribute *attr;
+
+	attr = inode_add_attribute(inode, attr_type, attr_name);
+	if (attr)
+		attribute_set_blob(attr, blob);
+	return attr;
+}
+
+struct wim_inode_attribute *
 inode_add_attribute_with_data(struct wim_inode *inode,
 			      int attr_type, const tchar *attr_name,
 			      const void *data, size_t size,
 			      struct blob_table *blob_table)
 {
-	struct wim_inode_attribute *new_attr;
 	struct blob_descriptor *blob;
-
-	new_attr = inode_add_attribute(inode, attr_type, attr_name);
-	if (unlikely(!new_attr))
-		return NULL;
+	struct wim_inode_attribute *attr;
 
 	blob = new_blob_from_data_buffer(data, size, blob_table);
-	if (unlikely(!blob)) {
-		inode_remove_attribute(inode, new_attr, NULL);
+	if (!blob)
 		return NULL;
-	}
-	attribute_set_blob(new_attr, blob);
-	return new_attr;
+
+	attr = inode_add_attribute_with_blob(inode, attr_type, attr_name, blob);
+
+	if (!attr)
+		blob_decrement_refcnt(blob, blob_table);
+
+	return attr;;
 }
 
 bool

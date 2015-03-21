@@ -123,12 +123,13 @@ unix_scan_regular_file(const char *path, u64 size, struct wim_inode *inode,
 		blob->size = size;
 	}
 
-	attr = inode_add_attribute_utf16le(inode, ATTR_DATA, NO_NAME);
+	attr = inode_add_attribute_utf16le_with_blob(inode, ATTR_DATA,
+						     NO_NAME, blob);
 	if (!attr) {
 		free_blob_descriptor(blob);
 		return WIMLIB_ERR_NOMEM;
 	}
-	prepare_unhashed_blob(blob, inode, attr, unhashed_blobs);
+	prepare_unhashed_blob(blob, inode, attr->attr_id, unhashed_blobs);
 	return 0;
 }
 

@@ -57,7 +57,6 @@
 #include "wimlib/dentry.h"
 #include "wimlib/encoding.h"
 #include "wimlib/blob_table.h"
-#include "wimlib/capture.h"
 #include "wimlib/metadata.h"
 #include "wimlib/paths.h"
 #include "wimlib/progress.h"
@@ -762,8 +761,9 @@ extract_blob_to_staging_dir(struct wim_inode *inode, struct wim_inode_attribute 
 	new_blob->staging_dir_fd    = ctx->staging_dir_fd;
 	new_blob->size              = size;
 
-	prepare_unhashed_blob(new_blob, inode, attr,
+	prepare_unhashed_blob(new_blob, inode, attr->attr_id,
 			      &wim_get_current_image_metadata(ctx->wim)->unhashed_blobs);
+	attribute_set_blob(attr, new_blob);
 	return 0;
 
 out_revert_fd_changes:
