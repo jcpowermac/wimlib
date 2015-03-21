@@ -5,8 +5,7 @@
  * sequences of binary data.  Within a WIM file, blobs are single-instanced.
  *
  * This file also contains code to read and write the corresponding on-disk
- * representation of this table in the WIM file format.  A WIM file has one blob
- * table.
+ * representation of this table in the WIM file format.
  */
 
 /*
@@ -45,7 +44,7 @@
 #include "wimlib/util.h"
 #include "wimlib/write.h"
 
-/* A hash table mapping SHA-1 message digests to blobs.  */
+/* A hash table mapping SHA-1 message digests to blob descriptors  */
 struct blob_table {
 	struct hlist_head *array;
 	size_t num_blobs;
@@ -361,10 +360,10 @@ blob_table_unlink(struct blob_table *table, struct blob_descriptor *blob)
 	table->num_blobs--;
 }
 
-/* Given a SHA-1 message digest, return the corresponding blob from the
- * specified blob table, or NULL if there is none.  */
+/* Given a SHA-1 message digest, return the corresponding blob descriptor from
+ * the specified blob table, or NULL if there is none.  */
 struct blob_descriptor *
-lookup_blob(const struct blob_table *table, const u8 hash[])
+lookup_blob(const struct blob_table *table, const u8 *hash)
 {
 	size_t i;
 	struct blob_descriptor *blob;
@@ -377,8 +376,8 @@ lookup_blob(const struct blob_table *table, const u8 hash[])
 	return NULL;
 }
 
-/* Call a function on all the blobs in the blob table.  Stop early and return
- * nonzero if any call to the function returns nonzero.  */
+/* Call a function on all blob descriptors in the specified blob table.  Stop
+ * early and return nonzero if any call to the function returns nonzero.  */
 int
 for_blob_in_table(struct blob_table *table,
 		  int (*visitor)(struct blob_descriptor *, void *), void *arg)
@@ -399,12 +398,13 @@ for_blob_in_table(struct blob_table *table,
 	return 0;
 }
 
-/* qsort() callback that sorts blobs into an order optimized for reading.
- *
- * Sorting is done primarily by resource location, then secondarily by a
- * per-resource location order.  For example, resources in WIM files are sorted
- * primarily by part number, then secondarily by offset, as to implement optimal
- * reading of either a standalone or split WIM.  */
+/*
+ * This is a qsort() callback that sorts blobs into an order optimized for
+ * reading.  Sorting is done primarily by blob location, then secondarily by a
+ * location-dependent order.  Most importantly, blobs in WIM files are sorted
+ * such that the WIM files will be read sequentially.  This is especially
+ * importont for WIM files containing solid resources.
+ */
 int
 cmp_blobs_by_sequential_order(const void *p1, const void *p2)
 {
@@ -524,8 +524,8 @@ add_blob_to_array(struct blob_descriptor *blob, void *_pp)
 	return 0;
 }
 
-/* Iterate through the blobs in the specified blob table, but first sort them in
- * an order optimized for sequential reading.  */
+/* Iterate through the blob descriptors in the specified blob table, but first
+ * sort them in an order optimized for sequential reading.  */
 int
 for_blob_in_table_sorted_by_sequential_order(struct blob_table *table,
 					     int (*visitor)(struct blob_descriptor *, void *),
@@ -555,7 +555,7 @@ for_blob_in_table_sorted_by_sequential_order(struct blob_table *table,
 	return ret;
 }
 
-/* On-disk format of a WIM blob descriptor  */
+/* On-disk format of a blob descriptor in a WIM file  */
 struct blob_descriptor_disk {
 
 	/* Size, offset, and flags of the blob.  */
@@ -572,8 +572,6 @@ struct blob_descriptor_disk {
 	 * zeroes if this blob is of zero length.  */
 	u8 hash[SHA1_HASH_SIZE];
 } _packed_attribute;
-
-#define WIM_BLOB_DESCRIPTOR_DISK_SIZE 50
 
 /* Given a nonempty run of consecutive blob descriptors with the SOLID flag set,
  * count how many specify resources (as opposed to blobs within those
@@ -880,10 +878,6 @@ read_blob_table(WIMStruct *wim)
 	size_t cur_num_solid_rdescs = 0;
 
 	DEBUG("Reading blob table.");
-
-	/* Sanity check: blob descriptors are 50 bytes each.  */
-	BUILD_BUG_ON(sizeof(struct blob_descriptor_disk) !=
-		     WIM_BLOB_DESCRIPTOR_DISK_SIZE);
 
 	/* Calculate the number of entries in the blob table.  */
 	num_entries = wim->hdr.blob_table_reshdr.uncompressed_size /

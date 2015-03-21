@@ -1234,8 +1234,11 @@ read_extra_data(const u8 *p, const u8 *end, struct wim_inode *inode)
 
 static int
 prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode,
-			     u32 num_extra_attributes, const u8 *default_hash)
+			     u32 num_extra_attributes, const u8 *default_hash,
+			     u64 *offset_p)
 {
+	const u8 *orig_p = p;
+
 	inode->i_num_attrs = 1 + num_extra_attributes;
 
 	if (inode->i_num_attrs <= INODE_NUM_EMBEDDED_ATTRS) {
@@ -1268,6 +1271,9 @@ prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode
 
 		/* Read the length field  */
 		length = le64_to_cpu(disk_attr->length);
+
+		/* 8-byte align the length  */
+		length = (length + 7) & ~7;
 
 		/* Make sure the length field is neither so small it doesn't
 		 * include all the fixed-length data nor so large it overflows
@@ -1302,6 +1308,8 @@ prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode
 		} else {
 			attr->attr_name = (utf16lechar *)NO_NAME;
 		}
+
+		p += length;
 	}
 
 	inode->i_next_attr_id = inode->i_num_attrs;
@@ -1336,6 +1344,8 @@ prepare_inode_attribute_list(const u8 *p, const u8 *end, struct wim_inode *inode
 		if (!found_unnamed_data_stream && unnamed_zero_hash_attr != NULL)
 			unnamed_zero_hash_attr->attr_type = ATTR_DATA;
 	}
+
+	*offset_p += p - orig_p;
 	return 0;
 }
 
@@ -1497,17 +1507,13 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	if (ret)
 		goto err_free_dentry;
 
-	/* Align the dentry length.  */
-	length = (length + 7) & ~7;
-
-	offset += length;
-
-	p = &buf[offset];
+	offset += (length + 7) & ~7;
 
 	/* Prepare the inode's list of attributes.  */
 	ret = prepare_inode_attribute_list(&buf[offset], &buf[buf_len], inode,
 					   le16_to_cpu(disk_dentry->num_extra_attributes),
-					   disk_dentry->default_hash);
+					   disk_dentry->default_hash,
+					   &offset);
 	if (ret)
 		goto err_free_dentry;
 
@@ -1685,41 +1691,31 @@ err_free_dentry_tree:
 	return ret;
 }
 
-/*
- * Write a WIM alternate data stream (ADS) entry to an output buffer.
- *
- * @ads_entry:
- *	The ADS entry to write.
- *
- * @hash:
- *	The hash field to use (instead of the one stored directly in the ADS
- *	entry, which isn't valid if the inode has been "resolved").
- *
- * @p:
- *	The memory location to which to write the data.
- *
- * Returns a pointer to the byte after the last byte written.
- */
 static u8 *
-write_ads_entry(const struct wim_ads_entry *ads_entry,
-		const u8 *hash, u8 * restrict p)
+write_extra_attribute_entry(u8 * restrict p,
+			    const utf16lechar * restrict name,
+			    const u8 * restrict hash)
 {
-	struct wim_inode_attribute_on_disk *disk_ads_entry =
-			(struct wim_inode_attribute_on_disk*)p;
+	struct wim_inode_attribute_on_disk *disk_attr =
+			(struct wim_inode_attribute_on_disk *)p;
 	u8 *orig_p = p;
+	u16 name_nbytes;
 
-	disk_ads_entry->reserved = cpu_to_le64(ads_entry->reserved);
-	copy_hash(disk_ads_entry->hash, hash);
-	disk_ads_entry->stream_name_nbytes = cpu_to_le16(ads_entry->stream_name_nbytes);
+	if (name == NO_NAME)
+		name_nbytes = 0;
+	else
+		name_nbytes = utf16le_len_bytes(name);
+
+	disk_attr->reserved = 0;
+	copy_hash(disk_attr->hash, hash);
+	disk_attr->name_nbytes = cpu_to_le16(name_nbytes);
 	p += sizeof(struct wim_inode_attribute_on_disk);
-	if (ads_entry->stream_name_nbytes) {
-		p = mempcpy(p, ads_entry->stream_name,
-			    (u32)ads_entry->stream_name_nbytes + 2);
-	}
+	if (name_nbytes != 0)
+		p = mempcpy(p, name, name_nbytes + 2);
 	/* Align to 8-byte boundary */
 	while ((uintptr_t)p & 7)
 		*p++ = 0;
-	disk_ads_entry->length = cpu_to_le64(p - orig_p);
+	disk_attr->length = cpu_to_le64(p - orig_p);
 	return p;
 }
 
@@ -1743,15 +1739,11 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	const struct wim_inode *inode;
 	struct wim_dentry_on_disk *disk_dentry;
 	const u8 *orig_p;
-	const u8 *hash;
-	bool use_dummy_stream;
-	u16 num_ads;
 
 	wimlib_assert(((uintptr_t)p & 7) == 0); /* 8 byte aligned */
 	orig_p = p;
 
 	inode = dentry->d_inode;
-	use_dummy_stream = inode_needs_dummy_stream(inode);
 	disk_dentry = (struct wim_dentry_on_disk*)p;
 
 	disk_dentry->file_flags = cpu_to_le32(inode->i_file_flags);
@@ -1764,11 +1756,6 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	disk_dentry->creation_time = cpu_to_le64(inode->i_creation_time);
 	disk_dentry->last_access_time = cpu_to_le64(inode->i_last_access_time);
 	disk_dentry->last_write_time = cpu_to_le64(inode->i_last_write_time);
-	if (use_dummy_stream)
-		hash = zero_hash;
-	else
-		hash = inode_stream_hash(inode, 0);
-	copy_hash(disk_dentry->unnamed_stream_hash, hash);
 	if (inode->i_file_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
 		disk_dentry->reparse.rp_unknown_1 = cpu_to_le32(inode->i_rp_unknown_1);
 		disk_dentry->reparse.reparse_tag = cpu_to_le32(inode->i_reparse_tag);
@@ -1779,15 +1766,13 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 		disk_dentry->nonreparse.hard_link_group_id =
 			cpu_to_le64((inode->i_nlink == 1) ? 0 : inode->i_ino);
 	}
-	num_ads = inode->i_num_ads;
-	if (use_dummy_stream)
-		num_ads++;
-	disk_dentry->num_alternate_data_streams = cpu_to_le16(num_ads);
-	disk_dentry->short_name_nbytes = cpu_to_le16(dentry->short_name_nbytes);
-	disk_dentry->file_name_nbytes = cpu_to_le16(dentry->file_name_nbytes);
-	p += sizeof(struct wim_dentry_on_disk);
 
 	wimlib_assert(dentry_is_root(dentry) != dentry_has_long_name(dentry));
+
+	disk_dentry->short_name_nbytes = cpu_to_le16(dentry->short_name_nbytes);
+	disk_dentry->file_name_nbytes = cpu_to_le16(dentry->file_name_nbytes);
+
+	p += sizeof(struct wim_dentry_on_disk);
 
 	if (dentry_has_long_name(dentry))
 		p = mempcpy(p, dentry->file_name, (u32)dentry->file_name_nbytes + 2);
@@ -1802,22 +1787,65 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	if (inode->i_extra_size) {
 		/* Extra tagged items --- not usually present.  */
 		p = mempcpy(p, inode->i_extra, inode->i_extra_size);
+
+		/* Align to 8-byte boundary */
 		while ((uintptr_t)p & 7)
 			*p++ = 0;
 	}
 
 	disk_dentry->length = cpu_to_le64(p - orig_p);
 
-	if (use_dummy_stream) {
-		hash = inode_get_hash_of_unnamed_data_stream(inode);
-		p = write_ads_entry(&(struct wim_ads_entry){}, hash, p);
+	/* Attributes  */
+
+	/*
+	 * - One extra attribute for each named data stream
+	 * - One extra attribute for the unnamed data stream there is either:
+	 * 	- a reparse point attribute
+	 * 	- at least one named data stream (for Windows PE bug workaround)
+	 * 		- UNLESS it's an encrypted file
+	 */
+	bool need_extra_attr_for_unnamed_data_stream = false;
+	u16 num_extra_attrs = 0;
+	const u8 *unnamed_data_stream_hash = zero_hash;
+	const u8 *reparse_point_hash = NULL;
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
+		switch (attr->attr_type) {
+		case ATTR_DATA:
+			if (unlikely(attribute_is_named(attr))) {
+				if (!(inode->i_file_flags & FILE_ATTRIBUTE_ENCRYPTED))
+					need_extra_attr_for_unnamed_data_stream = true;
+			} else {
+				unnamed_data_stream_hash = attribute_hash(attr);
+			}
+			break;
+		case ATTR_REPARSE_POINT:
+			reparse_point_hash = attribute_hash(attr);
+			need_extra_attr_for_unnamed_data_stream = true;
+			break;
+		}
 	}
 
-	/* Write the alternate data streams entries, if any. */
-	for (u16 i = 0; i < inode->i_num_ads; i++) {
-		hash = inode_stream_hash(inode, i + 1);
-		p = write_ads_entry(&inode->i_ads_entries[i], hash, p);
+	if (need_extra_attr_for_unnamed_data_stream) {
+		copy_hash(disk_dentry->default_hash, zero_hash);
+		p = write_extra_attribute_entry(p, NO_NAME, unnamed_data_stream_hash);
+		num_extra_attrs++;
+	} else {
+		copy_hash(disk_dentry->default_hash, unnamed_data_stream_hash);
 	}
+	if (reparse_point_hash != NULL) {
+		p = write_extra_attribute_entry(p, NO_NAME, reparse_point_hash);
+		num_extra_attrs++;
+	}
+	for (unsigned i = 0; i < inode->i_num_attrs; i++) {
+		const struct wim_inode_attribute *attr = &inode->i_attrs[i];
+		if (attribute_is_named_data_stream(attr)) {
+			p = write_extra_attribute_entry(p, attr->attr_name,
+							attribute_hash(attr));
+			num_extra_attrs++;
+		}
+	}
+	disk_dentry->num_extra_attributes = cpu_to_le16(num_extra_attrs);
 
 	return p;
 }

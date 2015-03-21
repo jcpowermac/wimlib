@@ -621,6 +621,6 @@ utf16le_len_bytes(const utf16lechar *s)
 size_t
 utf16le_len_chars(const utf16lechar *s)
 {
-	return utf16_len_bytes(s) / sizeof(utf16lechar);
+	return utf16le_len_bytes(s) / sizeof(utf16lechar);
 }
 
