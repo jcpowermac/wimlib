@@ -948,9 +948,10 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 	stream_name[stream_name_nchars] = L'\0';
 
 	if (!stream_name_nchars &&
-	    (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
+	    (inode->i_attributes & (FILE_ATTRIBUTE_ENCRYPTED |
+				    FILE_ATTRIBUTE_DIRECTORY)))
 	{
-		/* Ignore unnamed data stream of encrypted file  */
+		/* Ignore unnamed data stream of encrypted file or directory  */
 		return 0;
 	}
 

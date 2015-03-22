@@ -692,28 +692,26 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 	size_t stream_name_nchars;
 	ntfs_attr *dest_attr;
 
-	if (unlikely(strm->stream_type != STREAM_TYPE_DATA)) {
-		if (strm->stream_type == STREAM_TYPE_REPARSE_POINT) {
-			if (blob->size > REPARSE_DATA_MAX_SIZE) {
-				ERROR("Reparse data of \"%s\" has size "
-				      "%"PRIu64" bytes (exceeds %u bytes)",
-				      dentry_full_path(one_dentry),
-				      blob->size, REPARSE_DATA_MAX_SIZE);
-				return WIMLIB_ERR_INVALID_REPARSE_DATA;
-			}
-			ctx->reparse_ptr = ctx->rpbuf.rpdata;
-			ctx->rpbuf.rpdatalen = cpu_to_le16(blob->size);
-			ctx->rpbuf.rpreserved = cpu_to_le16(0);
-			ctx->ntfs_reparse_inodes[ctx->num_reparse_inodes] = ni;
-			ctx->wim_reparse_inodes[ctx->num_reparse_inodes] = inode;
-			ctx->num_reparse_inodes++;
-			return 0;
-		}
+	if (unlikely(strm->stream_type == STREAM_TYPE_REPARSE_POINT)) {
 
+		if (blob->size > REPARSE_DATA_MAX_SIZE) {
+			ERROR("Reparse data of \"%s\" has size "
+			      "%"PRIu64" bytes (exceeds %u bytes)",
+			      dentry_full_path(one_dentry),
+			      blob->size, REPARSE_DATA_MAX_SIZE);
+			return WIMLIB_ERR_INVALID_REPARSE_DATA;
+		}
+		ctx->reparse_ptr = ctx->rpbuf.rpdata;
+		ctx->rpbuf.rpdatalen = cpu_to_le16(blob->size);
+		ctx->rpbuf.rpreserved = cpu_to_le16(0);
+		ctx->ntfs_reparse_inodes[ctx->num_reparse_inodes] = ni;
+		ctx->wim_reparse_inodes[ctx->num_reparse_inodes] = inode;
+		ctx->num_reparse_inodes++;
 		return 0;
 	}
 
 	/* It's a data stream (may be unnamed or named).  */
+	wimlib_assert(strm->stream_type == STREAM_TYPE_DATA);
 
 	stream_name_nchars = utf16le_len_chars(strm->stream_name);
 

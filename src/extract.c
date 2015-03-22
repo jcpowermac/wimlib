@@ -1052,60 +1052,74 @@ ref_stream(struct wim_inode_stream *strm, struct wim_dentry *dentry,
 }
 
 static int
+ref_stream_if_needed(struct wim_dentry *dentry, struct wim_inode *inode,
+		     struct wim_inode_stream *strm, struct apply_ctx *ctx)
+{
+	bool need_stream = false;
+	switch (strm->stream_type) {
+	case STREAM_TYPE_DATA:
+		if (stream_is_named(strm)) {
+			/* Named data stream  */
+			if (ctx->supported_features.named_data_streams)
+				need_stream = true;
+		} else if (!(inode->i_attributes & (FILE_ATTRIBUTE_DIRECTORY |
+						    FILE_ATTRIBUTE_ENCRYPTED))
+			   && !(inode_is_symlink(inode)
+				&& !ctx->supported_features.reparse_points
+				&& ctx->supported_features.symlink_reparse_points))
+		{
+			/*
+			 * Unnamed data stream.  Skip if any of the following is true:
+			 *
+			 * - file is a directory
+			 * - file is encrypted
+			 * - backend needs to create the file as UNIX symlink
+			 * - backend will extract the stream as externally backed
+			 */
+			if (ctx->apply_ops->will_externally_back) {
+				int ret = (*ctx->apply_ops->will_externally_back)(dentry, ctx);
+				if (ret > 0) /* Error?  */
+					return ret;
+				if (ret < 0) /* Won't externally back?  */
+					need_stream = true;
+			} else {
+				need_stream = true;
+			}
+		}
+		break;
+	case STREAM_TYPE_REPARSE_POINT:
+		wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
+		if (ctx->supported_features.reparse_points ||
+		    (inode_is_symlink(inode) &&
+		     ctx->supported_features.symlink_reparse_points))
+			need_stream = true;
+		break;
+	case STREAM_TYPE_EFSRPC_RAW_DATA:
+		wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED);
+		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) {
+			if (ctx->supported_features.encrypted_directories)
+				need_stream = true;
+		} else {
+			if (ctx->supported_features.encrypted_files)
+				need_stream = true;
+		}
+		break;
+	}
+	if (need_stream)
+		return ref_stream(strm, dentry, ctx);
+	return 0;
+}
+
+static int
 dentry_ref_streams(struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
-	int ret;
-
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
-		struct wim_inode_stream *strm = &inode->i_streams[i];
-		bool need_stream = false;
-		switch (strm->stream_type) {
-		case STREAM_TYPE_DATA:
-			if (unlikely(stream_is_named(strm))) {
-				/* Named data stream  */
-				if (ctx->supported_features.named_data_streams)
-					need_stream = true;
-			} else if (!(inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)) {
-				/* Unnamed data stream  */
-				if (ctx->apply_ops->will_externally_back) {
-					int ret = (*ctx->apply_ops->will_externally_back)(dentry, ctx);
-					if (ret >= 0) {
-						if (ret) /* Error */
-							return ret;
-						/* Will externally back */
-					} else {
-						/* Won't externally back */
-						need_stream = true;
-					}
-				} else {
-					need_stream = true;
-				}
-			}
-			break;
-		case STREAM_TYPE_REPARSE_POINT:
-			if (ctx->supported_features.reparse_points ||
-			    (inode_is_symlink(inode) &&
-			     ctx->supported_features.symlink_reparse_points))
-				need_stream = true;
-			break;
-		case STREAM_TYPE_EFSRPC:
-			if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) {
-				if (ctx->supported_features.encrypted_directories)
-					need_stream = true;
-			} else {
-				if (ctx->supported_features.encrypted_files)
-					need_stream = true;
-			}
-			break;
-		}
-		if (need_stream) {
-			ret = ref_stream(strm, dentry, ctx);
-			if (ret)
-				return ret;
-		}
+		int ret = ref_stream_if_needed(dentry, inode,
+					       &inode->i_streams[i], ctx);
+		if (ret)
+			return ret;
 	}
-
 	inode->i_visited = 1;
 	return 0;
 }

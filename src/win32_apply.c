@@ -1652,55 +1652,41 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 	HANDLE h;
 	NTSTATUS status;
 
-	if (unlikely(strm->stream_type != STREAM_TYPE_DATA)) {
+	if (unlikely(strm->stream_type == STREAM_TYPE_REPARSE_POINT)) {
+		/* We can't write the reparse point stream directly; we must set
+		 * it with FSCTL_SET_REPARSE_POINT, which requires that all the
+		 * data be available.  So, stage the data in a buffer.  */
+		if (!prepare_data_buffer(ctx, blob->size))
+			return WIMLIB_ERR_NOMEM;
+		list_add_tail(&dentry->tmp_list, &ctx->reparse_dentries);
+		return 0;
+	}
 
-		if (strm->stream_type == STREAM_TYPE_REPARSE_POINT) {
-
-			/* We can't write the reparse point stream directly; we
-			 * must set it with FSCTL_SET_REPARSE_POINT, which
-			 * requires that all the data be available.  So, stage
-			 * the data in a buffer.  */
-
-			if (!ctx->common.supported_features.reparse_points)
-				return 0;
-			if (!prepare_data_buffer(ctx, blob->size))
-				return WIMLIB_ERR_NOMEM;
-			list_add_tail(&dentry->tmp_list, &ctx->reparse_dentries);
-			return 0;
-		}
-
-		if (strm->stream_type == STREAM_TYPE_EFSRPC_RAW_DATA) {
-
-			/* We can't write encrypted files directly; we must use
-			 * WriteEncryptedFileRaw(), which requires providing the
-			 * data through a callback function.  This can't easily
-			 * be combined with our own callback-based approach.
-			 *
-			 * The current workaround is to simply read the blob
-			 * into memory and write the encrypted file from that.
-			 *
-			 * TODO: This isn't sufficient for extremely large
-			 * encrypted files.  Perhaps we should create an extra
-			 * thread to write such files...  */
-
-			if (!ctx->common.supported_features.encrypted_files)
-				return 0;
-			if (!prepare_data_buffer(ctx, blob->size))
-				return WIMLIB_ERR_NOMEM;
-			list_add_tail(&dentry->tmp_list, &ctx->encrypted_dentries);
-			return 0;
-		}
-
-		/* Ignore unrecognized stream types  */
+	if (unlikely(strm->stream_type == STREAM_TYPE_EFSRPC_RAW_DATA)) {
+		/* We can't write encrypted files directly; we must use
+		 * WriteEncryptedFileRaw(), which requires providing the data
+		 * through a callback function.  This can't easily be combined
+		 * with our own callback-based approach.
+		 *
+		 * The current workaround is to simply read the blob into memory
+		 * and write the encrypted file from that.
+		 *
+		 * TODO: This isn't sufficient for extremely large encrypted
+		 * files.  Perhaps we should create an extra thread to write
+		 * such files...  */
+		if (!prepare_data_buffer(ctx, blob->size))
+			return WIMLIB_ERR_NOMEM;
+		list_add_tail(&dentry->tmp_list, &ctx->encrypted_dentries);
 		return 0;
 	}
 
 	/* It's a data stream (may be unnamed or named).  */
+	wimlib_assert(strm->stream_type == STREAM_TYPE_DATA);
 
 	if (ctx->num_open_handles == MAX_OPEN_FILES) {
 		/* XXX: Fix this.  But because of the checks in
-		 * extract_blob_list(), this can now only happen on a
-		 * filesystem that does not support hard links.  */
+		 * extract_blob_list(), this can now only happen on a filesystem
+		 * that does not support hard links.  */
 		ERROR("Can't extract data: too many open files!");
 		return WIMLIB_ERR_UNSUPPORTED;
 	}
