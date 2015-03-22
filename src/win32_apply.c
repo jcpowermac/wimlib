@@ -1654,20 +1654,46 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 	NTSTATUS status;
 
 	if (unlikely(strm->stream_type != STREAM_TYPE_DATA)) {
-		if ((strm->stream_type == STREAM_TYPE_REPARSE_POINT) &&
-		    (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
 
-			/* We can't write the reparse point attribute directly;
-			 * we must set it with FSCTL_SET_REPARSE_POINT, which
+		if (strm->stream_type == STREAM_TYPE_REPARSE_POINT) {
+
+			fprintf(stderr, "begin reparse point; size=%llu\n",blob->size);
+			/* We can't write the reparse point stream directly; we
+			 * must set it with FSCTL_SET_REPARSE_POINT, which
 			 * requires that all the data be available.  So, stage
 			 * the data in a buffer.  */
 
 			if (!ctx->common.supported_features.reparse_points)
 				return 0;
-
 			if (!prepare_data_buffer(ctx, blob->size))
 				return WIMLIB_ERR_NOMEM;
 			list_add_tail(&dentry->tmp_list, &ctx->reparse_dentries);
+			return 0;
+		}
+
+		/* Encrypted file?  */
+		if (strm->stream_type == STREAM_TYPE_EFSRPC) {
+
+			fprintf(stderr, "begin efsrpc; size=%llu\n",blob->size);
+
+			/* We can't write encrypted file streams directly; we
+			 * must use WriteEncryptedFileRaw(), which requires
+			 * providing the data through a callback function.  This
+			 * can't easily be combined with our own callback-based
+			 * approach.
+			 *
+			 * The current workaround is to simply read the blob
+			 * into memory and write the encrypted file from that.
+			 *
+			 * TODO: This isn't sufficient for extremely large
+			 * encrypted files.  Perhaps we should create an extra
+			 * thread to write such files...  */
+
+			if (!ctx->common.supported_features.encrypted_files)
+				return 0;
+			if (!prepare_data_buffer(ctx, blob->size))
+				return WIMLIB_ERR_NOMEM;
+			list_add_tail(&dentry->tmp_list, &ctx->encrypted_dentries);
 			return 0;
 		}
 
@@ -1676,33 +1702,6 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 	}
 
 	/* It's a data stream.  */
-
-
-	/* Encrypted file?  */
-	if (unlikely(attributes & FILE_ATTRIBUTE_ENCRYPTED) &&
-	    !stream_is_named(strm))
-	{
-		if (!ctx->common.supported_features.encrypted_files)
-			return 0;
-
-		/* We can't write encrypted file streams directly; we must use
-		 * WriteEncryptedFileRaw(), which requires providing the data
-		 * through a callback function.  This can't easily be combined
-		 * with our own callback-based approach.
-		 *
-		 * The current workaround is to simply read the blob into
-		 * memory and write the encrypted file from that.
-		 *
-		 * TODO: This isn't sufficient for extremely large encrypted
-		 * files.  Perhaps we should create an extra thread to write
-		 * such files...  */
-		if (!prepare_data_buffer(ctx, blob->size))
-			return WIMLIB_ERR_NOMEM;
-		list_add_tail(&dentry->tmp_list, &ctx->encrypted_dentries);
-		return 0;
-	}
-
-	/* It's a real data stream that we need to extract via a handle.  */
 
 	if (ctx->num_open_handles == MAX_OPEN_FILES) {
 		/* XXX: Fix this.  But because of the checks in
@@ -1735,6 +1734,8 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 		return WIMLIB_ERR_OPEN;
 	}
 
+	fprintf(stderr, "open %ls for writing \n", current_path(ctx));
+
 	ctx->open_handles[ctx->num_open_handles++] = h;
 
 	/* Allocate space for the data.  */
@@ -1759,6 +1760,9 @@ do_set_reparse_data(const struct wim_dentry *dentry,
 			     0, FILE_OPEN, 0, dentry, ctx);
 	if (!NT_SUCCESS(status))
 		goto fail;
+
+	print_byte_field(rpbuf, rpbuflen, stderr);
+	fprintf(stderr, "\n");
 
 	status = (*func_NtFsControlFile)(h, NULL, NULL, NULL,
 					 &ctx->iosb, FSCTL_SET_REPARSE_POINT,

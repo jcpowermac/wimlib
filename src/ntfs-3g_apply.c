@@ -693,9 +693,7 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 	ntfs_attr *dest_attr;
 
 	if (unlikely(strm->stream_type != STREAM_TYPE_DATA)) {
-		if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
-		    (strm->stream_type == STREAM_TYPE_REPARSE_POINT))
-		{
+		if (strm->stream_type == STREAM_TYPE_REPARSE_POINT) {
 			if (blob->size > REPARSE_DATA_MAX_SIZE) {
 				ERROR("Reparse data of \"%s\" has size "
 				      "%"PRIu64" bytes (exceeds %u bytes)",

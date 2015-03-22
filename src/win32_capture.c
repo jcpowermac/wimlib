@@ -852,7 +852,7 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	if (ret)
 		goto err;
 
-	strm = inode_add_stream(inode, STREAM_TYPE_DATA, NO_STREAM_NAME, blob);
+	strm = inode_add_stream(inode, STREAM_TYPE_EFSRPC, NO_STREAM_NAME, blob);
 	if (!strm)
 		goto err_nomem;
 

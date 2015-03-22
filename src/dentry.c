@@ -385,6 +385,7 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 	 */
 	bool have_named_data_stream = false;
 	bool have_reparse_point_stream = false;
+	bool have_efsrpc_stream = false;
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		const struct wim_inode_stream *strm = &inode->i_streams[i];
 		switch (strm->stream_type) {
@@ -397,16 +398,24 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 		case STREAM_TYPE_REPARSE_POINT:
 			have_reparse_point_stream = true;
 			break;
+		case STREAM_TYPE_EFSRPC:
+			have_efsrpc_stream = true;
+			break;
 		}
 	}
 
-	if (have_named_data_stream || have_reparse_point_stream) {
-		/* Unnamed data stream as extra entry  */
-		len += WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE;
+	if (have_named_data_stream || have_reparse_point_stream ||
+	    have_efsrpc_stream) {
 
-		if (have_reparse_point_stream)
+		if (!have_efsrpc_stream) {
+			/* Unnamed data stream as extra entry  */
+			len += WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE;
+		}
+
+		if (have_reparse_point_stream) {
 			/* Reparse point stream as extra entry  */
 			len += WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE;
+		}
 	}
 
 	return len;
@@ -1323,52 +1332,65 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 	/* Now, assign a type to each stream.  Unfortunately this requires
 	 * various hacks because stream types aren't explicitly provided in the
 	 * WIM on-disk format.  */
+	fprintf(stderr, "ASSIGN (dir=%d, enc=%d)\n",
+		!!(inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY),
+		!!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED));
 
-	if (likely(inode->i_num_streams == 1)) {
-		/* Just the unnamed data stream  */
-		inode->i_streams[0].stream_type = STREAM_TYPE_DATA;
-	} else {
-		bool found_reparse_point = false;
-		bool found_unnamed_data_stream = false;
-		struct wim_inode_stream *unnamed_stream_with_zero_hash = NULL;
-		for (unsigned i = 0; i < inode->i_num_streams; i++) {
+	bool found_reparse_point_stream = false;
+	bool found_unnamed_data_stream = false;
+	bool found_efsrpc_stream = false;
+	struct wim_inode_stream *unnamed_stream_with_zero_hash = NULL;
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 
-			struct wim_inode_stream *strm = &inode->i_streams[i];
-			if (stream_is_named(strm)) {
-				/* If a name is specified, assume it is a named
-				 * data stream. */
+		struct wim_inode_stream *strm = &inode->i_streams[i];
+
+		tchar hashstr[41];
+		sprint_hash(stream_hash(strm), hashstr);
+		fprintf(stderr, "stream %d name is %d chars %"TS"\n",
+			i, utf16le_len_chars(strm->stream_name),
+			hashstr);
+
+		if (stream_is_named(strm)) {
+			/* If a name is specified, assume it is a named
+			 * data stream. */
+			strm->stream_type = STREAM_TYPE_DATA;
+		} else if (!is_zero_hash(inode->i_streams[i]._stream_hash)) {
+			/* If no name is specified and the hash is
+			 * nonzero, then assume it is an unnamed data
+			 * stream or a reparse point stream.  For
+			 * reparse points, assume the reparse stream is
+			 * given first and the unnamed data stream is
+			 * given second.  */
+			if ((inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) &&
+			    !found_efsrpc_stream) {
+				fprintf(stderr, "found efsrpc\n");
+				found_efsrpc_stream = true;
+				strm->stream_type = STREAM_TYPE_EFSRPC;
+			} else if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+				   !found_reparse_point_stream) {
+				fprintf(stderr, "found reparse point\n");
+				found_reparse_point_stream = true;
+				strm->stream_type = STREAM_TYPE_REPARSE_POINT;
+			} else if (!found_unnamed_data_stream) {
+				fprintf(stderr, "found unnamed data stream\n");
+				found_unnamed_data_stream = true;
 				strm->stream_type = STREAM_TYPE_DATA;
-			} else if (!is_zero_hash(inode->i_streams[i]._stream_hash)) {
-				/* If no name is specified and the hash is
-				 * nonzero, then assume it is an unnamed data
-				 * stream or a reparse point stream.  For
-				 * reparse points, assume the reparse stream is
-				 * given first and the unnamed data stream is
-				 * given second.  */
-				if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
-				    !found_reparse_point) {
-					found_reparse_point = true;
-					strm->stream_type = STREAM_TYPE_REPARSE_POINT;
-				} else if (!found_unnamed_data_stream) {
-					found_unnamed_data_stream = true;
-					strm->stream_type = STREAM_TYPE_DATA;
-				} else {
-					strm->stream_type = STREAM_TYPE_UNKNOWN;
-				}
 			} else {
-				/* If no name is specified and the hash is zero,
-				 * then remember this stream for later so that
-				 * we can assign it to the unnamed data stream
-				 * if we don't find a better candidate.  */
-				unnamed_stream_with_zero_hash = strm;
 				strm->stream_type = STREAM_TYPE_UNKNOWN;
 			}
+		} else {
+			/* If no name is specified and the hash is zero,
+			 * then remember this stream for later so that
+			 * we can assign it to the unnamed data stream
+			 * if we don't find a better candidate.  */
+			unnamed_stream_with_zero_hash = strm;
+			strm->stream_type = STREAM_TYPE_UNKNOWN;
 		}
-
-		if (!found_unnamed_data_stream &&
-		    unnamed_stream_with_zero_hash != NULL)
-			unnamed_stream_with_zero_hash->stream_type = STREAM_TYPE_DATA;
 	}
+
+	if (!found_unnamed_data_stream &&
+	    unnamed_stream_with_zero_hash != NULL)
+		unnamed_stream_with_zero_hash->stream_type = STREAM_TYPE_DATA;
 
 	*offset_p += p - orig_p;
 	return 0;
@@ -1831,9 +1853,11 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	 */
 	bool have_named_data_stream = false;
 	bool have_reparse_point_stream = false;
+	bool have_efsrpc_stream = false;
 	u16 num_extra_streams = 0;
 	const u8 *unnamed_data_stream_hash = zero_hash;
 	const u8 *reparse_point_hash = zero_hash;
+	const u8 *efsrpc_hash = zero_hash;
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		const struct wim_inode_stream *strm = &inode->i_streams[i];
 		switch (strm->stream_type) {
@@ -1847,12 +1871,17 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 			have_reparse_point_stream = true;
 			reparse_point_hash = stream_hash(strm);
 			break;
+		case STREAM_TYPE_EFSRPC:
+			have_efsrpc_stream = true;
+			efsrpc_hash = stream_hash(strm);
+			break;
 		}
 	}
 
-	if (have_reparse_point_stream || have_named_data_stream) {
+	if (have_reparse_point_stream || have_named_data_stream ||
+	    have_efsrpc_stream) {
 
-		copy_hash(disk_dentry->default_hash, zero_hash);
+		copy_hash(disk_dentry->default_hash, efsrpc_hash);
 
 		if (have_reparse_point_stream) {
 			p = write_extra_stream_entry(p, NO_STREAM_NAME,
@@ -1860,9 +1889,11 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 			num_extra_streams++;
 		}
 
-		p = write_extra_stream_entry(p, NO_STREAM_NAME,
-					     unnamed_data_stream_hash);
-		num_extra_streams++;
+		if (!have_efsrpc_stream) {
+			p = write_extra_stream_entry(p, NO_STREAM_NAME,
+						     unnamed_data_stream_hash);
+			num_extra_streams++;
+		}
 	} else {
 		copy_hash(disk_dentry->default_hash, unnamed_data_stream_hash);
 	}

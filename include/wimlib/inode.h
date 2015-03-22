@@ -22,6 +22,9 @@ enum wim_inode_stream_type {
 	/* Reparse point stream, always unnamed  */
 	STREAM_TYPE_REPARSE_POINT,
 
+	/* Encrypted data in the format documented in [MS-EFSR]  */
+	STREAM_TYPE_EFSRPC,
+
 	/* Stream type could not be determined  */
 	STREAM_TYPE_UNKNOWN,
 };
