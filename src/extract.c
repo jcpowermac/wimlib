@@ -136,34 +136,6 @@ end_file_metadata_phase(struct apply_ctx *ctx)
 	return end_file_phase(ctx, WIMLIB_PROGRESS_MSG_EXTRACT_METADATA);
 }
 
-/* Check whether the extraction of a dentry should be skipped completely.  */
-static bool
-dentry_is_supported(struct wim_dentry *dentry,
-		    const struct wim_features *supported_features)
-{
-	struct wim_inode *inode = dentry->d_inode;
-
-	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-		if (!(supported_features->reparse_points ||
-		      (inode_is_symlink(inode) &&
-		       supported_features->symlink_reparse_points)))
-			return false;
-	}
-
-	if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) {
-		if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) {
-			if (!supported_features->encrypted_directories)
-				return false;
-		} else {
-			if (!supported_features->encrypted_files)
-				return false;
-		}
-	}
-
-	return true;
-}
-
-
 #define PWM_ALLOW_WIM_HDR 0x00001
 
 /* Read the header from a blob in a pipable WIM.  */
@@ -814,9 +786,6 @@ dentry_calculate_extraction_name(struct wim_dentry *dentry,
 {
 	int ret;
 
-	if (unlikely(!dentry_is_supported(dentry, &ctx->supported_features)))
-		goto skip_dentry;
-
 	if (dentry_is_root(dentry))
 		return 0;
 
@@ -1015,8 +984,8 @@ dentry_list_resolve_streams(struct list_head *dentry_list,
 }
 
 static int
-ref_stream(struct wim_inode_stream *strm,
-	   struct wim_dentry *dentry, struct apply_ctx *ctx)
+ref_stream(struct wim_inode_stream *strm, struct wim_dentry *dentry,
+	   struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	struct blob_descriptor *blob = stream_blob_resolved(strm);
@@ -1083,51 +1052,58 @@ ref_stream(struct wim_inode_stream *strm,
 }
 
 static int
-dentry_ref_data_stream(struct wim_inode_stream *strm,
-		       struct wim_dentry *dentry, struct apply_ctx *ctx)
-{
-	if (unlikely(stream_is_named(strm))) {
-		/* Named data stream  */
-		if (ctx->supported_features.named_data_streams)
-			return ref_stream(strm, dentry, ctx);
-	} else {
-		/* Unnamed data stream  */
-		if (ctx->apply_ops->will_externally_back) {
-			int ret = (*ctx->apply_ops->will_externally_back)(dentry, ctx);
-			if (ret >= 0) {
-				if (ret) /* Error */
-					return ret;
-				/* Will externally back */
-				return 0;
-			}
-			/* Won't externally back */
-		}
-		return ref_stream(strm, dentry, ctx);
-	}
-	return 0;
-}
-
-static int
 dentry_ref_streams(struct wim_dentry *dentry, struct apply_ctx *ctx)
 {
 	struct wim_inode *inode = dentry->d_inode;
 	int ret;
 
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
-		struct wim_inode_stream *stream = &inode->i_streams[i];
-		ret = 0;
-		switch (stream->stream_type) {
+		struct wim_inode_stream *strm = &inode->i_streams[i];
+		bool need_stream = false;
+		switch (strm->stream_type) {
 		case STREAM_TYPE_DATA:
-			ret = dentry_ref_data_stream(stream, dentry, ctx);
+			if (unlikely(stream_is_named(strm))) {
+				/* Named data stream  */
+				if (ctx->supported_features.named_data_streams)
+					need_stream = true;
+			} else if (!(inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+				/* Unnamed data stream  */
+				if (ctx->apply_ops->will_externally_back) {
+					int ret = (*ctx->apply_ops->will_externally_back)(dentry, ctx);
+					if (ret >= 0) {
+						if (ret) /* Error */
+							return ret;
+						/* Will externally back */
+					} else {
+						/* Won't externally back */
+						need_stream = true;
+					}
+				} else {
+					need_stream = true;
+				}
+			}
 			break;
 		case STREAM_TYPE_REPARSE_POINT:
-			ret = ref_stream(stream, dentry, ctx);
+			if (ctx->supported_features.reparse_points ||
+			    (inode_is_symlink(inode) &&
+			     ctx->supported_features.symlink_reparse_points))
+				need_stream = true;
 			break;
-		default:
+		case STREAM_TYPE_EFSRPC:
+			if (inode->i_attributes & FILE_ATTRIBUTE_DIRECTORY) {
+				if (ctx->supported_features.encrypted_directories)
+					need_stream = true;
+			} else {
+				if (ctx->supported_features.encrypted_files)
+					need_stream = true;
+			}
 			break;
 		}
-		if (ret)
-			return ret;
+		if (need_stream) {
+			ret = ref_stream(strm, dentry, ctx);
+			if (ret)
+				return ret;
+		}
 	}
 
 	inode->i_visited = 1;
@@ -1253,6 +1229,18 @@ do_feature_check(const struct wim_features *required_features,
 		 const struct wim_features *supported_features,
 		 int extract_flags)
 {
+	/* Encrypted files.  */
+	if (required_features->encrypted_files &&
+	    !supported_features->encrypted_files)
+		WARNING("Ignoring EFS-encrypted data of %lu files",
+			required_features->encrypted_files);
+
+	/* Named data streams.  */
+	if (required_features->named_data_streams &&
+	    !supported_features->named_data_streams)
+		WARNING("Ignoring named data streams of %lu files",
+			required_features->named_data_streams);
+
 	/* File attributes.  */
 	if (!(extract_flags & WIMLIB_EXTRACT_FLAG_NO_ATTRIBUTES)) {
 		/* Note: Don't bother the user about FILE_ATTRIBUTE_ARCHIVE.
@@ -1290,18 +1278,6 @@ do_feature_check(const struct wim_features *required_features,
 				required_features->encrypted_directories);
 	}
 
-	/* Encrypted files.  */
-	if (required_features->encrypted_files &&
-	    !supported_features->encrypted_files)
-		WARNING("Ignoring %lu encrypted files",
-			required_features->encrypted_files);
-
-	/* Named data streams.  */
-	if (required_features->named_data_streams &&
-	    (!supported_features->named_data_streams))
-		WARNING("Ignoring named data streams of %lu files",
-			required_features->named_data_streams);
-
 	/* Hard links.  */
 	if (required_features->hard_links && !supported_features->hard_links)
 		WARNING("Extracting %lu hard links as independent files",
@@ -1321,12 +1297,11 @@ do_feature_check(const struct wim_features *required_features,
 	{
 		if (supported_features->symlink_reparse_points) {
 			if (required_features->other_reparse_points) {
-				WARNING("Ignoring %lu non-symlink/junction "
-					"reparse point files",
+				WARNING("Ignoring reparse data of %lu non-symlink/junction files",
 					required_features->other_reparse_points);
 			}
 		} else {
-			WARNING("Ignoring %lu reparse point files",
+			WARNING("Ignoring reparse data of %lu files",
 				required_features->reparse_points);
 		}
 	}

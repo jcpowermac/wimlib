@@ -713,6 +713,8 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 		return 0;
 	}
 
+	/* It's a data stream (may be unnamed or named).  */
+
 	stream_name_nchars = utf16le_len_chars(strm->stream_name);
 
 	if (stream_name_nchars &&

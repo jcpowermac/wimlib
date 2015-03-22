@@ -525,12 +525,11 @@ build_dentry_tree_ntfs_recursive(struct wim_dentry **root_ret,
 		goto out;
 	}
 
-	if ((attributes & (FILE_ATTRIBUTE_DIRECTORY |
-			   FILE_ATTRIBUTE_ENCRYPTED)) == FILE_ATTRIBUTE_ENCRYPTED)
-	{
+	if (attributes & FILE_ATTRIBUTE_ENCRYPTED) {
 		if (params->add_flags & WIMLIB_ADD_FLAG_NO_UNSUPPORTED_EXCLUDE)
 		{
-			ERROR("Can't archive unsupported encrypted file \"%s\"", path);
+			ERROR("Can't archive \"%s\" because NTFS-3g capture mode "
+			      "does not support encrypted files and directories", path);
 			ret = WIMLIB_ERR_UNSUPPORTED_FILE;
 			goto out;
 		}

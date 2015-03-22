@@ -548,25 +548,42 @@ unix_cleanup_open_fds(struct unix_apply_ctx *ctx, unsigned offset)
 static int
 unix_begin_extract_blob_instance(const struct blob_descriptor *blob,
 				 const struct wim_inode *inode,
+				 const struct wim_inode_stream *strm,
 				 struct unix_apply_ctx *ctx)
 {
 	const struct wim_dentry *first_dentry;
 	const char *first_path;
 	int fd;
 
-	if (inode_is_symlink(inode)) {
-		/* On UNIX, symbolic links must be created with symlink(), which
-		 * requires that the full link target be available.  */
-		if (blob->size > REPARSE_DATA_MAX_SIZE) {
-			ERROR_WITH_ERRNO("Reparse data of \"%s\" has size "
-					 "%"PRIu64" bytes (exceeds %u bytes)",
-					 inode_first_full_path(inode),
-					 blob->size, REPARSE_DATA_MAX_SIZE);
-			return WIMLIB_ERR_INVALID_REPARSE_DATA;
+	if (unlikely(strm->stream_type != STREAM_TYPE_DATA)) {
+		if (strm->stream_type == STREAM_TYPE_REPARSE_POINT &&
+		    inode_is_symlink(inode))
+		{
+			/* On UNIX, symbolic links must be created with
+			 * symlink(), which requires that the full link target
+			 * be available.  */
+			if (blob->size > REPARSE_DATA_MAX_SIZE) {
+				ERROR_WITH_ERRNO("Reparse data of \"%s\" has size "
+						 "%"PRIu64" bytes (exceeds %u bytes)",
+						 inode_first_full_path(inode),
+						 blob->size, REPARSE_DATA_MAX_SIZE);
+				return WIMLIB_ERR_INVALID_REPARSE_DATA;
+			}
+			ctx->reparse_ptr = ctx->reparse_data;
+			return 0;
 		}
-		ctx->reparse_ptr = ctx->reparse_data;
 		return 0;
 	}
+
+	if (stream_is_named(strm))
+		return 0;
+
+	if (inode->i_attributes & (FILE_ATTRIBUTE_REPARSE_POINT |
+				   FILE_ATTRIBUTE_ENCRYPTED |
+				   FILE_ATTRIBUTE_DIRECTORY))
+		return 0;
+
+	/* Unnamed data stream of "regular" file  */
 
 	/* This should be ensured by extract_blob_list()  */
 	wimlib_assert(ctx->num_open_fds < MAX_OPEN_FILES);
@@ -595,6 +612,7 @@ unix_begin_extract_blob(struct blob_descriptor *blob, void *_ctx)
 	for (u32 i = 0; i < blob->out_refcnt; i++) {
 		int ret = unix_begin_extract_blob_instance(blob,
 							   targets[i].inode,
+							   targets[i].stream,
 							   ctx);
 		if (ret) {
 			ctx->reparse_ptr = NULL;

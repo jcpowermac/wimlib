@@ -1648,7 +1648,6 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 			    const struct wim_inode_stream *strm,
 			    struct win32_apply_ctx *ctx)
 {
-	const u32 attributes = dentry->d_inode->i_attributes;
 	FILE_ALLOCATION_INFORMATION alloc_info;
 	HANDLE h;
 	NTSTATUS status;
@@ -1657,7 +1656,6 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 
 		if (strm->stream_type == STREAM_TYPE_REPARSE_POINT) {
 
-			fprintf(stderr, "begin reparse point; size=%llu\n",blob->size);
 			/* We can't write the reparse point stream directly; we
 			 * must set it with FSCTL_SET_REPARSE_POINT, which
 			 * requires that all the data be available.  So, stage
@@ -1671,16 +1669,12 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 			return 0;
 		}
 
-		/* Encrypted file?  */
 		if (strm->stream_type == STREAM_TYPE_EFSRPC) {
 
-			fprintf(stderr, "begin efsrpc; size=%llu\n",blob->size);
-
-			/* We can't write encrypted file streams directly; we
-			 * must use WriteEncryptedFileRaw(), which requires
-			 * providing the data through a callback function.  This
-			 * can't easily be combined with our own callback-based
-			 * approach.
+			/* We can't write encrypted files directly; we must use
+			 * WriteEncryptedFileRaw(), which requires providing the
+			 * data through a callback function.  This can't easily
+			 * be combined with our own callback-based approach.
 			 *
 			 * The current workaround is to simply read the blob
 			 * into memory and write the encrypted file from that.
@@ -1701,7 +1695,7 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 		return 0;
 	}
 
-	/* It's a data stream.  */
+	/* It's a data stream (may be unnamed or named).  */
 
 	if (ctx->num_open_handles == MAX_OPEN_FILES) {
 		/* XXX: Fix this.  But because of the checks in
@@ -1734,8 +1728,6 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 		return WIMLIB_ERR_OPEN;
 	}
 
-	fprintf(stderr, "open %ls for writing \n", current_path(ctx));
-
 	ctx->open_handles[ctx->num_open_handles++] = h;
 
 	/* Allocate space for the data.  */
@@ -1760,9 +1752,6 @@ do_set_reparse_data(const struct wim_dentry *dentry,
 			     0, FILE_OPEN, 0, dentry, ctx);
 	if (!NT_SUCCESS(status))
 		goto fail;
-
-	print_byte_field(rpbuf, rpbuflen, stderr);
-	fprintf(stderr, "\n");
 
 	status = (*func_NtFsControlFile)(h, NULL, NULL, NULL,
 					 &ctx->iosb, FSCTL_SET_REPARSE_POINT,

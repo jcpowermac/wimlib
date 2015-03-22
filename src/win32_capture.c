@@ -1308,48 +1308,66 @@ retry_open:
 		}
 	}
 
-	/* If this is a reparse point, load the reparse data.  */
-	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
-		u8 *rpbuf;
-		u16 rpbuflen;
-
-		rpbuf = alloca(REPARSE_POINT_MAX_SIZE);
-		ret = winnt_get_reparse_data(h, full_path, params,
-					     rpbuf, &rpbuflen);
-		switch (ret) {
-		case RP_FIXED:
-			inode->i_not_rpfixed = 0;
-			break;
-		case RP_NOT_FIXED:
-			inode->i_not_rpfixed = 1;
-			break;
-		default:
+	if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)) {
+		/*
+		 * Load information about data streams (unnamed and named).
+		 *
+		 * Skip this step for encrypted files, since the data from
+		 * ReadEncryptedFileRaw() already contains all data streams (and
+		 * they do in fact all get restored by WriteEncryptedFileRaw().)
+		 *
+		 * (Note: WIMGAPI (as of Windows 8.1) gets wrong and stores both
+		 * the EFSRPC data and the named data stream(s)...!)
+		 */
+		ret = winnt_scan_data_streams(h,
+					      full_path,
+					      full_path_nchars,
+					      inode,
+					      params->unhashed_blobs,
+					      file_info.StandardInformation.EndOfFile.QuadPart,
+					      vol_flags);
+		if (ret)
 			goto out;
-		}
-		inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
-		if (!inode_add_stream_with_data(inode,
-						STREAM_TYPE_REPARSE_POINT,
-						NO_STREAM_NAME,
-						rpbuf + 8,
-						rpbuflen - 8,
-						params->blob_table))
-		{
-			ret = WIMLIB_ERR_NOMEM;
-			goto out;
-		}
 	}
 
+	/* If this is a reparse point, load the reparse data.  */
+	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+		if (0) {
+			/* There doesn't seem to be a way to store both a
+			 * REPARSE_POINT stream and an EFSRPC stream for the
+			 * same file in a way that WIMGAPI recognizes.  */
+			WARNING("Ignoring reparse data of encrypted file \"%ls\"",
+				printable_path(full_path));
+		} else {
+			u8 *rpbuf;
+			u16 rpbuflen;
 
-	/* Load information about data streams (unnamed and named).  */
-	ret = winnt_scan_data_streams(h,
-				      full_path,
-				      full_path_nchars,
-				      inode,
-				      params->unhashed_blobs,
-				      file_info.StandardInformation.EndOfFile.QuadPart,
-				      vol_flags);
-	if (ret)
-		goto out;
+			rpbuf = alloca(REPARSE_POINT_MAX_SIZE);
+			ret = winnt_get_reparse_data(h, full_path, params,
+						     rpbuf, &rpbuflen);
+			switch (ret) {
+			case RP_FIXED:
+				inode->i_not_rpfixed = 0;
+				break;
+			case RP_NOT_FIXED:
+				inode->i_not_rpfixed = 1;
+				break;
+			default:
+				goto out;
+			}
+			inode->i_reparse_tag = le32_to_cpu(*(le32*)rpbuf);
+			if (!inode_add_stream_with_data(inode,
+							STREAM_TYPE_REPARSE_POINT,
+							NO_STREAM_NAME,
+							rpbuf + 8,
+							rpbuflen - 8,
+							params->blob_table))
+			{
+				ret = WIMLIB_ERR_NOMEM;
+				goto out;
+			}
+		}
+	}
 
 	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)) {
 		/* Load information about the raw encrypted data.  This is
