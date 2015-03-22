@@ -760,7 +760,7 @@ winnt_get_reparse_data(HANDLE h, const wchar_t *path,
 		return WIMLIB_ERR_READ;
 	}
 
-	if (unlikely(bytes_returned < 8)) {
+	if (unlikely(bytes_returned < REPARSE_DATA_OFFSET)) {
 		ERROR("\"%ls\": Reparse point data is invalid",
 		      printable_path(path));
 		return WIMLIB_ERR_INVALID_REPARSE_DATA;
@@ -1328,8 +1328,8 @@ retry_open:
 			if (!inode_add_stream_with_data(inode,
 							STREAM_TYPE_REPARSE_POINT,
 							NO_STREAM_NAME,
-							rpbuf + 8,
-							rpbuflen - 8,
+							rpbuf + REPARSE_DATA_OFFSET,
+							rpbuflen - REPARSE_DATA_OFFSET,
 							params->blob_table))
 			{
 				ret = WIMLIB_ERR_NOMEM;

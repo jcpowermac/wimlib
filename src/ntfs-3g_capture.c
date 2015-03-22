@@ -45,6 +45,7 @@
 #include "wimlib/error.h"
 #include "wimlib/ntfs_3g.h"
 #include "wimlib/paths.h"
+#include "wimlib/reparse.h"
 #include "wimlib/security.h"
 
 static inline ntfschar *
@@ -59,7 +60,7 @@ open_ntfs_attr(ntfs_inode *ni, const struct ntfs_location *loc)
 	ntfs_attr *na;
 
 	na = ntfs_attr_open(ni,
-			    (ATTR_TYPES)loc->ntfs_3g_attr_type,
+			    (ATTR_TYPES)loc->attr_type,
 			    loc->attr_name,
 			    loc->attr_name_nchars);
 	if (!na) {
@@ -95,7 +96,7 @@ read_ntfs_attribute_prefix(const struct blob_descriptor *blob, u64 size,
 		goto out_close_ntfs_inode;
 	}
 
-	pos = (loc->ntfs_3g_attr_type == AT_REPARSE_POINT) ? 8 : 0;
+	pos = (loc->attr_type == AT_REPARSE_POINT) ? REPARSE_DATA_OFFSET : 0;
 	bytes_remaining = size;
 	while (bytes_remaining) {
 		s64 to_read = min(bytes_remaining, sizeof(buf));
@@ -151,7 +152,7 @@ out:
 }
 
 static int
-ntfs_3g_attr_type_to_wimlib_stream_type(ATTR_TYPES type)
+attr_type_to_wimlib_stream_type(ATTR_TYPES type)
 {
 	switch (type) {
 	case AT_DATA:
@@ -209,7 +210,7 @@ load_ntfs_attrs_with_type(struct wim_inode *inode,
 				goto out_put_actx;
 			}
 			ntfs_loc->ntfs_vol = vol;
-			ntfs_loc->ntfs_3g_attr_type = type;
+			ntfs_loc->attr_type = type;
 			ntfs_loc->path = memdup(path, path_len + 1);
 			if (!ntfs_loc->path) {
 				ret = WIMLIB_ERR_NOMEM;
@@ -237,14 +238,14 @@ load_ntfs_attrs_with_type(struct wim_inode *inode,
 			blob->size = data_size;
 			ntfs_loc = NULL;
 			if (type == AT_REPARSE_POINT) {
-				if (data_size < 8) {
+				if (data_size < REPARSE_DATA_OFFSET) {
 					ERROR("Reparse data of \"%s\" "
 					      "is invalid (only %u bytes)!",
 					      path, (unsigned)data_size);
 					ret = WIMLIB_ERR_NTFS_3G;
 					goto out_free_blob;
 				}
-				blob->size -= 8;
+				blob->size -= REPARSE_DATA_OFFSET;
 				ret = read_reparse_tag(ni, blob->ntfs_loc,
 						       &inode->i_reparse_tag);
 				if (ret)
@@ -253,7 +254,7 @@ load_ntfs_attrs_with_type(struct wim_inode *inode,
 		}
 
 		strm = inode_add_stream(inode,
-					ntfs_3g_attr_type_to_wimlib_stream_type(type),
+					attr_type_to_wimlib_stream_type(type),
 					stream_name,
 					blob);
 		if (!strm) {

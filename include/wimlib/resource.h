@@ -86,8 +86,7 @@ struct wim_reshdr {
 /* Flags for the `flags' field of WIM resource headers (`struct wim_reshdr').
  */
 
-/* Unknown meaning; may be intended to indicate spaces in the WIM that are free
- * to overwrite.  Currently ignored by wimlib.  */
+/* Unknown meaning; currently ignored by wimlib.  */
 #define WIM_RESHDR_FLAG_FREE            0x01
 
 /* The resource is a metadata resource for a WIM image, or is the blob table or
@@ -98,8 +97,7 @@ struct wim_reshdr {
  * compression type.  */
 #define WIM_RESHDR_FLAG_COMPRESSED	0x04
 
-/* Unknown meaning; may be intended to indicate a partial blob.  Currently
- * ignored by wimlib.  */
+/* Unknown meaning; currently ignored by wimlib.  */
 #define WIM_RESHDR_FLAG_SPANNED         0x08
 
 /* The resource is a solid compressed resource which may contain multiple blobs.
@@ -235,7 +233,9 @@ typedef int (*read_blob_list_begin_blob_t)(struct blob_descriptor *blob, void *c
  * @ctx:
  *	User-provided context.
  */
-typedef int (*read_blob_list_end_blob_t)(struct blob_descriptor *blob, int status, void *ctx);
+typedef int (*read_blob_list_end_blob_t)(struct blob_descriptor *blob,
+					 int status,
+					 void *ctx);
 
 
 /* Callback functions and contexts for read_blob_list().  */

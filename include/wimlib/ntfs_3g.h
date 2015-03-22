@@ -14,7 +14,7 @@ struct ntfs_location {
 	char *path;
 	utf16lechar *attr_name;
 	unsigned attr_name_nchars;
-	unsigned ntfs_3g_attr_type;
+	unsigned attr_type;
 };
 #endif
 

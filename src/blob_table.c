@@ -177,7 +177,7 @@ out_free:
 	return NULL;
 }
 
-void
+static void
 blob_release_location(struct blob_descriptor *blob)
 {
 	switch (blob->blob_location) {

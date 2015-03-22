@@ -83,8 +83,7 @@ wim_get_current_security_data(WIMStruct *wim)
 	list_for_each_entry_safe(blob, tmp, &(imd)->unhashed_blobs, unhashed_list)
 
 extern void
-put_image_metadata(struct wim_image_metadata *imd,
-		   struct blob_table *table);
+put_image_metadata(struct wim_image_metadata *imd, struct blob_table *table);
 
 extern int
 append_image_metadata(WIMStruct *wim, struct wim_image_metadata *imd);

@@ -2449,7 +2449,8 @@ print_resource(const struct wimlib_resource_entry *resource,
 		tprintf(T("Uncompressed size = %"PRIu64" bytes\n"),
 			resource->uncompressed_size);
 		if (resource->packed) {
-			tprintf(T("Solid resource    = %"PRIu64" => %"PRIu64" bytes @ offset %"PRIu64"\n"),
+			tprintf(T("Solid resource    = %"PRIu64" => %"PRIu64" "
+				  "bytes @ offset %"PRIu64"\n"),
 				resource->raw_resource_uncompressed_size,
 				resource->raw_resource_compressed_size,
 				resource->raw_resource_offset_in_wim);

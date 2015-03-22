@@ -12,48 +12,50 @@ enum blob_location {
 	/* The blob's data does not exist.  This is a temporary state only.  */
 	BLOB_NONEXISTENT = 0,
 
-	/* The blob is located in a resource in a WIM file identified by the
-	 * `struct wim_resource_descriptor' pointed to by @rdesc.  @offset_in_res
-	 * identifies the offset at which this particular blob begins in the
-	 * uncompressed data of the resource; this is normally 0, but a WIM
-	 * resource can be "solid" and contain multiple blobs.  */
+	/* The blob's data is located in a WIM resource identified by the
+	 * `struct wim_resource_descriptor' pointed to by @rdesc.
+	 * @offset_in_res identifies the offset at which this particular blob
+	 * begins in the uncompressed data of the resource.  */
 	BLOB_IN_WIM,
 
-	/* The blob is located in the external file named by @file_on_disk.
-	 */
+	/* The blob's data is available as the contents of the file named by
+	 * @file_on_disk.  */
 	BLOB_IN_FILE_ON_DISK,
 
-	/* The blob is directly attached in the in-memory buffer pointed to by
-	 * @attached_buffer.  */
+	/* The blob's data is available as the contents of the in-memory buffer
+	 * pointed to by @attached_buffer.  */
 	BLOB_IN_ATTACHED_BUFFER,
 
 #ifdef WITH_FUSE
-	/* The blob is located in the external file named by @staging_file_name,
-	 * located in the staging directory for a read-write mount.  */
+	/* The blob's data is available as the contents of the file with name
+	 * @staging_file_name relative to the open directory file descriptor
+	 * @staging_dir_fd.  */
 	BLOB_IN_STAGING_FILE,
 #endif
 
 #ifdef WITH_NTFS_3G
-	/* The blob is located in an NTFS volume.  It is identified by volume,
-	 * filename, attribute name, and attribute type.  @ntfs_loc points to a
-	 * structure containing this information.  */
+	/* The blob's data is available as the contents of an NTFS attribute
+	 * accessible through libntfs-3g.  The attribute is identified by
+	 * volume, path to an inode, attribute name, and attribute type.
+	 * @ntfs_loc points to a structure containing this information.  */
 	BLOB_IN_NTFS_VOLUME,
 #endif
 
 #ifdef __WIN32__
-	/* Windows only: the blob is located in the external file named by
-	 * @file_on_disk, which is in the Windows NT namespace and may specify a
-	 * named data stream.  */
+	/* Windows only: the blob's data is available as the contents of the
+	 * data stream named by @file_on_disk.  @file_on_disk is an NT namespace
+	 * path that may be longer than the Win32-level MAX_PATH.  Furthermore,
+	 * the stream may require "backup semantics" to access.  */
 	BLOB_IN_WINNT_FILE_ON_DISK,
 
-	/* Windows only: the blob is located in the external file named by
-	 * @file_on_disk, but the file is encrypted and must be read using the
-	 * appropriate Windows API.  */
+	/* Windows only: the blob's data is available as the raw encrypted data
+	 * of the external file named by @file_on_disk.  @file_on_disk is a
+	 * Win32 namespace path.  */
 	BLOB_WIN32_ENCRYPTED,
 #endif
 };
 
-/* A "blob target" is an stream, and the inode to which that stream belongs, to
+/* A "blob target" is a stream, and the inode to which that stream belongs, to
  * which a blob needs to be extracted as part of an extraction operation.  Since
  * blobs are single-instanced, a blob may have multiple targets.  */
 struct blob_extraction_target {
@@ -62,7 +64,7 @@ struct blob_extraction_target {
 };
 
 /*
- * Descriptor for a blob, which is a nonempty sequence of binary data.
+ * Descriptor for a blob, which is a known length sequence of binary data.
  *
  * Within a WIM file, blobs are single instanced and are identified by SHA-1
  * message digest.
@@ -84,7 +86,7 @@ struct blob_descriptor {
 	/* 1 iff the SHA-1 message digest of this blob is unknown.  */
 	u32 unhashed : 1;
 
-	/* Temoorary fields used when writing blobs; set as documented for
+	/* Temporary fields used when writing blobs; set as documented for
 	 * prepare_blob_list_for_write().  */
 	u32 unique_size : 1;
 	u32 will_be_in_output_wim : 1;
@@ -113,7 +115,7 @@ struct blob_descriptor {
 
 		/* For unhashed == 1: these variables make it possible to find
 		 * the stream that references this blob.  There can be at most
-		 * one such reference, since we can only join duplicate blobs
+		 * one such reference, since duplicate blobs can only be joined
 		 * after they have been hashed.  */
 		struct {
 			struct wim_inode *back_inode;
@@ -126,12 +128,12 @@ struct blob_descriptor {
 	 * limitations of this field.  */
 	u32 refcnt;
 
-	/* When a WIM file is written, this is set to the number of references
+	/*
+	 * When a WIM file is written, this is set to the number of references
 	 * (from file streams) to this blob in the output WIM file.
 	 *
-	 * During extraction, this is the number of slots in
-	 * blob_extraction_targets (or inline_blob_extraction_targets) that have
-	 * been filled.
+	 * During extraction, this is set to the number of targets to which this
+	 * blob is being extracted.
 	 *
 	 * During image export, this is set to the number of references of this
 	 * blob that originated from the source WIM.
@@ -139,7 +141,8 @@ struct blob_descriptor {
 	 * When mounting a WIM image read-write, this is set to the number of
 	 * extra references to this blob preemptively taken to allow later
 	 * saving the modified image as a new image and leaving the original
-	 * image alone.  */
+	 * image alone.
+	 */
 	u32 out_refcnt;
 
 #ifdef WITH_FUSE
@@ -148,8 +151,8 @@ struct blob_descriptor {
 	u16 num_opened_fds;
 #endif
 
-	/* Specification of where this blob is actually located.  Which member
-	 * is valid is determined by the @blob_location field.  */
+	/* Specification of where this blob's data is located.  Which member of
+	 * this union is valid is determined by the @blob_location field.  */
 	union {
 		/* BLOB_IN_WIM  */
 		struct {
@@ -175,6 +178,7 @@ struct blob_descriptor {
 			int staging_dir_fd;
 		};
 #endif
+
 #ifdef WITH_NTFS_3G
 		/* BLOB_IN_NTFS_VOLUME  */
 		struct ntfs_location *ntfs_loc;
@@ -182,7 +186,8 @@ struct blob_descriptor {
 	};
 
 	/* Links together blobs that share the same underlying WIM resource.
-	 * The head is the 'blob_list' member of 'struct wim_resource_descriptor'.  */
+	 * The head is the 'blob_list' member of
+	 * 'struct wim_resource_descriptor'.  */
 	struct list_head rdesc_node;
 
 	/* Temporary fields  */
@@ -265,10 +270,10 @@ read_blob_table(WIMStruct *wim);
 
 extern int
 write_blob_table_from_blob_list(struct list_head *blob_list,
-					struct filedes *out_fd,
-					u16 part_number,
-					struct wim_reshdr *out_reshdr,
-					int write_resource_flags);
+				struct filedes *out_fd,
+				u16 part_number,
+				struct wim_reshdr *out_reshdr,
+				int write_resource_flags);
 
 extern struct blob_descriptor *
 new_blob_descriptor(void) _malloc_attribute;
@@ -295,11 +300,11 @@ extern void
 blob_table_unlink(struct blob_table *table, struct blob_descriptor *blob);
 
 extern struct blob_descriptor *
-lookup_blob(const struct blob_table *table, const u8 hash[]);
+lookup_blob(const struct blob_table *table, const u8 *hash);
 
 extern int
 for_blob_in_table(struct blob_table *table,
-	 int (*visitor)(struct blob_descriptor *, void *), void *arg);
+		  int (*visitor)(struct blob_descriptor *, void *), void *arg);
 
 extern int
 for_blob_in_table_sorted_by_sequential_order(struct blob_table *table,
@@ -325,7 +330,7 @@ extern int
 cmp_blobs_by_sequential_order(const void *p1, const void *p2);
 
 static inline bool
-blob_is_in_solid_wim_resource(const struct blob_descriptor * blob)
+blob_is_in_solid_wim_resource(const struct blob_descriptor *blob)
 {
 	return blob->blob_location == BLOB_IN_WIM &&
 	       blob->size != blob->rdesc->uncompressed_size;
@@ -367,9 +372,6 @@ blob_unset_is_located_in_wim_resource(struct blob_descriptor *blob)
 	blob->blob_location = BLOB_NONEXISTENT;
 }
 
-extern void
-blob_release_location(struct blob_descriptor *blob);
-
 extern struct blob_descriptor *
 new_blob_from_data_buffer(const void *buffer, size_t size,
 			  struct blob_table *blob_table);
@@ -377,7 +379,7 @@ new_blob_from_data_buffer(const void *buffer, size_t size,
 extern int
 hash_unhashed_blob(struct blob_descriptor *blob,
 		   struct blob_table *blob_table,
-		   struct blob_descriptor **lte_ret);
+		   struct blob_descriptor **blob_ret);
 
 extern struct blob_descriptor **
 retrieve_pointer_to_unhashed_blob(struct blob_descriptor *blob);

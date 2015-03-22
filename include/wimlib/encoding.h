@@ -33,6 +33,7 @@ varname1##_to_##varname2##_nbytes(const chartype1 *in, size_t in_nbytes,\
 extern int								\
 varname1##_to_##varname2##_buf(const chartype1 *in, size_t in_nbytes,	\
 			       chartype2 *out);
+
 extern utf16lechar *
 utf16le_dupz(const void *ustr, size_t usize);
 

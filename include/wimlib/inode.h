@@ -22,8 +22,9 @@ enum wim_inode_stream_type {
 	/* Reparse point stream.  This is the same as the data of the on-disk
 	 * reparse point attribute, except that the first 8 bytes of the on-disk
 	 * attribute are omitted.  The omitted bytes contain the reparse tag
-	 * (stored in the on-disk WIM dentry), the reparse data size (redundant
-	 * with the stream size), and a reserved field that is always zero.  */
+	 * (which is instead stored in the on-disk WIM dentry), the reparse data
+	 * size (which is redundant with the stream size), and a reserved field
+	 * that is always zero.  */
 	STREAM_TYPE_REPARSE_POINT,
 
 	/* Encrypted data in the "EFSRPC raw data format" specified by [MS-EFSR]
@@ -38,13 +39,14 @@ enum wim_inode_stream_type {
 extern const utf16lechar NO_STREAM_NAME[1];
 
 /*
- * 'struct wim_inode_stream' describes an NTFS-style stream, which is a blob of
- * data associated with an inode.  Each stream has a type and optionally a name.
+ * 'struct wim_inode_stream' describes a "stream", which associates a blob of
+ * data with an inode.  Each stream has a type and optionally a name.
  *
- * The most frequently used stream type is the "unnamed data stream"
+ * The most frequently seen kind of stream is the "unnamed data stream"
  * (stream_type == STREAM_TYPE_DATA && stream_name == NO_STREAM_NAME), which is
  * the "default file contents".  Many inodes just have an unnamed data stream
- * and no other streams.
+ * and no other streams.  However, files on NTFS filesystems may have
+ * additional, "named" data streams, and this is supported by the WIM format.
  *
  * A "reparse point" is an inode with reparse data set.  The reparse data is
  * stored in a stream of type STREAM_TYPE_REPARSE_POINT.  There should be only
@@ -54,7 +56,7 @@ extern const utf16lechar NO_STREAM_NAME[1];
  */
 struct wim_inode_stream {
 
-	/* The name of the stream, or NO_STREAM_NAME if the stream is unnamed.*/
+	/* The name of the stream or NO_STREAM_NAME.  */
 	utf16lechar *stream_name;
 
 	/*
@@ -63,7 +65,7 @@ struct wim_inode_stream {
 	 * stream is empty.
 	 *
 	 * If 'stream_resolved' = 1, then 'stream_blob' is a pointer directly to
-	 * the blob descriptor for this blob, or NULL if this stream is empty.
+	 * a descriptor for this stream's blob, or NULL if this stream is empty.
 	 */
 	union {
 		u8 _stream_hash[SHA1_HASH_SIZE];
@@ -85,16 +87,16 @@ struct wim_inode_stream {
 /*
  * WIM inode - a "file" in an image which may be accessible via multiple paths
  *
- * As mentioned in the comment above 'struct wim_dentry', in WIM files there is
- * no on-disk analogue of a real inode, as most of these fields are duplicated
- * in the dentries.  Instead, a 'struct wim_inode' is something we create
- * ourselves to simplify the handling of hard links.
+ * Note: in WIM files there is no true on-disk analogue of an inode; there are
+ * only directory entries, and some fields are duplicated among all links to a
+ * file.  However, wimlib uses inode structures internally to simplify handling
+ * of hard links.
  */
 struct wim_inode {
 
 	/*
-	 * The collection of NTFS-style streams for this inode.  'i_streams'
-	 * points to either 'i_embedded_streams' or an allocated array.
+	 * The collection of streams for this inode.  'i_streams' points to
+	 * either 'i_embedded_streams' or an allocated array.
 	 */
 	struct wim_inode_stream *i_streams;
 	struct wim_inode_stream i_embedded_streams[1];

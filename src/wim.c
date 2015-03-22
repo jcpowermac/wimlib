@@ -243,8 +243,7 @@ destroy_image_metadata(struct wim_image_metadata *imd,
 }
 
 void
-put_image_metadata(struct wim_image_metadata *imd,
-		   struct blob_table *table)
+put_image_metadata(struct wim_image_metadata *imd, struct blob_table *table)
 {
 	if (imd && --imd->refcnt == 0) {
 		destroy_image_metadata(imd, table, true);
