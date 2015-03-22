@@ -824,8 +824,8 @@ win32_get_encrypted_file_size(const wchar_t *path, bool is_dir, u64 *size_ret)
 }
 
 static int
-winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path,
-				 struct list_head *unhashed_blobs)
+winnt_load_efsrpc_raw_data(struct wim_inode *inode, const wchar_t *nt_path,
+			   struct list_head *unhashed_blobs)
 {
 	struct blob_descriptor *blob;
 	struct wim_inode_stream *strm;
@@ -852,7 +852,8 @@ winnt_load_encrypted_stream_info(struct wim_inode *inode, const wchar_t *nt_path
 	if (ret)
 		goto err;
 
-	strm = inode_add_stream(inode, STREAM_TYPE_EFSRPC, NO_STREAM_NAME, blob);
+	strm = inode_add_stream(inode, STREAM_TYPE_EFSRPC_RAW_DATA,
+				NO_STREAM_NAME, blob);
 	if (!strm)
 		goto err_nomem;
 
@@ -1332,10 +1333,11 @@ retry_open:
 
 	/* If this is a reparse point, load the reparse data.  */
 	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
-		if (0) {
+		if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) {
 			/* There doesn't seem to be a way to store both a
-			 * REPARSE_POINT stream and an EFSRPC stream for the
-			 * same file in a way that WIMGAPI recognizes.  */
+			 * REPARSE_POINT stream and an EFSRPC_RAW_DATA stream
+			 * for the same file in a way that WIMGAPI recognizes.
+			 */
 			WARNING("Ignoring reparse data of encrypted file \"%ls\"",
 				printable_path(full_path));
 		} else {
@@ -1380,8 +1382,8 @@ retry_open:
 		 * needed.  */
 		(*func_NtClose)(h);
 		h = NULL;
-		ret = winnt_load_encrypted_stream_info(inode, full_path,
-						       params->unhashed_blobs);
+		ret = winnt_load_efsrpc_raw_data(inode, full_path,
+						 params->unhashed_blobs);
 		if (ret)
 			goto out;
 	}

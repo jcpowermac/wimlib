@@ -19,11 +19,17 @@ enum wim_inode_stream_type {
 	/* Data stream, may be unnamed (usual case) or named  */
 	STREAM_TYPE_DATA,
 
-	/* Reparse point stream, always unnamed  */
+	/* Reparse point stream.  This is the same as the data of the on-disk
+	 * reparse point attribute, except that the first 8 bytes of the on-disk
+	 * attribute are omitted.  The omitted bytes contain the reparse tag
+	 * (stored in the on-disk WIM dentry), the reparse data size (redundant
+	 * with the stream size), and a reserved field that is always zero.  */
 	STREAM_TYPE_REPARSE_POINT,
 
-	/* Encrypted data in the format documented in [MS-EFSR]  */
-	STREAM_TYPE_EFSRPC,
+	/* Encrypted data in the "EFSRPC raw data format" specified by [MS-EFSR]
+	 * section 2.2.3.  This contains metadata for the Encrypting File System
+	 * as well as the encrypted data of all the file's data streams.  */
+	STREAM_TYPE_EFSRPC_RAW_DATA,
 
 	/* Stream type could not be determined  */
 	STREAM_TYPE_UNKNOWN,

@@ -1669,7 +1669,7 @@ begin_extract_blob_instance(const struct blob_descriptor *blob,
 			return 0;
 		}
 
-		if (strm->stream_type == STREAM_TYPE_EFSRPC) {
+		if (strm->stream_type == STREAM_TYPE_EFSRPC_RAW_DATA) {
 
 			/* We can't write encrypted files directly; we must use
 			 * WriteEncryptedFileRaw(), which requires providing the
