@@ -1302,7 +1302,7 @@ retry:
 }
 
 /*
- * Create any empty named data streams for the specified file, if any.
+ * Create empty named data streams for the specified file, if there are any.
  *
  * Since these won't have 'struct blob_descriptor's, they won't show up in the
  * call to extract_blob_list().  Hence the need for the special case.

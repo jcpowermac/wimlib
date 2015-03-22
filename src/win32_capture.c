@@ -947,14 +947,6 @@ winnt_scan_data_stream(const wchar_t *path, size_t path_nchars,
 
 	stream_name[stream_name_nchars] = L'\0';
 
-	if (!stream_name_nchars &&
-	    (inode->i_attributes & (FILE_ATTRIBUTE_ENCRYPTED |
-				    FILE_ATTRIBUTE_DIRECTORY)))
-	{
-		/* Ignore unnamed data stream of encrypted file or directory  */
-		return 0;
-	}
-
 	/* If the stream is non-empty, set up a blob descriptor for it.  */
 	if (stream_size != 0) {
 		blob = new_blob_descriptor();
@@ -1310,42 +1302,16 @@ retry_open:
 		}
 	}
 
-	if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)) {
-		/*
-		 * Load information about data streams (unnamed and named).
-		 *
-		 * Skip this step for encrypted files, since the data from
-		 * ReadEncryptedFileRaw() already contains all data streams (and
-		 * they do in fact all get restored by WriteEncryptedFileRaw().)
-		 *
-		 * (Note: WIMGAPI (as of Windows 8.1) gets wrong and stores both
-		 * the EFSRPC data and the named data stream(s)...!)
-		 */
-		ret = winnt_scan_data_streams(h,
-					      full_path,
-					      full_path_nchars,
-					      inode,
-					      params->unhashed_blobs,
-					      file_info.StandardInformation.EndOfFile.QuadPart,
-					      vol_flags);
-		if (ret)
-			goto out;
-	}
-
 	/* If this is a reparse point, load the reparse data.  */
 	if (unlikely(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
 		if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED) {
-			/* There doesn't seem to be a way to store both a
-			 * REPARSE_POINT stream and an EFSRPC_RAW_DATA stream
-			 * for the same file in a way that WIMGAPI recognizes.
-			 */
+			/* See comment above assign_stream_types_encrypted()  */
 			WARNING("Ignoring reparse data of encrypted file \"%ls\"",
 				printable_path(full_path));
 		} else {
-			u8 *rpbuf;
+			u8 rpbuf[REPARSE_POINT_MAX_SIZE] _aligned_attribute(8);
 			u16 rpbuflen;
 
-			rpbuf = alloca(REPARSE_POINT_MAX_SIZE);
 			ret = winnt_get_reparse_data(h, full_path, params,
 						     rpbuf, &rpbuflen);
 			switch (ret) {
@@ -1385,6 +1351,26 @@ retry_open:
 		h = NULL;
 		ret = winnt_load_efsrpc_raw_data(inode, full_path,
 						 params->unhashed_blobs);
+		if (ret)
+			goto out;
+	} else {
+		/*
+		 * Load information about data streams (unnamed and named).
+		 *
+		 * Skip this step for encrypted files, since the data from
+		 * ReadEncryptedFileRaw() already contains all data streams (and
+		 * they do in fact all get restored by WriteEncryptedFileRaw().)
+		 *
+		 * Note: WIMGAPI (as of Windows 8.1) gets wrong and stores both
+		 * the EFSRPC data and the named data stream(s)...!
+		 */
+		ret = winnt_scan_data_streams(h,
+					      full_path,
+					      full_path_nchars,
+					      inode,
+					      params->unhashed_blobs,
+					      file_info.StandardInformation.EndOfFile.QuadPart,
+					      vol_flags);
 		if (ret)
 			goto out;
 	}
