@@ -235,6 +235,9 @@ struct wim_inode_stream_on_disk {
 	utf16lechar name[];
 } _packed_attribute;
 
+#define WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE \
+	((sizeof(struct wim_inode_stream_on_disk) + 7) & ~7)
+
 static void
 do_dentry_set_name(struct wim_dentry *dentry, utf16lechar *file_name,
 		   size_t file_name_nbytes)
@@ -380,25 +383,30 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 	 * 	- at least one named data stream (for Windows PE bug workaround)
 	 * 		- UNLESS it's an encrypted file
 	 */
-	bool need_extra_entry_for_unnamed_data_stream = false;
+	bool have_named_data_stream = false;
+	bool have_reparse_point_stream = false;
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		const struct wim_inode_stream *strm = &inode->i_streams[i];
 		switch (strm->stream_type) {
 		case STREAM_TYPE_DATA:
 			if (unlikely(stream_is_named(strm))) {
 				len += stream_out_total_length(strm);
-				if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
-					need_extra_entry_for_unnamed_data_stream = true;
+				have_named_data_stream = true;
 			}
 			break;
 		case STREAM_TYPE_REPARSE_POINT:
-			need_extra_entry_for_unnamed_data_stream = true;
+			have_reparse_point_stream = true;
 			break;
 		}
 	}
-	if (need_extra_entry_for_unnamed_data_stream) {
-		len += sizeof(struct wim_inode_stream_on_disk);
-		len = (len + 7) & ~7;
+
+	if (have_named_data_stream || have_reparse_point_stream) {
+		/* Unnamed data stream as extra entry  */
+		len += WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE;
+
+		if (have_reparse_point_stream)
+			/* Reparse point stream as extra entry  */
+			len += WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE;
 	}
 
 	return len;
@@ -1821,7 +1829,8 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 	 * 	- at least one named data stream (for Windows PE bug workaround)
 	 * 		- UNLESS it's an encrypted file
 	 */
-	bool need_extra_entry_for_unnamed_data_stream = false;
+	bool have_named_data_stream = false;
+	bool have_reparse_point_stream = false;
 	u16 num_extra_streams = 0;
 	const u8 *unnamed_data_stream_hash = zero_hash;
 	const u8 *reparse_point_hash = zero_hash;
@@ -1829,29 +1838,35 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 		const struct wim_inode_stream *strm = &inode->i_streams[i];
 		switch (strm->stream_type) {
 		case STREAM_TYPE_DATA:
-			if (unlikely(stream_is_named(strm))) {
-				if (!(inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED))
-					need_extra_entry_for_unnamed_data_stream = true;
-			} else {
-				const u8 *hash = stream_hash(strm);
-				if (!is_zero_hash(hash))
-					unnamed_data_stream_hash = hash;
-			}
+			if (unlikely(stream_is_named(strm)))
+				have_named_data_stream = true;
+			else
+				unnamed_data_stream_hash = stream_hash(strm);
 			break;
 		case STREAM_TYPE_REPARSE_POINT:
+			have_reparse_point_stream = true;
 			reparse_point_hash = stream_hash(strm);
-			need_extra_entry_for_unnamed_data_stream = true;
 			break;
 		}
 	}
 
-	if (need_extra_entry_for_unnamed_data_stream) {
-		copy_hash(disk_dentry->default_hash, reparse_point_hash);
-		p = write_extra_stream_entry(p, NO_STREAM_NAME, unnamed_data_stream_hash);
+	if (have_reparse_point_stream || have_named_data_stream) {
+
+		copy_hash(disk_dentry->default_hash, zero_hash);
+
+		if (have_reparse_point_stream) {
+			p = write_extra_stream_entry(p, NO_STREAM_NAME,
+						     reparse_point_hash);
+			num_extra_streams++;
+		}
+
+		p = write_extra_stream_entry(p, NO_STREAM_NAME,
+					     unnamed_data_stream_hash);
 		num_extra_streams++;
 	} else {
 		copy_hash(disk_dentry->default_hash, unnamed_data_stream_hash);
 	}
+
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 		const struct wim_inode_stream *strm = &inode->i_streams[i];
 		if (stream_is_named_data_stream(strm)) {
