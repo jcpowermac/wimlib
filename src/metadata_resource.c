@@ -32,6 +32,25 @@
 #include "wimlib/security.h"
 #include "wimlib/write.h"
 
+/* Fix the security ID for every inode to be either -1 or in bounds.  */
+static void
+fix_security_ids(struct wim_image_metadata *imd)
+{
+	struct wim_inode *inode;
+	unsigned long invalid_count = 0;
+	const u32 num_entries = imd->security_data->num_entries;
+
+	image_for_each_inode(inode, imd) {
+		if ((u32)inode->i_security_id >= num_entries) {
+			if (inode->i_security_id >= 0)
+				invalid_count++;
+			inode->i_security_id = -1;
+		}
+	}
+	if (invalid_count)
+		WARNING("%lu inodes had invalid security IDs", invalid_count);
+}
+
 /*
  * Reads and parses a metadata resource for an image in the WIM file.
  *
@@ -107,6 +126,8 @@ read_metadata_resource(struct wim_image_metadata *imd)
 	ret = dentry_tree_fix_inodes(root, &imd->inode_list);
 	if (ret)
 		goto out_free_dentry_tree;
+
+	fix_security_ids(imd);
 
 	/* Success; fill in the image_metadata structure.  */
 	imd->root_dentry = root;
