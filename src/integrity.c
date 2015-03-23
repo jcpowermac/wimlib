@@ -450,7 +450,7 @@ check_wim_integrity(WIMStruct *wim)
 	}
 
 	end_blob_table_offset = wim->hdr.blob_table_reshdr.offset_in_wim +
-				  wim->hdr.blob_table_reshdr.size_in_wim;
+				wim->hdr.blob_table_reshdr.size_in_wim;
 
 	if (end_blob_table_offset < WIM_HEADER_DISK_SIZE) {
 		ERROR("WIM blob table ends before WIM header ends!");

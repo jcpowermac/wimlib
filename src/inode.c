@@ -166,13 +166,13 @@ inode_dec_num_opened_fds(struct wim_inode *inode)
  *	The name of the stream desired as a null-terminated UTF-16LE string, or
  *	NO_STREAM_NAME if an unnamed stream is desired
  *
- * Returns a pointer to the stream if found, otherwise null.
+ * Returns a pointer to the stream if found, otherwise NULL.
  */
 struct wim_inode_stream *
 inode_get_stream(const struct wim_inode *inode, int stream_type,
 		 const utf16lechar *stream_name)
 {
-	if (stream_name == NO_STREAM_NAME)
+	if (stream_name == NO_STREAM_NAME)  /* Optimization  */
 		return inode_get_unnamed_stream(inode, stream_type);
 
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
@@ -297,6 +297,8 @@ inode_add_stream(struct wim_inode *inode, int stream_type,
  *	The size, in bytes, of the blob data
  * @blob_table
  *	Pointer to the blob table in which the blob needs to be indexed.
+ *
+ * Returns a pointer to the new stream if successfully added, otherwise NULL.
  */
 struct wim_inode_stream *
 inode_add_stream_with_data(struct wim_inode *inode,
@@ -467,7 +469,9 @@ stream_hash(const struct wim_inode_stream *strm)
 
 /*
  * Return the blob descriptor for the unnamed data stream of the inode, or NULL
- * if the blob for the inode's unnamed data stream is empty or not available.
+ * if the inode does not have an unnamed data stream, the blob for the inode's
+ * unnamed data stream is empty, or the blob for the inode's unnamed data stream
+ * is not available in @blob_table.
  */
 struct blob_descriptor *
 inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
@@ -482,8 +486,11 @@ inode_get_blob_for_unnamed_data_stream(const struct wim_inode *inode,
 	return stream_blob(strm, blob_table);
 }
 
-/* Return the SHA-1 message digest of the unnamed data stream of the inode, or a
- * void SHA-1 of all zeroes if the inode's unnamed data stream is empty.   */
+/*
+ * Return the SHA-1 message digest of the unnamed data stream of the inode, or a
+ * void SHA-1 of all zeroes if the inode does not have an unnamed data stream or
+ * if the inode's unnamed data stream is empty.
+ */
 const u8 *
 inode_get_hash_of_unnamed_data_stream(const struct wim_inode *inode)
 {
@@ -541,9 +548,12 @@ retrieve_pointer_to_unhashed_blob(struct blob_descriptor *blob)
 	wimlib_assert(blob->unhashed);
 
 	struct wim_inode *inode = blob->back_inode;
-	for (unsigned i = 0; i < inode->i_num_streams; i++)
-		if (inode->i_streams[i].stream_id == blob->back_stream_id)
+	for (unsigned i = 0; i < inode->i_num_streams; i++) {
+		if (inode->i_streams[i].stream_id == blob->back_stream_id) {
+			wimlib_assert(inode->i_streams[i]._stream_blob == blob);
 			return &inode->i_streams[i]._stream_blob;
+		}
+	}
 
 	wimlib_assert(0);
 	return NULL;

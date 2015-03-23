@@ -205,13 +205,13 @@ struct wim_dentry_on_disk {
 
 } _packed_attribute;
 	/* If num_extra_streams != 0, then there are that many extra stream
-	 * entries following the dentry, starting on the 8-byte aligned
+	 * entries following the dentry, starting on the next 8-byte aligned
 	 * boundary.  They are not counted in the 'length' field of the dentry.
 	 */
 
 /* On-disk format of an extra stream entry.  This represents an extra NTFS-style
  * "stream" associated with the file, such as a named data stream.  */
-struct wim_inode_stream_on_disk {
+struct wim_extra_stream_entry_on_disk {
 
 	/* Length of this extra stream entry, in bytes.  This includes all
 	 * fixed-length fields, plus the name and null terminator if present,
@@ -234,9 +234,6 @@ struct wim_inode_stream_on_disk {
 	 * @name_nbytes != 0; i.e., if this stream is named.  */
 	utf16lechar name[];
 } _packed_attribute;
-
-#define WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE \
-	((sizeof(struct wim_inode_stream_on_disk) + 7) & ~7)
 
 static void
 do_dentry_set_name(struct wim_dentry *dentry, utf16lechar *file_name,
@@ -343,7 +340,7 @@ static size_t
 stream_out_total_length(const struct wim_inode_stream *strm)
 {
 	/* Account for the fixed length portion  */
-	size_t len = sizeof(struct wim_inode_stream_on_disk);
+	size_t len = sizeof(struct wim_extra_stream_entry_on_disk);
 
 	/* For named streams, account for the variable-length name.  */
 	if (stream_is_named(strm))
@@ -399,8 +396,8 @@ dentry_out_total_length(const struct wim_dentry *dentry)
 
 		if (have_named_data_stream || have_reparse_point_stream) {
 			if (have_reparse_point_stream)
-				len += WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE;
-			len += WIM_INODE_STREAM_ON_DISK_UNNAMED_SIZE;
+				len += (sizeof(struct wim_extra_stream_entry_on_disk) + 7) & ~7;
+			len += (sizeof(struct wim_extra_stream_entry_on_disk) + 7) & ~7;
 		}
 	}
 
@@ -1257,9 +1254,9 @@ assign_stream_types_encrypted(struct wim_inode *inode)
 /*
  * Set the type of each stream for an unencrypted file.
  *
- * There will be an unnamed data stream and zero or more named data streams.  If
- * FILE_ATTRIBUTE_REPARSE_POINT is set, there should also be a reparse point
- * stream.
+ * There will be an unnamed data stream, a reparse point stream, or both an
+ * unnamed data stream and a reparse point stream.  In addition, there may be
+ * named data streams.
  */
 static void
 assign_stream_types_unencrypted(struct wim_inode *inode)
@@ -1274,7 +1271,7 @@ assign_stream_types_unencrypted(struct wim_inode *inode)
 		if (stream_is_named(strm)) {
 			/* Named data stream  */
 			strm->stream_type = STREAM_TYPE_DATA;
-		} else if (!is_zero_hash(inode->i_streams[i]._stream_hash)) {
+		} else if (!is_zero_hash(strm->_stream_hash)) {
 			if ((inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
 			    !found_reparse_point_stream) {
 				found_reparse_point_stream = true;
@@ -1321,11 +1318,12 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 	inode->i_streams[0].stream_name = (utf16lechar *)NO_STREAM_NAME;
 	copy_hash(inode->i_streams[0]._stream_hash, default_hash);
 	inode->i_streams[0].stream_type = STREAM_TYPE_UNKNOWN;
+	inode->i_streams[0].stream_id = 0;
 
 	/* Read the extra stream entries  */
 	for (unsigned i = 1; i < inode->i_num_streams; i++) {
 		struct wim_inode_stream *strm;
-		const struct wim_inode_stream_on_disk *disk_strm;
+		const struct wim_extra_stream_entry_on_disk *disk_strm;
 		u64 length;
 		u16 name_nbytes;
 
@@ -1335,10 +1333,10 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 
 		/* Do we have at least the size of the fixed-length data we know
 		 * need?  */
-		if ((end - p) < sizeof(struct wim_inode_stream_on_disk))
+		if ((end - p) < sizeof(struct wim_extra_stream_entry_on_disk))
 			return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
-		disk_strm = (const struct wim_inode_stream_on_disk *)p;
+		disk_strm = (const struct wim_extra_stream_entry_on_disk *)p;
 
 		/* Read the length field  */
 		length = le64_to_cpu(disk_strm->length);
@@ -1349,7 +1347,7 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 		/* Make sure the length field is neither so small it doesn't
 		 * include all the fixed-length data nor so large it overflows
 		 * the metadata resource buffer. */
-		if (length < sizeof(struct wim_inode_stream_on_disk) ||
+		if (length < sizeof(struct wim_extra_stream_entry_on_disk) ||
 		    length > (end - p))
 			return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
@@ -1369,7 +1367,7 @@ setup_inode_streams(const u8 *p, const u8 *end, struct wim_inode *inode,
 			/* Add the length of the stream name to get the length
 			 * we actually need to read.  Make sure this isn't more
 			 * than the specified length of the entry.  */
-			if (sizeof(struct wim_inode_stream_on_disk) +
+			if (sizeof(struct wim_extra_stream_entry_on_disk) +
 			    name_nbytes > length)
 				return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 
@@ -1426,19 +1424,14 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	/* Check for buffer overrun.  */
 	if (unlikely(offset + sizeof(u64) > buf_len ||
 		     offset + sizeof(u64) < offset))
-	{
-		ERROR("Directory entry starting at %"PRIu64" ends past the "
-		      "end of the metadata resource (size %zu)",
-		      offset, buf_len);
 		return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
-	}
 
 	/* Get pointer to the dentry data.  */
 	p = &buf[offset];
 	disk_dentry = (const struct wim_dentry_on_disk*)p;
 
 	/* Get dentry length.  */
-	length = le64_to_cpu(disk_dentry->length);
+	length = (le64_to_cpu(disk_dentry->length) + 7) & ~7;
 
 	/* Check for end-of-directory.  */
 	if (length <= 8) {
@@ -1447,21 +1440,13 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	}
 
 	/* Validate dentry length.  */
-	if (unlikely(length < sizeof(struct wim_dentry_on_disk))) {
-		ERROR("Directory entry has invalid length of %"PRIu64" bytes",
-		      length);
+	if (unlikely(length < sizeof(struct wim_dentry_on_disk)))
 		return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
-	}
 
 	/* Check for buffer overrun.  */
 	if (unlikely(offset + length > buf_len ||
 		     offset + length < offset))
-	{
-		ERROR("Directory entry at offset %"PRIu64" and with size "
-		      "%"PRIu64" ends past the end of the metadata resource "
-		      "(size %zu)", offset, length, buf_len);
 		return WIMLIB_ERR_INVALID_METADATA_RESOURCE;
-	}
 
 	/* Allocate new dentry structure, along with a preliminary inode.  */
 	ret = new_dentry_with_timeless_inode(NULL, &dentry);
@@ -1503,24 +1488,16 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	file_name_nbytes = le16_to_cpu(disk_dentry->file_name_nbytes);
 
 	if (unlikely((short_name_nbytes & 1) | (file_name_nbytes & 1))) {
-		ERROR("Dentry name is not valid UTF-16 (odd number of bytes)!");
 		ret = WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 		goto err_free_dentry;
 	}
 
 	/* We now know the length of the file name and short name.  Make sure
-	 * the length of the dentry is large enough to actually hold them.
-	 *
-	 * The calculated length here is unaligned to allow for the possibility
-	 * that the dentry's length is unaligned, although this would be
-	 * unexpected.  */
+	 * the length of the dentry is large enough to actually hold them.  */
 	calculated_size = dentry_min_len_with_names(file_name_nbytes,
 						    short_name_nbytes);
 
 	if (unlikely(length < calculated_size)) {
-		ERROR("Unexpected end of directory entry! (Expected "
-		      "at least %"PRIu64" bytes, got %"PRIu64" bytes.)",
-		      calculated_size, length);
 		ret = WIMLIB_ERR_INVALID_METADATA_RESOURCE;
 		goto err_free_dentry;
 	}
@@ -1558,7 +1535,7 @@ read_dentry(const u8 * restrict buf, size_t buf_len,
 	if (ret)
 		goto err_free_dentry;
 
-	offset += (length + 7) & ~7;
+	offset += length;
 
 	/* Set up the inode's collection of streams.  */
 	ret = setup_inode_streams(&buf[offset],
@@ -1748,8 +1725,8 @@ static u8 *
 write_extra_stream_entry(u8 * restrict p, const utf16lechar * restrict name,
 			 const u8 * restrict hash)
 {
-	struct wim_inode_stream_on_disk *disk_strm =
-			(struct wim_inode_stream_on_disk *)p;
+	struct wim_extra_stream_entry_on_disk *disk_strm =
+			(struct wim_extra_stream_entry_on_disk *)p;
 	u8 *orig_p = p;
 	size_t name_nbytes;
 
@@ -1761,7 +1738,7 @@ write_extra_stream_entry(u8 * restrict p, const utf16lechar * restrict name,
 	disk_strm->reserved = 0;
 	copy_hash(disk_strm->hash, hash);
 	disk_strm->name_nbytes = cpu_to_le16(name_nbytes);
-	p += sizeof(struct wim_inode_stream_on_disk);
+	p += sizeof(struct wim_extra_stream_entry_on_disk);
 	if (name_nbytes != 0)
 		p = mempcpy(p, name, name_nbytes + 2);
 	/* Align to 8-byte boundary */
@@ -1853,10 +1830,7 @@ write_dentry(const struct wim_dentry * restrict dentry, u8 * restrict p)
 
 		efs_strm = inode_get_stream(inode, STREAM_TYPE_EFSRPC_RAW_DATA,
 					    NO_STREAM_NAME);
-		if (efs_strm)
-			efs_hash = stream_hash(efs_strm);
-		else
-			efs_hash = zero_hash;
+		efs_hash = efs_strm ? stream_hash(efs_strm) : zero_hash;
 		copy_hash(disk_dentry->default_hash, efs_hash);
 		disk_dentry->num_extra_streams = cpu_to_le16(0);
 	} else {

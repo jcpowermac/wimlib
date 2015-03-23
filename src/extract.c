@@ -962,7 +962,7 @@ dentry_resolve_streams(struct wim_dentry *dentry, int extract_flags,
 
 /*
  * For each dentry to be extracted, resolve all streams in the corresponding
- * inode and set 'out_refcnt' in all referenced 'struct blob_descriptor' to 0.
+ * inode and set 'out_refcnt' in all referenced blob_descriptors to 0.
  *
  * Possible error codes: WIMLIB_ERR_RESOURCE_NOT_FOUND, WIMLIB_ERR_NOMEM.
  */
@@ -997,7 +997,7 @@ ref_stream(struct wim_inode_stream *strm, struct wim_dentry *dentry,
 	/* Tally the size only for each actual extraction of the stream (not
 	 * additional hard links to the inode).  */
 	if (inode->i_visited && ctx->supported_features.hard_links)
-		 return 0;
+		return 0;
 
 	ctx->progress.extract.total_bytes += blob->size;
 	ctx->progress.extract.total_streams++;

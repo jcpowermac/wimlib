@@ -48,9 +48,6 @@ stream_to_wimlib_stream_entry(const struct wim_inode *inode,
 	const struct blob_descriptor *blob;
 	const u8 *hash;
 
-	if (!strm)
-		return 0;
-
 	if (stream_is_named(strm)) {
 		size_t dummy;
 		int ret;
@@ -72,6 +69,16 @@ stream_to_wimlib_stream_entry(const struct wim_inode *inode,
 		wstream->resource.is_missing = 1;
 	}
 	return 0;
+}
+
+static int
+get_default_stream_type(const struct wim_inode *inode)
+{
+	if (inode->i_attributes & FILE_ATTRIBUTE_ENCRYPTED)
+		return STREAM_TYPE_EFSRPC_RAW_DATA;
+	if (inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+		return STREAM_TYPE_REPARSE_POINT;
+	return STREAM_TYPE_DATA;
 }
 
 static int
@@ -123,15 +130,14 @@ init_wimlib_dentry(struct wimlib_dir_entry *wdentry, struct wim_dentry *dentry,
 		wdentry->unix_rdev = unix_data.rdev;
 	}
 
-	strm = inode_get_unnamed_stream(inode,
-					(inode->i_attributes &
-					 FILE_ATTRIBUTE_REPARSE_POINT) ?
-					STREAM_TYPE_REPARSE_POINT : STREAM_TYPE_DATA);
-
-	ret = stream_to_wimlib_stream_entry(inode, strm, &wdentry->streams[0],
-					    wim->blob_table, flags);
-	if (ret)
-		return ret;
+	strm = inode_get_unnamed_stream(inode, get_default_stream_type(inode));
+	if (strm) {
+		ret = stream_to_wimlib_stream_entry(inode, strm,
+						    &wdentry->streams[0],
+						    wim->blob_table, flags);
+		if (ret)
+			return ret;
+	}
 
 	for (unsigned i = 0; i < inode->i_num_streams; i++) {
 
