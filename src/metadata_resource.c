@@ -34,11 +34,10 @@
 
 /* Fix the security ID for every inode to be either -1 or in bounds.  */
 static void
-fix_security_ids(struct wim_image_metadata *imd)
+fix_security_ids(struct wim_image_metadata *imd, const u32 num_entries)
 {
 	struct wim_inode *inode;
 	unsigned long invalid_count = 0;
-	const u32 num_entries = imd->security_data->num_entries;
 
 	image_for_each_inode(inode, imd) {
 		if ((u32)inode->i_security_id >= num_entries) {
@@ -121,13 +120,13 @@ read_metadata_resource(struct wim_image_metadata *imd)
 	FREE(buf);
 	buf = NULL;
 
-	/* Calculate inodes.  */
+	/* Calculate and validate inodes.  */
 
 	ret = dentry_tree_fix_inodes(root, &imd->inode_list);
 	if (ret)
 		goto out_free_dentry_tree;
 
-	fix_security_ids(imd);
+	fix_security_ids(imd, sd->num_entries);
 
 	/* Success; fill in the image_metadata structure.  */
 	imd->root_dentry = root;

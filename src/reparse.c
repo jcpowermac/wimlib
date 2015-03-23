@@ -27,12 +27,12 @@
 
 #include "wimlib/alloca.h"
 #include "wimlib/assert.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/compiler.h"
 #include "wimlib/endianness.h"
 #include "wimlib/encoding.h"
 #include "wimlib/error.h"
 #include "wimlib/inode.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/reparse.h"
 #include "wimlib/resource.h"
 
@@ -174,7 +174,9 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 
 	wimlib_assert(inode->i_attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 
-	if (!blob_override) {
+	if (blob_override) {
+		blob = blob_override;
+	} else {
 		struct wim_inode_stream *strm;
 
 		strm = inode_get_stream(inode, STREAM_TYPE_REPARSE_POINT,
@@ -187,8 +189,6 @@ wim_inode_get_reparse_data(const struct wim_inode * restrict inode,
 			ERROR("Reparse point has no reparse data!");
 			return WIMLIB_ERR_INVALID_REPARSE_DATA;
 		}
-	} else {
-		blob = blob_override;
 	}
 
 	if (blob->size > REPARSE_DATA_MAX_SIZE) {

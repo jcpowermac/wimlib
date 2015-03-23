@@ -1228,7 +1228,7 @@ calculate_dentry_statistics(struct wim_dentry *dentry, void *arg)
 			for (unsigned i = 0; i < inode->i_num_streams; i++) {
 				if (stream_is_named_data_stream(&inode->i_streams[i])) {
 					blob = stream_blob(&inode->i_streams[i],
-							      info->blob_table);
+							   info->blob_table);
 					if (blob) {
 						info->hard_link_bytes += inode->i_nlink *
 									 blob->size;

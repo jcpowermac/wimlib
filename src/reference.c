@@ -26,9 +26,9 @@
 #endif
 
 #include "wimlib.h"
+#include "wimlib/blob_table.h"
 #include "wimlib/error.h"
 #include "wimlib/glob.h"
-#include "wimlib/blob_table.h"
 #include "wimlib/wim.h"
 
 #define WIMLIB_REF_MASK_PUBLIC (WIMLIB_REF_FLAG_GLOB_ENABLE | \
@@ -149,7 +149,7 @@ wimlib_reference_resources(WIMStruct *wim, WIMStruct **resource_wims,
 
 	for (i = 0; i < num_resource_wims; i++) {
 		ret = for_blob_in_table(resource_wims[i]->blob_table,
-			       blob_clone_if_new, &info);
+					blob_clone_if_new, &info);
 		if (ret)
 			break;
 	}

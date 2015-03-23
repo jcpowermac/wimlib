@@ -230,8 +230,7 @@ sort_blob_list_for_solid_compression(struct list_head *blob_list)
 	}
 
 	ret = sort_blob_list(blob_list,
-			     offsetof(struct blob_descriptor,
-				      write_blobs_list),
+			     offsetof(struct blob_descriptor, write_blobs_list),
 			     cmp_blobs_by_solid_sort_name);
 
 out:

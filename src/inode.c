@@ -218,7 +218,8 @@ inode_get_unnamed_stream(const struct wim_inode *inode, int stream_type)
  * @blob
  *	The blob that the new stream will initially reference, or NULL
  *
- * Returns a pointer to the new stream, or NULL if it could not be added.
+ * Returns a pointer to the new stream, or NULL with errno set if it could not
+ * be added.
  */
 struct wim_inode_stream *
 inode_add_stream(struct wim_inode *inode, int stream_type,
@@ -298,7 +299,8 @@ inode_add_stream(struct wim_inode *inode, int stream_type,
  * @blob_table
  *	Pointer to the blob table in which the blob needs to be indexed.
  *
- * Returns a pointer to the new stream if successfully added, otherwise NULL.
+ * Returns a pointer to the new stream if successfully added, otherwise NULL
+ * with errno set.
  */
 struct wim_inode_stream *
 inode_add_stream_with_data(struct wim_inode *inode,

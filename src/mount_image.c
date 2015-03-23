@@ -349,7 +349,7 @@ wim_pathname_to_inode(WIMStruct *wim, const char *path)
 #define LOOKUP_FLAG_DIRECTORY_OK	0x02
 
 /* Get the data stream of the specified name from the specified inode.  Returns
- * NULL and sets errno if not found.  */
+ * NULL with errno set if not found.  */
 static struct wim_inode_stream *
 inode_get_data_stream_tstr(const struct wim_inode *inode,
 			   const char *stream_name)
@@ -964,13 +964,13 @@ delete_empty_blobs(struct wimfs_context *ctx)
 
 	imd = wim_get_current_image_metadata(ctx->wim);
 
-        image_for_each_unhashed_blob_safe(blob, tmp, imd) {
-                if (!blob->size) {
-                        *retrieve_pointer_to_unhashed_blob(blob) = NULL;
-                        list_del(&blob->unhashed_list);
-                        free_blob_descriptor(blob);
-                }
-        }
+	image_for_each_unhashed_blob_safe(blob, tmp, imd) {
+		if (!blob->size) {
+			*retrieve_pointer_to_unhashed_blob(blob) = NULL;
+			list_del(&blob->unhashed_list);
+			free_blob_descriptor(blob);
+		}
+	}
 }
 
 /* Close all file descriptors open to the specified inode.
@@ -1575,7 +1575,7 @@ wimfs_open(const char *path, struct fuse_file_info *fi)
 	 * directory, we need to open a native file descriptor for the
 	 * corresponding file.  Otherwise, we can read the file data directly
 	 * from the WIM file if we are opening it read-only, but we need to
-	 * extract the resource to the staging directory if we are opening it
+	 * extract the data to the staging directory if we are opening it
 	 * writable.  */
 
 	if (flags_writable(fi->flags) &&
@@ -1863,12 +1863,15 @@ wimfs_setxattr(const char *path, const char *name,
 			goto out_put_uname;
 	}
 
-	ret = -ENOMEM;
 	if (!inode_add_stream_with_data(inode, STREAM_TYPE_DATA, uname,
 					value, size, ctx->wim->blob_table))
+	{
+		ret = -errno;
 		goto out_put_uname;
+	}
 	if (existing_strm)
 		inode_remove_stream(inode, existing_strm, ctx->wim->blob_table);
+	ret = 0;
 out_put_uname:
 	tstr_put_utf16le(uname);
 	return ret;
@@ -1934,6 +1937,7 @@ wimfs_truncate(const char *path, off_t size)
 	if (close(fd) || ret)
 		return -errno;
 	blob->size = size;
+	touch_inode(dentry->d_inode);
 	return 0;
 }
 
@@ -2320,12 +2324,12 @@ create_message_queue(const char *name)
 	bool am_root;
 	mode_t umask_save;
 	mode_t mode;
-	struct mq_attr stream;
+	struct mq_attr attr;
 	mqd_t mq;
 
-	memset(&stream, 0, sizeof(stream));
-	stream.mq_maxmsg = 8;
-	stream.mq_msgsize = sizeof(struct commit_progress_report);
+	memset(&attr, 0, sizeof(attr));
+	attr.mq_maxmsg = 8;
+	attr.mq_msgsize = sizeof(struct commit_progress_report);
 
 	am_root = (geteuid() == 0);
 	if (am_root) {
@@ -2337,7 +2341,7 @@ create_message_queue(const char *name)
 	} else {
 		mode = 0600;
 	}
-	mq = mq_open(name, O_RDWR | O_CREAT | O_EXCL, mode, &stream);
+	mq = mq_open(name, O_RDWR | O_CREAT | O_EXCL, mode, &attr);
 	if (am_root)
 		umask(umask_save);
 	return mq;

@@ -65,7 +65,7 @@ inode_metadata_consistent(const struct wim_inode *inode,
 
 		blob = stream_blob_resolved(&inode->i_streams[i]);
 		template_blob = stream_blob(&template_inode->i_streams[i],
-					       template_blob_table);
+					    template_blob_table);
 
 		/* Compare blob sizes.  */
 		if (blob && template_blob) {
@@ -96,8 +96,8 @@ inode_metadata_consistent(const struct wim_inode *inode,
  * useful information (e.g. checksums) from @template_inode.
  *
  * This assumes that the streams for @inode have been resolved (to point
- * directly to the appropriate `struct blob_descriptor's)  but do not
- * necessarily have checksum information filled in.
+ * directly to the appropriate `struct blob_descriptor's) but do not necessarily
+ * have checksum information filled in.
  */
 static int
 inode_copy_checksums(struct wim_inode *inode,

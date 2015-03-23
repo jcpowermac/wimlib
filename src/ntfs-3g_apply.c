@@ -690,7 +690,7 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 {
 	struct wim_dentry *one_dentry = inode_first_extraction_dentry(inode);
 	size_t stream_name_nchars;
-	ntfs_attr *dest_attr;
+	ntfs_attr *attr;
 
 	if (unlikely(strm->stream_type == STREAM_TYPE_REPARSE_POINT)) {
 
@@ -716,8 +716,8 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 	stream_name_nchars = utf16le_len_chars(strm->stream_name);
 
 	if (stream_name_nchars &&
-	    (ntfs_attr_add(ni, AT_DATA, strm->stream_name, stream_name_nchars,
-			   NULL, 0)))
+	    (ntfs_attr_add(ni, AT_DATA, strm->stream_name,
+			   stream_name_nchars, NULL, 0)))
 	{
 		ERROR_WITH_ERRNO("Failed to create named data stream of \"%s\"",
 				 dentry_full_path(one_dentry));
@@ -727,15 +727,15 @@ ntfs_3g_begin_extract_blob_instance(struct blob_descriptor *blob,
 	/* This should be ensured by extract_blob_list()  */
 	wimlib_assert(ctx->num_open_attrs < MAX_OPEN_FILES);
 
-	dest_attr = ntfs_attr_open(ni, AT_DATA, strm->stream_name,
-				   stream_name_nchars);
-	if (!dest_attr) {
+	attr = ntfs_attr_open(ni, AT_DATA, strm->stream_name,
+			      stream_name_nchars);
+	if (!attr) {
 		ERROR_WITH_ERRNO("Failed to open data stream of \"%s\"",
 				 dentry_full_path(one_dentry));
 		return WIMLIB_ERR_NTFS_3G;
 	}
-	ctx->open_attrs[ctx->num_open_attrs++] = dest_attr;
-	ntfs_attr_truncate_solid(dest_attr, blob->size);
+	ctx->open_attrs[ctx->num_open_attrs++] = attr;
+	ntfs_attr_truncate_solid(attr, blob->size);
 	return 0;
 }
 
